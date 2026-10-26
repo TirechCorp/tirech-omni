@@ -1,0 +1,33 @@
+# Red Nebula integrada (M48).
+
+nebula-arquivo-e-chave = Elige el config.yml, el ca.crt, el host.crt o el host.key del nodo; esta ruta no es ninguno de ellos.
+nebula-certificado-trocado = Se reemplazó el certificado del nodo; la clave privada sigue siendo la misma.
+nebula-certificados = Certificados Nebula
+nebula-cofre-trancado = La bóveda está bloqueada; desbloquéala para que la red { $nome } se inicie.
+nebula-conectando = Conectando a la red { $nome }…
+nebula-config-vazio = La configuración de la red Nebula está vacía.
+nebula-copiar-impressao = Copiar la huella digital
+nebula-estado-conectada = Conectada como { $ip } ({ $lighthouses } lighthouses, { $tuneis } túneles)
+nebula-estado-conectando = Conectando…
+nebula-estado-desligada = Desactivada
+nebula-estado-falhou = Error: { $motivo }
+nebula-estado-tentando = Intentando de nuevo: { $motivo }
+nebula-grupos = Grupos
+nebula-identidade-sumiu = La identidad Nebula de la red { $nome } ya no está en la bóveda.
+nebula-impressao = Huella digital
+nebula-mostrar-chave = Mostrar la clave privada
+nebula-nao-conectou = La red { $nome } no se conectó: { $motivo }
+nebula-nao-subiu = La red Nebula { $nome } no se inició: { $motivo }
+nebula-ocultar-chave = Ocultar la clave privada
+nebula-pki-em-fluxo = El ca.crt, el host.crt y el host.key de la configuración deben ser archivos; usa la identidad de la bóveda.
+nebula-pki-incompleto = La configuración necesita ca, cert y key del nodo; importa el config.yml con los archivos al lado.
+nebula-pronta = La red { $nome } está conectada como { $ip }.
+nebula-restou-segredo = La configuración aún tiene un secreto (clave privada); guárdalo en la identidad de la bóveda.
+nebula-sem-config = La red { $nome } no tiene configuración Nebula; importa un config.yml.
+nebula-sem-identidade = La red { $nome } no tiene elegida una identidad Nebula de la bóveda.
+nebula-sem-validade = Sin fecha de caducidad
+nebula-substituir = Reemplazar el certificado…
+nebula-substituir-titulo = Elige el nuevo host.crt
+nebula-titulo = Identidad Nebula
+nebula-valido-ate = Válido hasta el { $data }
+nebula-vencido-em = Caducó el { $data }

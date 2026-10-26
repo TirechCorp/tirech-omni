@@ -1,0 +1,27 @@
+# Reprodução local do problema, sem VPN: dois "clientes" com o mesmo IP, 10.99.0.5, cada um
+# com um sshd (usuário demo, senha demo) e um SOCKS5 em 127.0.0.1 (1081 e 1082).
+services:
+  cliente-a:
+    build: .
+    container_name: rede-cliente-a
+    hostname: cliente-a
+    init: true
+    cap_add: [NET_ADMIN]
+    ports: ["127.0.0.1:1081:1080"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "1080"]
+      interval: 1s
+      retries: 30
+    restart: "no"
+  cliente-b:
+    build: .
+    container_name: rede-cliente-b
+    hostname: cliente-b
+    init: true
+    cap_add: [NET_ADMIN]
+    ports: ["127.0.0.1:1082:1080"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "1080"]
+      interval: 1s
+      retries: 30
+    restart: "no"

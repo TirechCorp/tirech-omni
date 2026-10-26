@@ -1,0 +1,37 @@
+[package]
+name = "tirech-omni-tools"
+description = "ssh-keygen, ssh-agent, ssh-add e ssh-copy-id feitos com o Tomni UI, sem tela"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tomni-ui-terminal = { workspace = true, features = ["ssh"] }
+ssh-key.workspace = true
+
+[dev-dependencies]
+# O servidor SSH local dos testes do `tirech-omni-copy-id`.
+russh.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "io-util"] }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "tirech-omni-keygen"
+path = "src/bin/tirech-omni-keygen.rs"
+
+[[bin]]
+name = "tirech-omni-agent"
+path = "src/bin/tirech-omni-agent.rs"
+
+[[bin]]
+name = "tirech-omni-add"
+path = "src/bin/tirech-omni-add.rs"
+
+[[bin]]
+name = "tirech-omni-copy-id"
+path = "src/bin/tirech-omni-copy-id.rs"

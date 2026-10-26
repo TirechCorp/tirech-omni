@@ -1,0 +1,172 @@
+# A página Arquivos: painéis, fila e rclone.
+
+arquivos-abortar = Abortar
+arquivos-abortar-todos = Abortar todos
+arquivos-cancelar-transferencias-e-fechar = Cancelar transferências e fechar
+arquivos-envios-incompletos = Envios incompletos…
+arquivos-envios-incompletos-2 = Envios incompletos
+arquivos-fechar-a-aba-cancela-as-transferencias = Fechar a aba cancela as transferências que ela pediu.
+arquivos-nova-aba = Nova aba
+arquivos-opcoes-da-comparacao = Opções da comparação
+arquivos-sempre-enviar-este-arquivo = Sempre enviar este arquivo
+arquivos-sftp-ftp-ftps-s3-rclone = SFTP · FTP · FTPS · S3 · rclone
+fila-limpar-concluidas = Limpar concluídas
+fila-o-arquivo-ja-existe = O arquivo já existe
+fila-pausar = Pausar
+fila-pular = Pular
+fila-sobrescrever = Sobrescrever
+painel-acima = Acima
+painel-aplicar = Aplicar
+painel-caminho = Caminho
+painel-inicio = Início
+painel-mostrar-ocultos = Mostrar ocultos
+painel-nome-da-pasta = Nome da pasta
+painel-octal-755 = Octal (755)
+rclone-apagar-o-remoto = Apagar o remoto?
+rclone-arquivo-de-configuracao = Arquivo de configuração
+rclone-caminho-do-rclone = Caminho do rclone
+rclone-conclua-o-login-no-navegador = Conclua o login no navegador…
+rclone-gravar = Gravar
+rclone-lendo-os-remotos = Lendo os remotos…
+rclone-lendo-os-tipos-de-remoto-do = Lendo os tipos de remoto do rclone…
+rclone-nome-da-conexao = Nome da conexão
+rclone-o-rclone-quer-saber = O rclone quer saber
+rclone-o-servico-de-nuvem-ou-protocolo = O serviço de nuvem (ou protocolo) do remoto.
+rclone-opcoes = Opções
+rclone-opcoes-do-rclone = Opções do rclone
+rclone-por-na-arvore = Pôr na árvore
+rclone-senha-da-configuracao-do-rclone = Senha da configuração do rclone
+rclone-vazio-o-padrao-do-rclone = Vazio: o padrão do rclone
+rclone-vazio-procura-rclone-no-path = Vazio: procura rclone no PATH
+arquivos-nenhuma-conexao-ssh-sftp-ftp-s3 = Nenhuma conexão SSH, SFTP, FTP, S3 ou rclone. Crie uma em Nova conexão.
+rclone-a-conexao-fica-no-grupo-escolhido = A conexão fica no grupo escolhido da árvore, junto das conexões SSH.
+rclone-a-configuracao-do-rclone-rclone-conf = A configuração do rclone (rclone.conf) é cifrada. Digite a senha para o app poder ler e mudar os remotos.
+rclone-como-o-remoto-se-chama-no = Como o remoto se chama no rclone (letras, números, ponto, hífen, sublinhado e espaço). Não dá para trocar o nome de um remoto que já existe.
+rclone-o-rclone-abriu-o-navegador-para = O rclone abriu o navegador para você entrar na conta. Volte aqui quando terminar.
+rclone-sim-abre-o-navegador-nesta-maquina = Sim abre o navegador nesta máquina para entrar na conta. Não pede o código que o comando `rclone authorize` gera em outra máquina.
+arquivos-enviar = Enviar
+arquivos-conexoes = Conexões
+arquivos-navegacao-sincronizada = Navegação sincronizada
+arquivos-pastas-recentes = Pastas recentes
+fila-direcao = Direção
+fila-fazer-o-mesmo-nos-proximos = Fazer o mesmo nos próximos
+fila-nenhuma-transferencia = Nenhuma transferência
+fila-progresso = Progresso
+fila-restante = Restante
+fila-velocidade = Velocidade
+painel-aplicar-as-subpastas = Aplicar às subpastas
+painel-modificado = Modificado
+painel-pasta-vazia = Pasta vazia
+painel-permissoes = Permissões
+rclone-avancadas = Avançadas
+rclone-guardar-as-senhas-no-cofre = Guardar as senhas no cofre
+rclone-guardar-no-cofre = Guardar no cofre
+rclone-mostrar-as-opcoes-avancadas = Mostrar as opções avançadas
+rclone-nenhum-remoto-configurado-use-novo-para = Nenhum remoto configurado. Use Novo para criar o primeiro.
+arquivos-inicio-titulo = Arquivos
+arquivos-inicio-descricao = Os arquivos do servidor ao lado dos seus. Arraste entre os painéis; a fila cuida das cópias.
+arquivos-ocultar-identicos = Ocultar idênticos
+arquivos-propriedades = Propriedades
+arquivos-copiar-caminho = Copiar caminho
+arquivos-copiar-link-publico = Copiar link público
+arquivos-abrir-terminal-aqui = Abrir terminal aqui
+arquivos-propriedades-do-objeto = Propriedades do objeto
+arquivos-copiar-link-outra-validade = Copiar link, outra validade
+fila-conflito-detalhe = { $caminho }
+    Origem: { $origem_tamanho } · { $origem_data }
+    Destino: { $destino_tamanho } · { $destino_data }
+arquivos-copiar-link-padrao = Copiar link ({ $validade })
+painel-dono-e-grupo = Dono: { $dono } · Grupo: { $grupo }
+rclone-form-obrigatorio = { $nome } (obrigatório)
+rclone-form-exemplos = Exemplos: { $lista }.
+rclone-form-deixe-em-branco = Deixe em branco para manter a senha atual.
+rclone-form-tipo-desconhecido = O rclone desta máquina não conhece o tipo { $tipo }.
+rclone-form-escolha-o-tipo = Escolha o tipo do remoto.
+rclone-form-nome-invalido = O nome precisa ter letras, números, ponto, hífen, sublinhado ou espaço (sem espaço nas pontas).
+rclone-form-ja-existe = Já existe um remoto chamado { $nome }.
+rclone-form-preencha = Preencha: { $lista }.
+rclone-form-login-cancelado = Login cancelado; o remoto inacabado foi apagado
+rclone-form-config-cancelada = Configuração cancelada; o remoto inacabado foi apagado
+rclone-form-remoto-criado = Remoto { $nome } criado
+rclone-form-remoto-atualizado = Remoto { $nome } atualizado
+rclone-form-senhas-no-cofre = ; as senhas foram para o cofre
+rclone-form-senhas-fora-do-cofre = ; as senhas não foram para o cofre: { $motivo }
+rclone-form-senha-da-config-errada = A senha não abriu a configuração. Tente de novo.
+rclone-form-digite-a-senha-da-config = Digite a senha da configuração.
+rclone-form-senha-fora-do-cofre = A senha não foi para o cofre: { $motivo }
+rclone-form-senha-aceita = Senha da configuração aceita. Repita a operação.
+rclone-form-editar-o-remoto = Editar o remoto
+rclone-form-novo-remoto = Novo remoto do rclone
+arquivos-nao-foi-possivel-abrir-de = Não foi possível abrir os arquivos de { $nome }: { $motivo }
+arquivos-nao-foi-possivel-abrir-da-sessao = Não foi possível abrir os arquivos da sessão: { $motivo }
+arquivos-nome-da-sessao = { $nome } (sessão)
+arquivos-nao-consegui-criar = Não consegui criar { $arquivo }: { $erro }
+arquivos-foi-alterado-enviar = { $nome } foi alterado. Enviar?
+rclone-tipo-indisponivel = Este tipo de conexão não está disponível neste app.
+rclone-remoto-apagado = Remoto { $nome } apagado
+rclone-foi-para-a-arvore = { $nome } foi para a árvore de conexões
+rclone-opcoes-gravadas = Opções do rclone gravadas
+rclone-apagar-texto = O remoto { $nome } sai do rclone.conf. Os arquivos na nuvem não são tocados.
+fila-estado-na-fila = Na fila
+fila-estado-em-andamento = Em andamento
+fila-estado-pausada = Pausada
+fila-estado-concluida = Concluída
+fila-estado-pulada = Pulada
+fila-estado-cancelada = Cancelada
+fila-estado-esperando = Esperando resposta
+fila-estado-falhou = Falhou: { $motivo }
+fila-direcao-envio = Envio
+fila-direcao-download = Download
+fila-direcao-copia = Cópia
+fila-direcao-apagar = Apagar
+fila-substantivo-itens = itens
+fila-substantivo-arquivo = arquivo
+fila-substantivo-arquivos = arquivos
+fila-contando = Contando arquivos… { $n } encontrados
+fila-concluido = Concluído · { $n } { $substantivo }
+fila-falhas = { $n ->
+        [1] 1 falha
+       *[other] { $n } falhas
+    }
+fila-concluido-com-falhas = Concluído com { $falhas } · { $feitos } de { $todos } { $substantivo }
+fila-andamento = { $pct }% · { $feitos } de { $total } { $substantivo }
+fila-parada-ha = Parada há { $tempo }
+fila-calculando = Calculando…
+arquivos-pasta-lembrada-nao-existe = A pasta lembrada `{ $pasta }` não existe; abri o início.
+arquivos-pasta-padrao-nao-existe = A pasta padrão `{ $pasta }` não existe; abri o início.
+arquivos-comparar-tamanho = Comparar o tamanho
+arquivos-comparar-data = Comparar a data de modificação
+arquivos-propriedades-de = Propriedades de { $nome }
+arquivos-procurando = Procurando…
+arquivos-nenhum-envio-incompleto = Nenhum envio incompleto aqui.
+arquivos-abortar-apaga-partes = Abortar apaga as partes que já subiram.
+arquivos-fechar-titulo = { $n ->
+        [1] Há 1 transferência em andamento
+       *[other] Há { $n } transferências em andamento
+    }
+arquivos-nome-de-pasta-invalido = “{ $nome }” não serve de nome de pasta
+arquivos-nome-invalido = “{ $nome }” não serve de nome
+arquivos-nao-e-pasta = { $alvo } não é uma pasta
+arquivos-apagar-titulo = { $n ->
+        [1] Apagar 1 item?
+       *[other] Apagar { $n } itens?
+    }
+arquivos-e-mais = … e mais { $n }
+arquivos-octal-invalido = O modo em octal não é válido (use 3 ou 4 dígitos de 0 a 7)
+arquivos-validade-hora = 1 hora
+arquivos-validade-dia = 1 dia
+arquivos-validade-dias = 7 dias
+arquivos-link-copiado = Link de { $nome } copiado; vale até { $ate }
+arquivos-classe-agora = A classe de { $nome } agora é { $classe }
+arquivos-abortados = { $n ->
+        [1] 1 envio incompleto abortado
+       *[other] { $n } envios incompletos abortados
+    }
+arquivos-s3-meta = meta { $nome }
+arquivos-envio-iniciado-em = { $caminho } · iniciado em { $inicio }
+arquivos-rclone-usados = { $usado } usados
+arquivos-link-publico-copiado = Link público de { $nome } copiado
+arquivos-sincronia-desligada = Navegação sincronizada desligada: { $motivo }
+arquivos-sincronia-nao-existe-no-disco = `{ $pasta }` não existe no disco.
+arquivos-sincronia-nao-existe-no-servidor = `{ $pasta }` não existe no servidor.
+arquivos-sincronia-fora-da-base = `{ $destino }` fica fora de `{ $minha }`.

@@ -1,0 +1,28 @@
+AVISOS DE TERCEIROS / THIRD-PARTY NOTICES
+
+Este software usa os componentes abaixo, distribuídos sob as licenças indicadas.
+This software uses the components below, distributed under the licenses shown.
+
+Resumo / Overview:
+{{#each overview}}
+  - {{{name}}}: {{count}}
+{{/each}}
+
+Com o WebView (feature `webview`), o app usa o navegador do sistema, que não vai no binário:
+o runtime do Microsoft Edge WebView2 no Windows, o WKWebView no macOS e o WebKitGTK
+(LGPL-2.1, https://webkitgtk.org) no Linux.
+With the WebView (`webview` feature), the app uses the system browser engine, which is not
+bundled: the Microsoft Edge WebView2 Runtime on Windows, WKWebView on macOS and WebKitGTK
+(LGPL-2.1, https://webkitgtk.org) on Linux.
+{{#each licenses}}
+
+================================================================================
+{{{name}}}
+
+Usada por / Used by:
+{{#each used_by}}
+  - {{{crate.name}}} {{{crate.version}}}{{#if crate.repository}} ({{{crate.repository}}}){{/if}}
+{{/each}}
+--------------------------------------------------------------------------------
+{{{text}}}
+{{/each}}

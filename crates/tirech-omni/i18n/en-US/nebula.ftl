@@ -1,0 +1,33 @@
+# Embedded Nebula network (M48).
+
+nebula-arquivo-e-chave = Pick the config.yml, ca.crt, host.crt or host.key of the node; this path is none of them.
+nebula-certificado-trocado = The node certificate was replaced; the private key stays the same.
+nebula-certificados = Nebula certificates
+nebula-cofre-trancado = The vault is locked; unlock it so the { $nome } network can start.
+nebula-conectando = Connecting the { $nome } network…
+nebula-config-vazio = The Nebula network config is empty.
+nebula-copiar-impressao = Copy the fingerprint
+nebula-estado-conectada = Connected as { $ip } ({ $lighthouses } lighthouses, { $tuneis } tunnels)
+nebula-estado-conectando = Connecting…
+nebula-estado-desligada = Off
+nebula-estado-falhou = Failed: { $motivo }
+nebula-estado-tentando = Trying again: { $motivo }
+nebula-grupos = Groups
+nebula-identidade-sumiu = The Nebula identity of the { $nome } network is no longer in the vault.
+nebula-impressao = Fingerprint
+nebula-mostrar-chave = Show the private key
+nebula-nao-conectou = The { $nome } network did not connect: { $motivo }
+nebula-nao-subiu = The { $nome } Nebula network did not start: { $motivo }
+nebula-ocultar-chave = Hide the private key
+nebula-pki-em-fluxo = The config's ca.crt, host.crt and host.key must be files; use the vault identity.
+nebula-pki-incompleto = The config needs the node's ca, cert and key; import the config.yml with the files beside it.
+nebula-pronta = The { $nome } network is connected as { $ip }.
+nebula-restou-segredo = The config still holds a secret (private key); keep it in the vault identity.
+nebula-sem-config = The { $nome } network has no Nebula config; import a config.yml.
+nebula-sem-identidade = The { $nome } network has no Nebula identity picked from the vault.
+nebula-sem-validade = No expiry date
+nebula-substituir = Replace the certificate…
+nebula-substituir-titulo = Pick the new host.crt
+nebula-titulo = Nebula identity
+nebula-valido-ate = Valid until { $data }
+nebula-vencido-em = Expired on { $data }

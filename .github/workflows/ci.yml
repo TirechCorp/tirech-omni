@@ -1,0 +1,90 @@
+# CI do Tirech Omni. O app depende do Tomni UI por caminho (`../tomni-ui`): o job baixa os dois
+# repositórios lado a lado. A versão do Rust vem do rust-toolchain.toml.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Formatação, clippy, licenças e lint das telas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: tirech-omni
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/tomni-ui
+          path: tomni-ui
+      - run: rustup toolchain install
+        working-directory: tirech-omni
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tirech-omni
+      - run: cargo fmt --all --check
+        working-directory: tirech-omni
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: tirech-omni
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: tirech-omni/Cargo.toml
+          command: check licenses
+      # As telas do app nos dois temas, sem erros de acessibilidade e layout, com uma pasta de
+      # configuração vazia.
+      - name: tomni-ui lint no app
+        working-directory: tirech-omni
+        run: |
+          export TIRECH_OMNI_CONFIG="$(mktemp -d)"
+          cargo run --manifest-path ../tomni-ui/Cargo.toml -p tomni-ui-cli -- lint -p tirech-omni
+
+  msrv:
+    name: Rust 1.89 (rust-version)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: tirech-omni
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/tomni-ui
+          path: tomni-ui
+      - run: rustup toolchain install 1.89 --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tirech-omni
+      - run: cargo +1.89 check --workspace --all-targets
+        working-directory: tirech-omni
+
+  testes:
+    # Os snapshots são da CPU determinística, os mesmos pixels em todo sistema.
+    name: Testes (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: tirech-omni
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ github.repository_owner }}/tomni-ui
+          path: tomni-ui
+      - run: rustup toolchain install
+        working-directory: tirech-omni
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tirech-omni
+      - run: cargo test --workspace
+        working-directory: tirech-omni
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: snapshots-${{ matrix.os }}
+          path: tirech-omni/crates/tirech-omni/snapshots/*.snap.*.png

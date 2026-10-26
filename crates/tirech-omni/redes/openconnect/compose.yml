@@ -1,0 +1,23 @@
+# Rede do cliente A por OpenConnect. Serve para AnyConnect (Cisco), GlobalProtect (Palo Alto),
+# Fortinet, Pulse, Juniper NC, F5 e Array: o --protocol sai de VPN_PROTOCOL
+# (anyconnect, gp, fortinet, pulse, nc, f5, array).
+# Ponha a senha, sozinha numa linha, no arquivo `senha` desta pasta.
+services:
+  vpn:
+    build: .
+    container_name: rede-cliente-a
+    init: true
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun"]
+    environment:
+      VPN_SERVER: vpn.cliente-a.exemplo
+      VPN_USER: ana
+      VPN_PROTOCOL: anyconnect
+    volumes:
+      - ./senha:/run/senha:ro
+    ports: ["127.0.0.1:1081:1080"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "1080"]
+      interval: 2s
+      retries: 60
+    restart: "no"

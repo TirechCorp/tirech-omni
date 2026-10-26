@@ -1,0 +1,5 @@
+/target
+# Saídas do harness de snapshot; as referências aprovadas ficam versionadas.
+*.snap.new.png
+*.snap.diff.png
+/target-*/

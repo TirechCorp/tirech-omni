@@ -1,0 +1,93 @@
+[package]
+name = "tirech-omni"
+description = "Gerenciador de conexões SSH feito com o Tomni UI"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tomni-ui = { workspace = true, features = ["terminal", "pty", "ssh", "sftp", "ftp", "s3", "rclone", "markdown", "ai", "mcp"] }
+# O `MemFs` do `FakeOpener` (os testes das telas abrem arquivos sem rede).
+tomni-ui-files = { workspace = true, features = ["test-util"] }
+# A rede Nebula embutida.
+tomni-ui-nebula.workspace = true
+# O OpenVPN embutido.
+tomni-ui-openvpn.workspace = true
+# O WireGuard e o Tailscale embutidos.
+tomni-ui-wireguard.workspace = true
+tomni-ui-tailscale.workspace = true
+tomni-ui-zerotier.workspace = true
+# O runtime próprio da Nebula embutida (`nebula.rs`), com threads de trabalho.
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "time", "sync", "io-util", "net"] }
+# O relé das portas: HTTP com o nome do site e HTTPS sobre o canal SSH.
+rustls.workspace = true
+tokio-rustls.workspace = true
+rustls-native-certs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+aes-gcm.workspace = true
+argon2.workspace = true
+getrandom.workspace = true
+base64.workspace = true
+sha2.workspace = true
+curve25519-dalek.workspace = true
+hkdf.workspace = true
+ssh-key.workspace = true
+# Importar e exportar de outros gerenciadores.
+quick-xml.workspace = true
+pbkdf2.workspace = true
+sha1.workspace = true
+md-5.workspace = true
+aes.workspace = true
+cbc.workspace = true
+# A data e a hora do nome dos logs das sessões.
+jiff.workspace = true
+# O Project Fluent (os textos da interface por idioma) e o idioma do sistema.
+fluent-bundle.workspace = true
+unic-langid.workspace = true
+sys-locale.workspace = true
+# Os PNGs e o `.ico` do ícone, gerados dos SVG (`icone.rs`).
+png.workspace = true
+gethostname.workspace = true
+# A redação de segredos antes de o texto sair para a IA.
+regex.workspace = true
+zeroize.workspace = true
+# O pacote `tar` com gzip das pastas coladas, montado aqui dentro.
+tar.workspace = true
+flate2.workspace = true
+
+[build-dependencies]
+winresource.workspace = true
+
+[dev-dependencies]
+tomni-ui-test.workspace = true
+# O servidor falso de IA (`FakeAi`) dos testes das telas.
+tomni-ui-ai = { workspace = true, features = ["test-util"] }
+# O plano de controle falso (`ControlFake`) dos testes do Tailscale embutido.
+tomni-ui-tailscale = { workspace = true, features = ["test-util"] }
+tomni-ui-zerotier = { workspace = true, features = ["test-util"] }
+tomni-ui-netstack.workspace = true
+# Gera as chaves e os certificados dos testes.
+rand = { version = "0.10", features = ["thread_rng"] }
+# O servidor S3 de teste do `tomni-ui-files` (`tests/s3.rs` o inclui por `#[path]`).
+rcgen.workspace = true
+rusty-s3.workspace = true
+percent-encoding.workspace = true
+url.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+# O servidor SSH com SFTP de `tests/real.rs` (o mesmo dos testes do `tomni-ui-files`).
+tomni-ui-terminal = { workspace = true, features = ["ssh"] }
+russh.workspace = true
+russh-sftp = "3.0.1"
+tokio = { workspace = true, features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+
+[target.'cfg(windows)'.dependencies]
+# A entrada "Iniciar com o sistema" em `HKCU\...\Run` (API segura, sem `unsafe` nosso).
+windows-registry = "0.6.1"
+# O pipe com dono do canal da ponte MCP (`mcp/pipe.rs`): o `tokio` dos pipes e o `unsafe` fica na lib.
+tomni-ui-win32.workspace = true
+tokio = { workspace = true, features = ["rt", "net", "sync", "macros", "io-util"] }

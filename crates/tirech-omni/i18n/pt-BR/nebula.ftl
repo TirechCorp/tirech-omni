@@ -1,0 +1,33 @@
+# Rede Nebula embutida (M48).
+
+nebula-arquivo-e-chave = Escolha o config.yml, o ca.crt, o host.crt ou o host.key do nó; este caminho não é nenhum deles.
+nebula-certificado-trocado = O certificado do nó foi trocado; a chave privada continua a mesma.
+nebula-certificados = Certificados Nebula
+nebula-cofre-trancado = O cofre está trancado; destrave-o para a rede { $nome } subir.
+nebula-conectando = Conectando a rede { $nome }…
+nebula-config-vazio = O config da rede Nebula está vazio.
+nebula-copiar-impressao = Copiar a impressão digital
+nebula-estado-conectada = Conectada como { $ip } ({ $lighthouses } lighthouses, { $tuneis } túneis)
+nebula-estado-conectando = Conectando…
+nebula-estado-desligada = Desligada
+nebula-estado-falhou = Falhou: { $motivo }
+nebula-estado-tentando = Tentando de novo: { $motivo }
+nebula-grupos = Grupos
+nebula-identidade-sumiu = A identidade Nebula da rede { $nome } não está mais no cofre.
+nebula-impressao = Impressão digital
+nebula-mostrar-chave = Mostrar a chave privada
+nebula-nao-conectou = A rede { $nome } não conectou: { $motivo }
+nebula-nao-subiu = A rede Nebula { $nome } não subiu: { $motivo }
+nebula-ocultar-chave = Ocultar a chave privada
+nebula-pki-em-fluxo = O ca.crt, o host.crt e o host.key do config precisam ser arquivos; use a identidade do cofre.
+nebula-pki-incompleto = O config precisa de ca, cert e key do nó; importe o config.yml com os arquivos ao lado.
+nebula-pronta = A rede { $nome } está conectada como { $ip }.
+nebula-restou-segredo = O config ainda tem um segredo (chave privada); guarde-o na identidade do cofre.
+nebula-sem-config = A rede { $nome } não tem config Nebula; importe um config.yml.
+nebula-sem-identidade = A rede { $nome } não escolheu uma identidade Nebula do cofre.
+nebula-sem-validade = Sem data de validade
+nebula-substituir = Trocar o certificado…
+nebula-substituir-titulo = Escolha o novo host.crt
+nebula-titulo = Identidade Nebula
+nebula-valido-ate = Válido até { $data }
+nebula-vencido-em = Vencido em { $data }

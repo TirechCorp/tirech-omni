@@ -1,0 +1,172 @@
+# The Files page: panes, queue and rclone.
+
+arquivos-abortar = Abort
+arquivos-abortar-todos = Abort all
+arquivos-cancelar-transferencias-e-fechar = Cancel transfers and close
+arquivos-envios-incompletos = Incomplete uploads…
+arquivos-envios-incompletos-2 = Incomplete uploads
+arquivos-fechar-a-aba-cancela-as-transferencias = Closing the tab cancels the transfers it started.
+arquivos-nova-aba = New tab
+arquivos-opcoes-da-comparacao = Comparison options
+arquivos-sempre-enviar-este-arquivo = Always upload this file
+arquivos-sftp-ftp-ftps-s3-rclone = SFTP · FTP · FTPS · S3 · rclone
+fila-limpar-concluidas = Clear completed
+fila-o-arquivo-ja-existe = The file already exists
+fila-pausar = Pause
+fila-pular = Skip
+fila-sobrescrever = Overwrite
+painel-acima = Up
+painel-aplicar = Apply
+painel-caminho = Path
+painel-inicio = Home
+painel-mostrar-ocultos = Show hidden files
+painel-nome-da-pasta = Folder name
+painel-octal-755 = Octal (755)
+rclone-apagar-o-remoto = Delete the remote?
+rclone-arquivo-de-configuracao = Configuration file
+rclone-caminho-do-rclone = rclone path
+rclone-conclua-o-login-no-navegador = Finish signing in in the browser…
+rclone-gravar = Save
+rclone-lendo-os-remotos = Reading the remotes…
+rclone-lendo-os-tipos-de-remoto-do = Reading the rclone remote types…
+rclone-nome-da-conexao = Connection name
+rclone-o-rclone-quer-saber = rclone needs to know
+rclone-o-servico-de-nuvem-ou-protocolo = The cloud service (or protocol) of the remote.
+rclone-opcoes = Options
+rclone-opcoes-do-rclone = rclone options
+rclone-por-na-arvore = Add to the tree
+rclone-senha-da-configuracao-do-rclone = rclone configuration password
+rclone-vazio-o-padrao-do-rclone = Empty: the rclone default
+rclone-vazio-procura-rclone-no-path = Empty: looks for rclone in the PATH
+arquivos-nenhuma-conexao-ssh-sftp-ftp-s3 = No SSH, SFTP, FTP, S3 or rclone connections. Create one in New connection.
+rclone-a-conexao-fica-no-grupo-escolhido = The connection goes in the chosen tree group, alongside the SSH connections.
+rclone-a-configuracao-do-rclone-rclone-conf = The rclone configuration (rclone.conf) is encrypted. Enter the password so the app can read and change the remotes.
+rclone-como-o-remoto-se-chama-no = How the remote is named in rclone (letters, numbers, period, hyphen, underscore and space). You can't rename a remote that already exists.
+rclone-o-rclone-abriu-o-navegador-para = rclone opened the browser for you to sign in. Come back here when you're done.
+rclone-sim-abre-o-navegador-nesta-maquina = Yes opens the browser on this machine to sign in. No asks for the code that the `rclone authorize` command generates on another machine.
+arquivos-enviar = Upload
+arquivos-conexoes = Connections
+arquivos-navegacao-sincronizada = Synchronized browsing
+arquivos-pastas-recentes = Recent folders
+fila-direcao = Direction
+fila-fazer-o-mesmo-nos-proximos = Do the same for the next ones
+fila-nenhuma-transferencia = No transfers
+fila-progresso = Progress
+fila-restante = Remaining
+fila-velocidade = Speed
+painel-aplicar-as-subpastas = Apply to subfolders
+painel-modificado = Modified
+painel-pasta-vazia = Empty folder
+painel-permissoes = Permissions
+rclone-avancadas = Advanced
+rclone-guardar-as-senhas-no-cofre = Store the passwords in the vault
+rclone-guardar-no-cofre = Store in the vault
+rclone-mostrar-as-opcoes-avancadas = Show advanced options
+rclone-nenhum-remoto-configurado-use-novo-para = No remotes configured. Use New to create the first one.
+arquivos-inicio-titulo = Files
+arquivos-inicio-descricao = The server's files next to yours. Drag between the panes; the queue takes care of the copies.
+arquivos-ocultar-identicos = Hide identical
+arquivos-propriedades = Properties
+arquivos-copiar-caminho = Copy path
+arquivos-copiar-link-publico = Copy public link
+arquivos-abrir-terminal-aqui = Open terminal here
+arquivos-propriedades-do-objeto = Object properties
+arquivos-copiar-link-outra-validade = Copy link, other validity
+fila-conflito-detalhe = { $caminho }
+    Source: { $origem_tamanho } · { $origem_data }
+    Target: { $destino_tamanho } · { $destino_data }
+arquivos-copiar-link-padrao = Copy link ({ $validade })
+painel-dono-e-grupo = Owner: { $dono } · Group: { $grupo }
+rclone-form-obrigatorio = { $nome } (required)
+rclone-form-exemplos = Examples: { $lista }.
+rclone-form-deixe-em-branco = Leave blank to keep the current password.
+rclone-form-tipo-desconhecido = This machine's rclone doesn't know the type { $tipo }.
+rclone-form-escolha-o-tipo = Choose the remote type.
+rclone-form-nome-invalido = The name needs letters, numbers, dot, hyphen, underscore or space (no spaces at the ends).
+rclone-form-ja-existe = A remote named { $nome } already exists.
+rclone-form-preencha = Fill in: { $lista }.
+rclone-form-login-cancelado = Login canceled; the unfinished remote was deleted
+rclone-form-config-cancelada = Setup canceled; the unfinished remote was deleted
+rclone-form-remoto-criado = Remote { $nome } created
+rclone-form-remoto-atualizado = Remote { $nome } updated
+rclone-form-senhas-no-cofre = ; the passwords went to the vault
+rclone-form-senhas-fora-do-cofre = ; the passwords didn't go to the vault: { $motivo }
+rclone-form-senha-da-config-errada = The password didn't open the configuration. Try again.
+rclone-form-digite-a-senha-da-config = Enter the configuration password.
+rclone-form-senha-fora-do-cofre = The password didn't go to the vault: { $motivo }
+rclone-form-senha-aceita = Configuration password accepted. Repeat the operation.
+rclone-form-editar-o-remoto = Edit the remote
+rclone-form-novo-remoto = New rclone remote
+arquivos-nao-foi-possivel-abrir-de = Couldn't open the files of { $nome }: { $motivo }
+arquivos-nao-foi-possivel-abrir-da-sessao = Couldn't open the session's files: { $motivo }
+arquivos-nome-da-sessao = { $nome } (session)
+arquivos-nao-consegui-criar = Couldn't create { $arquivo }: { $erro }
+arquivos-foi-alterado-enviar = { $nome } was changed. Upload it?
+rclone-tipo-indisponivel = This connection type is not available in this app.
+rclone-remoto-apagado = Remote { $nome } deleted
+rclone-foi-para-a-arvore = { $nome } went to the connection tree
+rclone-opcoes-gravadas = rclone options saved
+rclone-apagar-texto = The remote { $nome } is removed from rclone.conf. The files in the cloud are not touched.
+fila-estado-na-fila = Queued
+fila-estado-em-andamento = In progress
+fila-estado-pausada = Paused
+fila-estado-concluida = Done
+fila-estado-pulada = Skipped
+fila-estado-cancelada = Canceled
+fila-estado-esperando = Waiting for an answer
+fila-estado-falhou = Failed: { $motivo }
+fila-direcao-envio = Upload
+fila-direcao-download = Download
+fila-direcao-copia = Copy
+fila-direcao-apagar = Delete
+fila-substantivo-itens = items
+fila-substantivo-arquivo = file
+fila-substantivo-arquivos = files
+fila-contando = Counting files… { $n } found
+fila-concluido = Done · { $n } { $substantivo }
+fila-falhas = { $n ->
+        [1] 1 failure
+       *[other] { $n } failures
+    }
+fila-concluido-com-falhas = Done with { $falhas } · { $feitos } of { $todos } { $substantivo }
+fila-andamento = { $pct }% · { $feitos } of { $total } { $substantivo }
+fila-parada-ha = Stalled for { $tempo }
+fila-calculando = Calculating…
+arquivos-pasta-lembrada-nao-existe = The remembered folder `{ $pasta }` doesn't exist; I opened the start.
+arquivos-pasta-padrao-nao-existe = The default folder `{ $pasta }` doesn't exist; I opened the start.
+arquivos-comparar-tamanho = Compare the size
+arquivos-comparar-data = Compare the modification date
+arquivos-propriedades-de = Properties of { $nome }
+arquivos-procurando = Searching…
+arquivos-nenhum-envio-incompleto = No incomplete uploads here.
+arquivos-abortar-apaga-partes = Aborting deletes the parts that were already uploaded.
+arquivos-fechar-titulo = { $n ->
+        [1] There is 1 transfer in progress
+       *[other] There are { $n } transfers in progress
+    }
+arquivos-nome-de-pasta-invalido = “{ $nome }” isn't a valid folder name
+arquivos-nome-invalido = “{ $nome }” isn't a valid name
+arquivos-nao-e-pasta = { $alvo } isn't a folder
+arquivos-apagar-titulo = { $n ->
+        [1] Delete 1 item?
+       *[other] Delete { $n } items?
+    }
+arquivos-e-mais = … and { $n } more
+arquivos-octal-invalido = The octal mode isn't valid (use 3 or 4 digits from 0 to 7)
+arquivos-validade-hora = 1 hour
+arquivos-validade-dia = 1 day
+arquivos-validade-dias = 7 days
+arquivos-link-copiado = Link for { $nome } copied; valid until { $ate }
+arquivos-classe-agora = The class of { $nome } is now { $classe }
+arquivos-abortados = { $n ->
+        [1] 1 incomplete upload aborted
+       *[other] { $n } incomplete uploads aborted
+    }
+arquivos-s3-meta = meta { $nome }
+arquivos-envio-iniciado-em = { $caminho } · started at { $inicio }
+arquivos-rclone-usados = { $usado } used
+arquivos-link-publico-copiado = Public link for { $nome } copied
+arquivos-sincronia-desligada = Synchronized browsing turned off: { $motivo }
+arquivos-sincronia-nao-existe-no-disco = `{ $pasta }` doesn't exist on the disk.
+arquivos-sincronia-nao-existe-no-servidor = `{ $pasta }` doesn't exist on the server.
+arquivos-sincronia-fora-da-base = `{ $destino }` is outside `{ $minha }`.

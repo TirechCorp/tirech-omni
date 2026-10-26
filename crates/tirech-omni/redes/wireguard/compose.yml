@@ -1,0 +1,19 @@
+# Rede do cliente A por WireGuard. Ponha o wg0.conf do cliente nesta pasta.
+# No AllowedIPs, só a faixa do cliente (não 0.0.0.0/0, senão toda a saída do contêiner vai pela VPN).
+services:
+  vpn:
+    build: .
+    container_name: rede-cliente-a
+    init: true
+    cap_add: [NET_ADMIN]
+    sysctls:
+      net.ipv4.conf.all.src_valid_mark: 1
+    volumes:
+      - ./wg0.conf:/etc/wireguard/wg0.conf:ro
+    # Sempre com 127.0.0.1: sem ele o SOCKS5 fica aberto para a rede local.
+    ports: ["127.0.0.1:1081:1080"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "1080"]
+      interval: 2s
+      retries: 30
+    restart: "no"

@@ -1,0 +1,22 @@
+# Rede do cliente A por FortiClient VPN (SSL), com o openfortivpn.
+# Ponha o arquivo `config` nesta pasta, no formato do openfortivpn:
+#   host = vpn.cliente-a.exemplo
+#   port = 443
+#   username = ana
+#   password = ...
+#   trusted-cert = <sha256 do certificado do concentrador>
+services:
+  vpn:
+    build: .
+    container_name: rede-cliente-a
+    init: true
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/ppp"]
+    volumes:
+      - ./config:/etc/openfortivpn/config:ro
+    ports: ["127.0.0.1:1081:1080"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "1080"]
+      interval: 2s
+      retries: 60
+    restart: "no"

@@ -1,0 +1,19 @@
+# Rede do cliente A por OpenVPN. Ponha o cliente.ovpn nesta pasta (certificados dentro dele ou
+# ao lado, montados em /etc/openvpn/). Se pedir usuário e senha, use `auth-user-pass /etc/openvpn/senha`
+# no .ovpn e um arquivo `senha` (usuário na primeira linha, senha na segunda).
+services:
+  vpn:
+    build: .
+    container_name: rede-cliente-a
+    init: true
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun"]
+    volumes:
+      - ./cliente.ovpn:/etc/openvpn/cliente.ovpn:ro
+      # - ./senha:/etc/openvpn/senha:ro
+    ports: ["127.0.0.1:1081:1080"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "1080"]
+      interval: 2s
+      retries: 60
+    restart: "no"

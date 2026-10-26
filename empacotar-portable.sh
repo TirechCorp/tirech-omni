@@ -32,6 +32,12 @@ for nome in tirech-omni tirech-omni-add tirech-omni-agent tirech-omni-copy-id ti
     fi
     cp "$alvo/$nome.exe" "$pacote/"
 done
+# O mingw do x86_64 deixa a tabela de símbolos no .exe (o llvm-mingw do ARM, não): sem ela,
+# o zip cai para um terço.
+strip=$(command -v "${STRIP:-x86_64-w64-mingw32-strip}" || true)
+if [ -n "$strip" ] && [ "${TRIPLO:-x86_64-pc-windows-gnu}" = x86_64-pc-windows-gnu ]; then
+    "$strip" "$pacote"/*.exe
+fi
 if [ -f "$alvo/libunwind.dll" ]; then
     cp "$alvo/libunwind.dll" "$pacote/"
 fi

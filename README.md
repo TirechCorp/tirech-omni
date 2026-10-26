@@ -23,6 +23,7 @@ em português, inglês e espanhol. → [Leia a documentação](docs/pt-BR/README
 | Contributing / Como contribuir | [CONTRIBUTING](docs/en/CONTRIBUTING.md) | [CONTRIBUTING](docs/pt-BR/CONTRIBUTING.md) |
 | Security / Segurança | [SECURITY](docs/en/SECURITY.md) | [SECURITY](docs/pt-BR/SECURITY.md) |
 | Changelog / Mudanças | [CHANGELOG](docs/en/CHANGELOG.md) | [CHANGELOG](docs/pt-BR/CHANGELOG.md) |
+| Roadmap / Planos | [ROADMAP](docs/en/ROADMAP.md) | [ROADMAP](docs/pt-BR/ROADMAP.md) |
 | Code of conduct / Código de conduta | [CODE_OF_CONDUCT](docs/en/CODE_OF_CONDUCT.md) | [CODE_OF_CONDUCT](docs/pt-BR/CODE_OF_CONDUCT.md) |
 
 Built with / Feito com: [Tomni UI](https://github.com/TirechCorp/tomni-ui).

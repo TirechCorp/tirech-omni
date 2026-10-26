@@ -126,7 +126,7 @@ add barriers such as automatic locking or extra confirmations. To report a vulne
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md) (the CI checks, the layout and the rules) and the
 [code of conduct](CODE_OF_CONDUCT.md). New widgets and protocols usually belong in
-[Tomni UI](https://github.com/TirechCorp/tomni-ui), not in the app.
+[Tomni UI](https://github.com/TirechCorp/tomni-ui), not in the app. What is planned is in [`ROADMAP.md`](ROADMAP.md).
 
 ## License
 

@@ -125,7 +125,7 @@ bloqueio automático ou confirmações extras. Para relatar uma falha, veja o
 
 Leia o [`CONTRIBUTING.md`](CONTRIBUTING.md) (a bateria do CI, a estrutura e as regras) e o
 [código de conduta](CODE_OF_CONDUCT.md). Widgets e protocolos novos costumam ir para o
-[Tomni UI](https://github.com/TirechCorp/tomni-ui), não para o app.
+[Tomni UI](https://github.com/TirechCorp/tomni-ui), não para o app. O que está planejado fica em [`ROADMAP.md`](ROADMAP.md).
 
 ## Licença
 

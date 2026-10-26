@@ -124,7 +124,7 @@ fn o_claude_abre_numa_aba_a_direita_com_a_ponte_presa_a_aba() {
         })
         .collect();
     arquivos.sort();
-    // Em ordem, o `lancar-<n>-avisos.json` vem antes do `lancar-<n>.json`.
+    // Em ordem, o `lancar-<pid>-<n>-avisos.json` vem antes do `lancar-<pid>-<n>.json`.
     let [avisos, ponte] = arquivos.as_slice() else {
         panic!("{} arquivos de lançamento", arquivos.len());
     };

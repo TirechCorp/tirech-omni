@@ -46,7 +46,7 @@ const EXEC_COM_O_PATH: &str = "exec env PATH=\"$PATH:$HOME/.local/bin:$HOME/.ope
      $HOME/.npm-global/bin:$HOME/.bun/bin:$HOME/.volta/bin:$HOME/.asdf/shims:\
      $HOME/.local/share/mise/shims:/opt/homebrew/bin:/usr/local/bin\"";
 
-/// Os arquivos `lancar-<n>.json` e `lancar-<n>-avisos.json` do Claude Code ficam nesta pasta de dentro da pasta de dados.
+/// Os arquivos `lancar-<pid>-<n>.json` e `lancar-<pid>-<n>-avisos.json` do Claude Code ficam nesta pasta de dentro da pasta de dados.
 const PASTA_DOS_ARQUIVOS: &str = "mcp";
 
 /// As extensões que o Windows tenta, na ordem, quando o nome do programa não tem uma.
@@ -337,6 +337,10 @@ fn procurar_no_windows(nome: &str, pastas: &[PathBuf]) -> Option<PathBuf> {
 /// anteriores do app deixaram. Chamado na abertura do app: durante o uso eles ficam, porque o
 /// "Reconectar" reabre o mesmo comando.
 pub(super) fn limpar_arquivos_antigos(pasta_de_dados: &Path) {
+    // Numa segunda cópia do app, os arquivos são da primeira, que pode estar abrindo um assistente.
+    if crate::armazenamento::so_leitura(pasta_de_dados) {
+        return;
+    }
     let Ok(entradas) = std::fs::read_dir(pasta_de_dados.join(PASTA_DOS_ARQUIVOS)) else {
         return;
     };
@@ -1027,14 +1031,15 @@ impl Tela {
         let rotulo = encomenda.rotulo.as_str();
         let nome = t!("controlar-nome-da-sessao", nome = ficha.nome, aba = rotulo);
         let n = self.contador.get_untracked() + 1;
+        // Único entre as cópias do app e as aberturas: o hook e o cluster acham a sessão por ele,
+        // e os arquivos de uma cópia não passam por cima dos da outra.
+        let lancamento = format!("{}-{n}", std::process::id());
         let arquivo = self
             .armazenamento
             .pasta()
             .join(PASTA_DOS_ARQUIVOS)
-            .join(format!("lancar-{n}.json"));
-        let avisos = arquivo.with_file_name(format!("lancar-{n}-avisos.json"));
-        // Único entre as cópias do app e as aberturas: o hook e o cluster acham a sessão por ele.
-        let lancamento = format!("{}-{n}", std::process::id());
+            .join(format!("lancar-{lancamento}.json"));
+        let avisos = arquivo.with_file_name(format!("lancar-{lancamento}-avisos.json"));
         let mut ponte = ["mcp", "--nome", nome.as_str()].map(str::to_owned).to_vec();
         ponte.extend(encomenda.ponte);
         ponte.extend(["--lancamento".to_owned(), lancamento.clone()]);

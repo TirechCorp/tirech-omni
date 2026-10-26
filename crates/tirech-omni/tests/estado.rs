@@ -2,6 +2,8 @@
 
 mod comum;
 
+use std::time::{Duration, Instant};
+
 use tirech_omni::abrir::Senhas;
 use tomni_ui::terminal::Session;
 use tomni_ui::theme::Theme;
@@ -17,6 +19,11 @@ fn abas(app: &TestApp) -> Vec<Vec<String>> {
         .iter()
         .map(|p| p.tabs.iter().map(|(_, titulo)| titulo.clone()).collect())
         .collect()
+}
+
+/// O texto do widget `id`, ou `None` se ele (ainda) não existe.
+fn texto(app: &TestApp, id: &str) -> Option<String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.text(id))).ok()
 }
 
 /// Fecha as sessões que a "execução" anterior deixou no registro desta thread.
@@ -123,23 +130,36 @@ fn sem_confirmar_a_senha_o_estado_antigo_nao_e_apagado() {
 }
 
 #[test]
-fn a_segunda_copia_do_app_abre_sem_as_abas_da_primeira_e_so_grava_quando_ela_fecha() {
+fn a_segunda_copia_do_app_e_so_de_leitura_ate_reiniciar() {
     let pasta = Pasta::nova("estado-segunda-copia");
     pasta.semear(&exemplo());
     let arquivo = pasta.caminho().join("estado.json");
+    let conexoes = pasta.caminho().join("connections.json");
     let da_primeira = r#"{"grade":[1,1],"paineis":[[3]]}"#;
     std::fs::write(&arquivo, da_primeira).unwrap();
+    let conexoes_antes = std::fs::read(&conexoes).unwrap();
     // A primeira cópia segura a trava da pasta, como o `main` faz.
     let primeira = armazenamento::travar(pasta.caminho()).unwrap();
     assert!(matches!(primeira, Trava::Travada(_)));
 
-    let (mut m, _) = montar_com_ambiente(&pasta, Theme::Light, |a| a.dono_do_estado = false);
+    let (mut m, _) = montar_com_ambiente(&pasta, Theme::Light, |a| {
+        a.dono_do_estado = false;
+        a.vigia_do_cofre = Duration::from_millis(50);
+    });
+    assert!(m.app.visible("so-leitura"));
+    assert!(
+        m.app.text("so-leitura").contains("é a dona"),
+        "{}",
+        m.app.text("so-leitura")
+    );
     assert!(
         m.opener.abertas.borrow().is_empty(),
         "a segunda cópia reabriu as abas da primeira"
     );
     m.app.expand("arvore", "1");
     m.app.double_click("arvore-2");
+    m.app.context_menu("arvore-2");
+    m.app.click("menu-2-duplicar");
     m.app.frame();
     assert_eq!(*m.opener.abertas.borrow(), [2]);
     assert_eq!(
@@ -147,25 +167,40 @@ fn a_segunda_copia_do_app_abre_sem_as_abas_da_primeira_e_so_grava_quando_ela_fec
         da_primeira,
         "a segunda cópia gravou por cima do estado da primeira"
     );
+    assert_eq!(
+        std::fs::read(&conexoes).unwrap(),
+        conexoes_antes,
+        "a segunda cópia gravou as conexões"
+    );
 
-    // A primeira fecha: na gravação seguinte, a segunda pega a trava e grava as abas dela.
+    // O que a primeira grava aparece na segunda. A dona é outro processo: grava direto no
+    // arquivo, sem passar pelo registro das pastas só de leitura deste.
+    let mut da_dona = exemplo();
+    da_dona.add_group(None, "Gravado pela dona");
+    std::fs::write(&conexoes, serde_json::to_vec(&da_dona).unwrap()).unwrap();
+    let limite = Instant::now() + Duration::from_secs(10);
+    while texto(&m.app, "arvore-6").as_deref() != Some("Gravado pela dona") {
+        assert!(Instant::now() < limite, "a árvore da dona não chegou");
+        m.app.wait(Duration::from_millis(20));
+    }
+
+    // A primeira fecha: a segunda avisa, mas continua só de leitura até reiniciar.
     drop(primeira);
+    let limite = Instant::now() + Duration::from_secs(10);
+    while m.app.text("so-leitura").contains("é a dona") {
+        assert!(Instant::now() < limite, "o aviso não mudou");
+        m.app.wait(Duration::from_millis(20));
+    }
     m.app.double_click("arvore-4");
     m.app.frame();
-    let texto = std::fs::read_to_string(&arquivo).unwrap();
-    let valor = serde_json::from_str(&texto).unwrap();
-    let estado = tirech_omni::estado::do_valor(&valor).unwrap();
-    let ids: Vec<Option<u64>> = estado.janelas[0]
-        .paineis
-        .iter()
-        .flatten()
-        .map(|i| i.id)
-        .collect();
-    assert_eq!(ids, [Some(2), Some(4)], "{texto}");
-    assert!(matches!(
-        armazenamento::travar(pasta.caminho()).unwrap(),
-        Trava::Ocupada
-    ));
+    assert_eq!(std::fs::read_to_string(&arquivo).unwrap(), da_primeira);
+    assert!(
+        matches!(
+            armazenamento::travar(pasta.caminho()).unwrap(),
+            Trava::Travada(_)
+        ),
+        "a segunda cópia ficou com a trava"
+    );
     drop(m);
     encerrar(&["2-1", "4-2"]);
 }

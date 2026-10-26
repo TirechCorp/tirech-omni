@@ -33,13 +33,18 @@ tabs from the previous state does not count. Deleting a connection removes its r
 
 ## Windows and workspaces
 
-- **Multiple windows**: Window ▸ New window (Ctrl+Alt+N) opens another window with just the terminals
-  (title bar, the same menu bar as the main window, and the panes). The tree, the properties,
-  the vault and the other pages stay in the main window. In the other windows, session actions
-  (Reconnect, Stop logging, Close tab…) act on the window the menu belongs to; the ones that only exist in the
-  main window (New connection, Import, Export, Vault, Notes, Keyboard shortcuts, About) bring the main window
-  to the front, even from the tray, and act there; the pane items in the View menu are disabled. Double-clicking a connection opens the tab in the last
-  window you interacted with. Dragging a tab to another window (or outside all of them, which
+- **Multiple windows**: Window ▸ New window (Ctrl+Alt+N) opens another window with the terminals
+  and the **Connections** and **Properties** panels, pinned as in the main window (title bar, the
+  same menu bar as the main window, and the panes). The tree's selection, filter and open folders
+  are the same in every window; each window's View menu shows and hides its own panels, and each
+  window's layout comes back on the next run. Deleting, editing tunnels and commands, running and
+  the server sessions ask in the window whose tree you used. The vault and the other pages stay
+  in the main window. In the other windows, session actions
+  (Reconnect, Stop logging, Close tab…) act on the window the menu belongs to; the ones that only
+  exist in the main window (New connection, Import, Export, Vault, Notes, Keyboard shortcuts,
+  About, and the tree menu's cluster, script, files and copy key) bring the main window to the
+  front, even from the tray, and act there; the other pane items in the View menu are disabled.
+  Double-clicking a connection opens the tab in the last window you interacted with. Dragging a tab to another window (or outside all of them, which
   opens a new window) and the tab menu's "Move to window" carry the **same session**: nothing
   reconnects and the history is kept. The Window menu lists the open windows and focuses them.
 - **Connection status in the tree**: a badge on the corner of the icon shows the status of each connection
@@ -998,7 +1003,7 @@ menu, in the tab menu and in Tools › AI assistants (which controls the current
 - In Claude Code, the app's notices (the given tab, files dropped on the tab) arrive along with the
   next message you send, without waiting for the assistant to call a tool: the app launches
   Claude with `--settings` pointing to a `UserPromptSubmit` hook (`tirech-omni mcp --avisos
-  <code>`), in a `lancar-<n>-avisos.json` file next to `lancar-<n>.json`. Your
+  <code>`), in a `lancar-<pid>-<n>-avisos.json` file next to `lancar-<pid>-<n>.json`. Your
   Claude Code settings don't change.
 - The app's server also offers three slash commands in Claude Code (MCP prompts):
   `/mcp__tirech-omni-aba__abas` (the open tabs and which ones it controls),
@@ -1070,14 +1075,21 @@ assistants do" turns it off.
 In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in the folder the
 `TIRECH_OMNI_CONFIG` variable points to:
 
-- `connections.json`: connections and groups, written immediately and atomically. If it is
-  corrupted, it is moved to `connections.json.bak` and the app warns you.
+- `connections.json`: connections and groups, written immediately and atomically (each write
+  goes to its own `.tmp`, which only replaces the whole file). If it is corrupted, it is moved to
+  `connections.json.bak` (or `.bak-<date and time>`, never over an earlier copy) and the app
+  warns you. Fields this version doesn't know (from a newer version) stay in the file when it is
+  written; a file with a `version` higher than this version's is read as far as it is understood
+  and is not overwritten. When another program (another copy of the app, an editor, sync) changes
+  the file, the app rereads it on its own within a few seconds; if the outside change lands
+  between a read and a write from here, the outside version is kept as
+  `connections.json.conflito-<date and time>` and the app warns you.
 - `estado.json`: all windows, with the grid and the connections open in each pane, and the tmux
   session of tabs with a persistent session (the workspace format; the single-window format of the first versions is still read). It also stores the layout of each page's
   pinned panels (Terminals, Notes and Files: mode, side, sizes, order and the
   floating panels' window). With two copies of the app open on the same folder, only the first one restores
-  and writes this file: the second opens without the tabs (they are already open in the first) and starts
-  writing when the first one closes.
+  and writes this file: the second opens without the tabs (they are already open in the first) and is
+  read-only (see `trava.lock`).
 - `conversas.json`: the "Control with" assistants' conversation log, per tab (the
   connection id; `0` is the standalone local shell): the assistant, the conversation id in it, when it was opened and
   the first message. Up to 20 per tab and assistant. Deleting it only makes the app forget the conversations
@@ -1095,8 +1107,15 @@ In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in t
   kept when writing. If corrupted, it is moved to `configuracoes.json.bak` and the app warns you.
 - `pasta.txt` (in the system's configuration folder, not the data folder): the path of the data folder,
   when it was changed through the Settings page.
-- `trava.lock`: the lock of the first copy opened with the folder. In portable mode, it prevents the
-  second copy; outside it, it says who owns `estado.json`.
+- `trava.lock`: the lock of the first copy opened with the folder, the owner of the settings. In
+  portable mode, it prevents the second copy. Outside it, the second one opens **read-only**, as
+  in WinSSHTerm: a bar at the top says so, and it writes nothing in the data folder or the vault
+  (connections, state, vault, settings, workspaces, attachments, recents, the daily copy, the
+  cleanup of the "Control with" files); whatever you change in it stays in memory and is lost
+  when you close it. What the owner saves shows up in the second copy on its own (connections and
+  the vault are reread). When the owner closes, the bar says you can save after restarting, and
+  the bar's Restart button opens this copy again, now as the owner. The `tirech-omni mcp` bridge
+  doesn't write anything in the folder either.
 - `agente.json`: whether the built-in agent starts with the app, the default lifetime and the file
   keys it loads on startup (only the file path, the confirmation and the lifetime; never the
   passphrase). Vault keys aren't stored here: they live in `vault.json` itself. The agent's
@@ -1112,7 +1131,7 @@ In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in t
 - `ia.json`: the AI providers (name, URL, dialect, model, network, TLS and headers) and the
   default provider. **The API key isn't stored here**: it lives in a vault item ("API key — …")
   and the profile stores only its id. If corrupted, it is moved to `ia.json.bak` and the app warns you.
-- `mcp/lancar-<n>.json`, `mcp/lancar-<n>-avisos.json` and `mcp/conversa-<n>.json`: the files for
+- `mcp/lancar-<pid>-<n>.json`, `mcp/lancar-<pid>-<n>-avisos.json` and `mcp/conversa-<pid>-<n>.json`: the files for
   each "Control with" launch (the bridge, the Claude Code notices hook and the id of Codex's
   new conversation, which `notify` writes). They stay while the app is open (
   Reconnect reuses them) and are deleted on the next startup.
@@ -1138,9 +1157,15 @@ In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in t
   `uid`, tombstones for removals and the SSH keys) and the key that opens it (gone when there's a master
   password). `cofre.json` and `chave` from older versions are renamed on first open, and
   version 1 and 2 vaults move to version 3 on the first write. Written with 0600 on Unix. If
-  `vault.json` is corrupted, it is moved to `vault.json.bak` and the app warns you. "Use instead
+  `vault.json` is corrupted, it is moved to `vault.json.bak` (or `.bak-<date and time>`, never
+  over an earlier copy, with `vault.key` alongside) and the app warns you; a `vault.json` from a
+  newer version of the app opens locked, without being overwritten. "Use instead
   of this one" leaves the previous vault as `vault.json.bak-<date and time>` (and `vault.key`).
   The vault folder can be different from the data folder ("Vault location", in `configuracoes.json`).
+- `copias/`: one copy per day of `connections.json`, `vault.json` and `vault.key`
+  (`<yyyymmdd>-<name>`, the file as it was before the day's first change), only for the last 7
+  days. A file that gets lost or damaged comes back with at most one day of changes missing:
+  close the app and copy the copy over it. The folder belongs only to its owner on Unix.
 - `vault/`: note attachments, one encrypted file per attachment (name = id), next to `vault.json`.
   Those left without a record (an interrupted save) are deleted after 24 hours.
   When switching vaults, the old `vault/` becomes `vault.bak/` (or `vault.bak-<date and time>/`).

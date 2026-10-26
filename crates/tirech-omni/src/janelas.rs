@@ -1,7 +1,7 @@
 //! As janelas de terminais do app (M28): a principal e as que a pessoa abre com Janela > Nova
 //! janela, arrasta uma aba para fora ou reabre de um espaço de trabalho. Cada uma tem o seu
-//! layout de painéis e a sua grade; este módulo guarda a lista e o que cada janela precisa para
-//! viver depois que a tela dela some.
+//! layout de painéis, a sua grade e os seus painéis Conexões e Propriedades; este módulo guarda
+//! a lista e o que cada janela precisa para viver depois que a tela dela some.
 //!
 //! O layout e a grade de uma janela secundária nascem num escopo à parte (`Scope::detached`),
 //! não no da tela dela: assim a lista, que vive na janela principal, nunca guarda um signal já
@@ -42,6 +42,9 @@ pub struct Janela {
     pub colar_dialogo: Signal<bool>,
     /// Se o diálogo de aprovação de um pedido de assistente (M51) está aberto nesta janela.
     pub mcp_aprovar: Signal<bool>,
+    /// Os painéis Conexões e Propriedades em volta dos terminais (na principal, também o chat
+    /// e as portas), que o `DockHost` da janela mantém em dia.
+    pub paineis: Signal<DockLayout>,
 }
 
 /// A lista das janelas abertas, na ordem em que abriram. A primeira é a principal.
@@ -111,18 +114,20 @@ impl Janelas {
             .with_untracked(|l| l.iter().position(|j| j.handle == handle).map(|n| n + 1))
     }
 
-    /// Abre uma janela secundária com a grade `grade`. `tela` monta o conteúdo, já com a janela
-    /// (o handle só existe quando o sistema a cria). `None` onde só cabe uma janela (o Android).
+    /// Abre uma janela secundária com a grade `grade` e os painéis em `paineis` (o vazio: o
+    /// padrão do `DockHost`). `tela` monta o conteúdo, já com a janela (o handle só existe
+    /// quando o sistema a cria). `None` onde só cabe uma janela (o Android).
     pub fn abrir<V: View>(
         &self,
         titulo: String,
         grade: (usize, usize),
         geometria: Option<WindowGeometry>,
+        paineis: DockLayout,
         tela: impl FnOnce(Janela) -> V + 'static,
     ) -> Option<Janela> {
         let escopo = Scope::detached();
-        let (layout, grade_atual, envio, ia_comando, colar_dialogo, mcp_aprovar) =
-            escopo.run(|| {
+        let (layout, grade_atual, envio, ia_comando, colar_dialogo, mcp_aprovar, paineis) = escopo
+            .run(|| {
                 let layout = signal(PaneLayout::with(Vec::new()));
                 if grade.0 > 0 && grade.1 > 0 && grade != (1, 1) {
                     layout.update(|l| l.grid(grade.0, grade.1));
@@ -134,6 +139,7 @@ impl Janelas {
                     signal(false),
                     signal(false),
                     signal(false),
+                    signal(paineis),
                 )
             });
         let (largura, altura) = geometria.map_or(TAMANHO_PADRAO, |g| g.size);
@@ -146,6 +152,7 @@ impl Janelas {
                 ia_comando,
                 colar_dialogo,
                 mcp_aprovar,
+                paineis,
             })
         })
         .title(titulo)
@@ -165,6 +172,7 @@ impl Janelas {
             ia_comando,
             colar_dialogo,
             mcp_aprovar,
+            paineis,
         };
         self.escopos
             .lock()

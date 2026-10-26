@@ -12,8 +12,8 @@ use tomni_ui::WindowGeometry;
 use tomni_ui::dialogs;
 use tomni_ui::files::Transfers;
 use tomni_ui::prelude::*;
-use tomni_ui::request_focus;
 use tomni_ui::terminal::{PaneLayout, Session, Terminal, TerminalPanes, move_session};
+use tomni_ui::{request_focus, request_focus_in};
 
 use crate::abrir::{
     DadosCertificado, FilaChaves, Opener, PedidoChave, Senhas, ler_fila, mexer_na_fila,
@@ -925,6 +925,10 @@ struct Tela {
     filtro: Signal<String>,
     /// A lupa da barra da árvore: ligada, mostra o campo do filtro.
     filtro_aberto: Signal<bool>,
+    /// O resumo da linha "Túneis" das propriedades ("Nenhum", "1 túnel"…).
+    resumo_tuneis: Signal<String>,
+    /// O resumo da linha "Comandos" das propriedades.
+    resumo_comandos: Signal<String>,
     renomeando: Signal<Option<String>>,
     campos: Campos,
     /// As janelas de terminais abertas (a principal e as secundárias).
@@ -1051,12 +1055,16 @@ struct Tela {
     liberado: Cell<bool>,
     /// O app está acabando: o estado das janelas já foi gravado e não muda mais.
     encerrando: Cell<bool>,
-    /// Outra cópia do app, aberta antes, é a dona do `estado.json` (`Ambiente::dono_do_estado`):
-    /// esta não restaura as abas dela nem grava por cima. Quando a outra fecha, esta pega a trava
-    /// na próxima gravação e passa a ser a dona.
-    estado_alheio: Cell<bool>,
-    /// A trava do `trava.lock` que esta cópia pegou ao virar a dona do estado; solta ao fechar.
-    trava_do_estado: RefCell<Option<std::fs::File>>,
+    /// Outra cópia do app, aberta antes, é a dona da configuração (`Ambiente::dono_do_estado`):
+    /// esta abre só de leitura ([`crate::armazenamento::somente_leitura_em`]), sem as abas da
+    /// outra, e o que se muda nela fica na memória e se perde ao fechar.
+    so_leitura: bool,
+    /// Numa cópia só de leitura, se a dona ainda está aberta. Quando ela fecha, a barra de só
+    /// leitura convida a reiniciar.
+    dona_aberta: Signal<bool>,
+    /// O que se viu do `connections.json` na última leitura ou gravação: a vigia relê o arquivo
+    /// quando outro programa (a outra cópia do app, um editor) o muda.
+    visto_conexoes: RefCell<crate::armazenamento::Visto>,
     /// O id do item do menu em realce (o submenu "Abrir em" aberto): os painéis da janela de
     /// destino mostram o número deles enquanto isso. Um signal só, porque só um menu fica aberto.
     realce_menu: Signal<Option<String>>,
@@ -1151,18 +1159,76 @@ impl Tela {
         self.aviso.set(Some((severidade, mensagem.into())));
     }
 
-    /// Grava o `connections.json`; se falhar, avisa na tela.
+    /// Grava o `connections.json`; se falhar, avisa na tela. Se outro programa o mudou depois da
+    /// última leitura (e a vigia ainda não releu), a versão dele fica numa cópia ao lado, com o
+    /// aviso.
     fn gravar(&self) {
-        let resultado = self.tree.with_untracked(|t| self.armazenamento.salvar(t));
-        if let Err(erro) = resultado {
-            self.avisar(
+        let resultado = self.tree.with_untracked(|t| {
+            self.armazenamento
+                .salvar_visto(t, &mut self.visto_conexoes.borrow_mut())
+        });
+        match resultado {
+            Ok(None) => {}
+            Ok(Some(copia)) => self.avisar(
+                InfoBarSeverity::Warning,
+                t!(
+                    "armazenamento-conexoes-conflito",
+                    copia = copia.display().to_string()
+                ),
+            ),
+            Err(erro) => self.avisar(
                 InfoBarSeverity::Error,
                 t!(
                     "comum-nao-consegui-gravar",
                     arquivo = self.armazenamento.arquivo_conexoes().display().to_string(),
                     erro = erro.to_string()
                 ),
-            );
+            ),
+        }
+    }
+
+    /// Liga a vigia do `connections.json`: de tempos em tempos (`Ambiente.vigia_do_cofre`, o
+    /// mesmo ritmo da do cofre) e quando a janela ganha o foco.
+    fn vigiar_conexoes(self: &Rc<Self>) {
+        self.agendar_vigia_das_conexoes();
+        let t = Rc::clone(self);
+        effect(move || {
+            let _ = t.ativa.get();
+            untrack(|| t.conferir_conexoes());
+        });
+    }
+
+    fn agendar_vigia_das_conexoes(self: &Rc<Self>) {
+        let espera = self.ferramentas.ambiente().vigia_do_cofre;
+        let t = Rc::clone(self);
+        self.alarmes.depois(espera, move || {
+            t.conferir_conexoes();
+            t.agendar_vigia_das_conexoes();
+        });
+    }
+
+    /// Relê o `connections.json` se outro programa o mudou, e numa cópia só de leitura confere se
+    /// a dona ainda está aberta.
+    fn conferir_conexoes(&self) {
+        let lido = self
+            .armazenamento
+            .reler_se_mudou(&mut self.visto_conexoes.borrow_mut());
+        if let Some((arvore, aviso)) = lido {
+            self.tree.set(arvore);
+            self.refazer_itens();
+            if let Some(aviso) = aviso {
+                self.avisar(InfoBarSeverity::Warning, aviso);
+            }
+        }
+        // A trava só é tomada para saber se está livre, e sai na hora: esta cópia continua só de
+        // leitura até reiniciar.
+        if self.so_leitura
+            && self.dona_aberta.get_untracked()
+            && let Ok(crate::armazenamento::Trava::Travada(trava)) =
+                crate::armazenamento::travar(self.armazenamento.pasta())
+        {
+            drop(trava);
+            self.dona_aberta.set(false);
         }
     }
 
@@ -2158,6 +2224,20 @@ impl Tela {
         self.sincronizar_colar();
     }
 
+    /// Os diálogos da árvore aparecem na janela `handle`? Sim se ela é a última ativa, ou se é
+    /// a principal e a última ativa já fechou. Com rastreamento, para o `visible`.
+    fn dialogos_na_janela(&self, handle: WindowHandle) -> bool {
+        let ativa = self.ativa.get();
+        self.janelas
+            .todas()
+            .iter()
+            .position(|j| j.handle == ativa)
+            .map_or_else(
+                || self.janelas.principal().handle == handle,
+                |_| ativa == handle,
+            )
+    }
+
     /// A janela das abas novas: a última ativa ou, se ela já fechou, a principal.
     fn janela_ativa(&self) -> Janela {
         self.janelas
@@ -2467,16 +2547,18 @@ impl Tela {
         grade: (usize, usize),
         geometria: Option<WindowGeometry>,
     ) -> Option<Janela> {
-        self.abrir_janela_titulada(None, grade, geometria)
+        self.abrir_janela_titulada(None, grade, geometria, DockLayout::default())
     }
 
-    /// Como [`Tela::abrir_janela`], com um título que não muda (o cluster usa "Cluster (N)").
-    /// Sem ele, o título é "Janela K", pela posição na lista.
+    /// Como [`Tela::abrir_janela`], com um título que não muda (o cluster usa "Cluster (N)") e os
+    /// painéis Conexões e Propriedades em `paineis` (o vazio é o padrão: os dois fixados à
+    /// esquerda, como na principal). Sem título, ele é "Janela K", pela posição na lista.
     fn abrir_janela_titulada(
         self: &Rc<Self>,
         titulo_fixo: Option<String>,
         grade: (usize, usize),
         geometria: Option<WindowGeometry>,
+        paineis: DockLayout,
     ) -> Option<Janela> {
         let numero = self.janelas.quantas_agora() + 1;
         let inicial = titulo_fixo
@@ -2484,7 +2566,7 @@ impl Tela {
             .unwrap_or_else(|| t!("casca-titulo-da-janela", n = numero));
         let tela = Rc::clone(self);
         self.janelas
-            .abrir(inicial, grade, geometria, move |janela| {
+            .abrir(inicial, grade, geometria, paineis, move |janela| {
                 janela_secundaria(&tela, janela, titulo_fixo)
             })
     }
@@ -2492,7 +2574,8 @@ impl Tela {
     /// Abre `salva` numa janela nova: a grade, a geometria e as abas.
     fn abrir_salva(self: &Rc<Self>, salva: &JanelaSalva, registrar: bool) -> Option<Resolvida> {
         let resolvida = self.tree.with_untracked(|t| salva.resolver(t));
-        let janela = self.abrir_janela(salva.grade, geometria_de(salva))?;
+        let janela =
+            self.abrir_janela_titulada(None, salva.grade, geometria_de(salva), paineis_de(salva))?;
         self.encher(janela, &resolvida, registrar);
         Some(resolvida)
     }
@@ -2578,8 +2661,8 @@ impl Tela {
         self.fechar_se_vazia(origem);
     }
 
-    /// A janela no formato do espaço de trabalho: a grade, as abas e, se o sistema informa, a
-    /// posição e o tamanho de agora. As abas dos assistentes ficam de fora; com `com_ias`, os
+    /// A janela no formato do espaço de trabalho: a grade, as abas, os painéis (de uma
+    /// secundária) e, se o sistema informa, a posição e o tamanho de agora. As abas dos assistentes ficam de fora; com `com_ias`, os
     /// assistentes de cada aba e o de um cluster com IA vão junto (com a conversa), para voltar
     /// quando o espaço (ou o app) reabrir. `None` se a janela já foi descartada.
     fn salva_da_janela(&self, janela: Janela, com_ias: bool) -> Option<JanelaSalva> {
@@ -2594,6 +2677,12 @@ impl Tela {
         if let Some(g) = janela.handle.geometry() {
             salva.posicao = g.position;
             salva.tamanho = Some(g.size);
+        }
+        // Os painéis da principal vão em `Espaco.paineis`, com os das outras páginas.
+        if janela.handle != self.janelas.principal().handle {
+            salva.laterais = janela.paineis.try_with_untracked(|layout| {
+                (*layout != DockLayout::default()).then(|| paineis::de_layout(layout))
+            })?;
         }
         if com_ias {
             salva.cluster_ia = self
@@ -2657,29 +2746,12 @@ impl Tela {
         if self.encerrando.get()
             || self.adiado.get_untracked()
             || self.pendentes.with_untracked(|p| !p.is_empty())
-            || !self.assumir_o_estado()
         {
             return;
         }
         self.resolver_conversas(false);
         let com_ias = self.config.with_untracked(|c| c.ia.conversas_reabrir);
         estado::gravar(&self.armazenamento, &self.estado_atual(com_ias));
-    }
-
-    /// Se esta cópia pode gravar o `estado.json`. Uma cópia aberta depois de outra tenta pegar a
-    /// trava da pasta: consegue quando a primeira já fechou, e daí em diante é a dona.
-    fn assumir_o_estado(&self) -> bool {
-        if !self.estado_alheio.get() {
-            return true;
-        }
-        match crate::armazenamento::travar(self.armazenamento.pasta()) {
-            Ok(crate::armazenamento::Trava::Travada(arquivo)) => {
-                *self.trava_do_estado.borrow_mut() = Some(arquivo);
-                self.estado_alheio.set(false);
-                true
-            }
-            Ok(crate::armazenamento::Trava::Ocupada) | Err(_) => false,
-        }
     }
 
     // --- Espaços de trabalho ---
@@ -2916,7 +2988,12 @@ impl Tela {
                 continue;
             }
             if em_janelas_novas
-                && let Some(janela) = self.abrir_janela(salva.grade, geometria_de(salva))
+                && let Some(janela) = self.abrir_janela_titulada(
+                    None,
+                    salva.grade,
+                    geometria_de(salva),
+                    paineis_de(salva),
+                )
             {
                 self.encher(janela, &resolvida, false);
             } else {
@@ -3524,6 +3601,15 @@ fn painel_livre(l: &PaneLayout) -> usize {
         .unwrap_or_else(|| l.active())
 }
 
+/// Os painéis Conexões e Propriedades que `salva` guardou, ou o vazio (o padrão).
+fn paineis_de(salva: &JanelaSalva) -> DockLayout {
+    salva
+        .laterais
+        .as_ref()
+        .map(paineis::para_layout)
+        .unwrap_or_default()
+}
+
 /// A geometria de uma janela salva, sem posições e tamanhos absurdos (um monitor que saiu).
 fn geometria_de(salva: &JanelaSalva) -> Option<WindowGeometry> {
     let position = salva
@@ -4115,8 +4201,10 @@ fn subtitulo_da_janela(
     }
 }
 
-/// A tela de uma janela secundária: a barra de título, a mesma barra de menus da principal e os
-/// painéis de terminais. Sem a árvore, as propriedades e a navegação: estas só existem na principal.
+/// A tela de uma janela secundária: a barra de título, a mesma barra de menus da principal, os
+/// painéis de terminais e, encaixados, as Conexões e as Propriedades. A árvore, a seleção e o
+/// filtro são os mesmos da principal; o arranjo dos painéis é de cada janela (`Janela.paineis`),
+/// com o menu Exibir dela. A navegação, o chat e as portas só existem na principal.
 fn janela_secundaria(
     tela: &Rc<Tela>,
     janela: Janela,
@@ -4159,7 +4247,8 @@ fn janela_secundaria(
         });
     }
 
-    let menus = menus::barra_de_menus(tela, janela);
+    let controle = DockController::new();
+    let menus = menus::barra_de_menus(tela, janela, &controle);
     let cabecalho = Row::new()
         .gap(8)
         .align(Align::Center)
@@ -4218,8 +4307,46 @@ fn janela_secundaria(
         .child(
             Column::new()
                 .child(cabecalho)
-                .child(area_de_terminais(tela, janela, false))
+                .child(paineis_da_secundaria(tela, janela, &controle))
+                .child(dialogos_da_arvore(tela, handle))
                 .child(dialogo),
+        )
+}
+
+/// Os terminais de uma janela secundária com as Conexões e as Propriedades encaixadas, no
+/// arranjo de `janela.paineis`.
+fn paineis_da_secundaria(tela: &Rc<Tela>, janela: Janela, controle: &DockController) -> DockHost {
+    let conexoes = {
+        let tela = Rc::clone(tela);
+        move || painel_conexoes(&tela)
+    };
+    let propriedades = {
+        let tela = Rc::clone(tela);
+        move || painel_propriedades(&tela)
+    };
+    DockHost::new(area_de_terminais(tela, janela, false))
+        .id("terminais-paineis")
+        .layout(janela.paineis)
+        .controller(controle)
+        .min_content(320.0)
+        .pane(
+            DockPane::new(
+                "conexoes",
+                Symbol::Server,
+                t!("casca-painel-conexoes"),
+                conexoes,
+            )
+            .size(340.0)
+            .min_size(160.0),
+        )
+        .pane(
+            DockPane::new(
+                "propriedades",
+                Symbol::Info,
+                t!("casca-painel-propriedades"),
+                propriedades,
+            )
+            .min_size(160.0),
         )
 }
 
@@ -4244,21 +4371,15 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
     let cofre = tela.cofre.clone();
     let Tela {
         tree,
-        itens,
         selecionado,
-        abertos,
         filtro,
         filtro_aberto,
-        renomeando,
         campos,
-        apagar,
-        apagar_espaco,
         pendentes,
         vigiadas,
         ..
     } = *tela;
 
-    let config = tela.config;
     let principal = tela.janelas.principal();
     let envio = principal.envio;
     let atalhos = tela.atalhos_aberto;
@@ -4311,9 +4432,9 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
     let adiado = tela.adiado;
     // Uma segunda cópia do app abre sem as abas: elas já estão abertas na primeira.
     let estado_anterior = (tela.config.with_untracked(|c| c.geral.restaurar_sessoes)
-        && !tela.estado_alheio.get())
-    .then(|| estado::ler(&tela.armazenamento))
-    .flatten();
+        && !tela.so_leitura)
+        .then(|| estado::ler(&tela.armazenamento))
+        .flatten();
 
     // As abas da última execução voltam antes de começar a gravar o estado novo.
     if let Some(estado) = estado_anterior {
@@ -4393,12 +4514,14 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
     tela.acompanhar_downloads();
     tela.ligar_rclone();
     {
-        // Qualquer mudança nas janelas (abas, grade, janela aberta ou fechada) grava o estado.
+        // Qualquer mudança nas janelas (abas, grade, painéis, janela aberta ou fechada) grava o
+        // estado.
         let t = Rc::clone(&tela);
         effect(move || {
             for janela in t.janelas.todas() {
                 let _ = janela.layout.try_get();
                 let _ = janela.grade.try_get();
+                let _ = janela.paineis.try_get();
             }
             let _ = t.pendentes.get();
             let _ = adiado.get();
@@ -4503,26 +4626,17 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
         });
     }
     // --- Menus ---
-    let barra_menus = menus::barra_de_menus(&tela, principal);
+    let barra_menus = menus::barra_de_menus(&tela, principal, &tela.paineis_terminais.controle);
 
     let botoes_envio = envio.botoes();
 
     // --- Árvore ---
-    // Subir e descer só valem para as conexões; o grupo dos espaços não se apaga.
-    let sem_conexao_escolhida = move || {
-        selecionado
-            .get()
-            .is_none_or(|c| ChaveDeEspaco::de(&c).is_some())
-    };
-    let sem_apagar = move || {
-        selecionado
-            .get()
-            .is_none_or(|c| ChaveDeEspaco::de(&c) == Some(ChaveDeEspaco::Raiz))
-    };
-    // A lupa ligada põe o cursor no campo; desligada, o filtro se limpa e a árvore volta inteira.
+    // A lupa ligada põe o cursor no campo da janela onde ela foi ligada (a ativa: o efeito roda
+    // no quadro de qualquer janela); desligada, o filtro se limpa e a árvore volta inteira.
+    let ativa = tela.ativa;
     effect(move || {
         if filtro_aberto.get() {
-            request_focus("filtro");
+            request_focus_in(untrack(|| ativa.get()), "filtro");
         } else {
             untrack(|| filtro.set(String::new()));
         }
@@ -4531,391 +4645,18 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
     // em signals da `Tela`.
     let montar_lista = {
         let tela = Rc::clone(&tela);
-        move || {
-            let botoes = Row::new()
-                .gap(2)
-                .child(
-                    Button::icon_only(Symbol::Add)
-                        .id("nova-conexao")
-                        .label(t!("comum-nova-conexao"))
-                        .on_click(acao(&tela, |t| t.nova_conexao())),
-                )
-                .child(
-                    Button::icon_only(Symbol::FolderAdd)
-                        .id("novo-grupo")
-                        .label(t!("casca-novo-grupo"))
-                        .on_click(acao(&tela, |t| t.novo_grupo())),
-                )
-                .child(
-                    Button::icon_only(Symbol::ArrowUp)
-                        .id("subir")
-                        .label(t!("casca-subir"))
-                        .disabled(sem_conexao_escolhida)
-                        .on_click(acao(&tela, |t| t.subir())),
-                )
-                .child(
-                    Button::icon_only(Symbol::ArrowDown)
-                        .id("descer")
-                        .label(t!("casca-descer"))
-                        .disabled(sem_conexao_escolhida)
-                        .on_click(acao(&tela, |t| t.descer())),
-                )
-                .child(
-                    Button::icon_only(Symbol::Delete)
-                        .id("apagar")
-                        .label(t!("comum-apagar"))
-                        .disabled(sem_apagar)
-                        .on_click(move || pedir_apagar(selecionado, apagar, apagar_espaco)),
-                )
-                .child(
-                    ToggleButton::icon_only(filtro_aberto, Symbol::Search)
-                        .id("filtrar")
-                        .label(t!("casca-filtrar-as-conexoes")),
-                );
-            // O campo do filtro fica logo abaixo da barra, enquanto a lupa está ligada; o Esc
-            // desliga a lupa e devolve o foco à árvore.
-            let campo_filtro = Column::new()
-                .visible(move || filtro_aberto.get())
-                .accelerator(Shortcut::key(Key::Escape), move || {
-                    filtro_aberto.set(false);
-                    request_focus("arvore");
-                })
-                .child(
-                    Edit::bind(filtro)
-                        .id("filtro")
-                        .placeholder(t!("casca-nome-ip-usuario-ou-descricao")),
-                );
-
-            let arvore = {
-                let invocar = Rc::clone(&tela);
-                let renomear = Rc::clone(&tela);
-                let mover = Rc::clone(&tela);
-                estado_conexoes::com_estado(TreeView::bind(itens, selecionado), &tela)
-                    .id("arvore")
-                    .grow(1)
-                    .expanded(abertos)
-                    .filter(filtro)
-                    .renaming(renomeando)
-                    .on_invoke(move |chave| match ChaveDeEspaco::de(&chave) {
-                        Some(ChaveDeEspaco::Espaco(caminho)) => {
-                            invocar.abrir_espaco(&caminho, ComoAbrir::Padrao);
-                        }
-                        Some(_) => {}
-                        None => {
-                            if let Ok(id) = chave.parse() {
-                                invocar.abrir(id, invocar.lugar_novo());
-                            }
-                        }
-                    })
-                    .on_rename(move |chave, texto| match ChaveDeEspaco::de(&chave) {
-                        Some(espaco) => renomear.renomear_espaco(&espaco, &texto),
-                        None => renomear.renomear(&chave, &texto),
-                    })
-                    .on_delete(move |chave| {
-                        selecionado.set(Some(chave));
-                        pedir_apagar(selecionado, apagar, apagar_espaco);
-                    })
-                    .on_move(move |chave, pai, posicao| match ChaveDeEspaco::de(&chave) {
-                        Some(espaco) => mover.mover_espaco(&espaco, pai.as_deref()),
-                        None => mover.mover(&chave, pai.as_deref(), posicao),
-                    })
-                    .can_drop(pode_soltar)
-                    .item_context_flyout({
-                        let t = Rc::clone(&tela);
-                        move |chave| {
-                            if let Some(espaco) = ChaveDeEspaco::de(chave) {
-                                return menu_de_espaco(&t, chave, &espaco);
-                            }
-                            let id = chave.parse().unwrap_or(0);
-                            let abrir = Rc::clone(&t);
-                            let chave_renomear = chave.to_owned();
-                            let chave_copiar = chave.to_owned();
-                            let eh_ssh = t.tree.with_untracked(|tr| {
-                                tr.connection(id).map(|c| c.kind == Kind::Ssh)
-                            }) == Some(true);
-                            let aceita_sessao = t.tree.with_untracked(|tr| {
-                                tr.connection(id).is_some_and(tmux::aceita_sessao)
-                            });
-                            let usa_ssh = t
-                                .tree
-                                .with_untracked(|tr| tr.connection(id).map(|c| c.kind.usa_ssh()))
-                                == Some(true);
-                            // Numa pasta, "Abrir" e "Abrir todas em" valem para as conexões de terminal
-                            // dela (em qualquer profundidade).
-                            let eh_grupo = t
-                                .tree
-                                .with_untracked(|tr| matches!(tr.find(id), Some(Node::Group(_))));
-                            let alvo = if eh_grupo {
-                                AlvoAbrir::Pasta(id)
-                            } else {
-                                AlvoAbrir::Conexao(id)
-                            };
-                            let com_terminal = Rc::clone(&t);
-                            let mut menu = MenuFlyout::new()
-                                .id(format!("menu-{chave}"))
-                                .item(
-                                    format!("menu-{chave}-abrir"),
-                                    if eh_grupo {
-                                        t!("casca-abrir-todas")
-                                    } else {
-                                        t!("comum-abrir")
-                                    },
-                                    move || {
-                                        if eh_grupo {
-                                            abrir.abrir_pasta(id);
-                                        } else {
-                                            abrir.abrir(id, abrir.lugar_novo());
-                                        }
-                                    },
-                                )
-                                .icon(Symbol::Open);
-                            if eh_grupo {
-                                menu = menu.item_visible(move || com_terminal.tem_terminal(alvo));
-                            }
-                            let base = if eh_grupo {
-                                format!("menu-{chave}-todas")
-                            } else {
-                                format!("menu-{chave}")
-                            };
-                            abrir_em::com_abrir_em(&t, menu, &base, alvo)
-                                .submenu(
-                                    format!("menu-{chave}-todas-ia"),
-                                    t!("casca-abrir-todas-com-ia"),
-                                    cluster::submenu_da_pasta(
-                                        &t,
-                                        &format!("menu-{chave}-todas-ia"),
-                                        id,
-                                    ),
-                                )
-                                .icon(Symbol::Sparkle)
-                                .item_visible({
-                                    let t = Rc::clone(&t);
-                                    move || {
-                                        eh_grupo
-                                            && t.tem_terminal(alvo)
-                                            && t.config.with(|c| {
-                                                Ferramenta::TODAS
-                                                    .into_iter()
-                                                    .any(|f| c.ia.mostra(f))
-                                            })
-                                    }
-                                })
-                                .item(
-                                    format!("menu-{chave}-ir-para-aba"),
-                                    t!("casca-ir-para-a-aba"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || t.ir_para_a_aba(id)
-                                    },
-                                )
-                                .icon(Symbol::Next)
-                                .item_visible({
-                                    let t = Rc::clone(&t);
-                                    move || !eh_grupo && t.linha_com_sessao(id)
-                                })
-                                .item(
-                                    format!("menu-{chave}-reconectar"),
-                                    t!("casca-reconectar"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || t.reconectar_linha(id)
-                                    },
-                                )
-                                .icon(Symbol::ArrowSync)
-                                .item_visible({
-                                    let t = Rc::clone(&t);
-                                    move || t.linha_com_queda(id)
-                                })
-                                .item(
-                                    format!("menu-{chave}-cluster"),
-                                    t!("casca-abrir-em-modo-cluster"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || {
-                                            let previas = t.previas_do_cluster(id);
-                                            t.abrir_dialogo_do_cluster(&previas, false);
-                                        }
-                                    },
-                                )
-                                .icon(Symbol::Grid)
-                                .item_visible({
-                                    let t = Rc::clone(&t);
-                                    move || t.tem_terminal(alvo)
-                                })
-                                .item(
-                                    format!("menu-{chave}-cluster-ia"),
-                                    t!("casca-abrir-em-cluster-com-ia"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || {
-                                            let previas = t.previas_do_cluster(id);
-                                            t.abrir_dialogo_do_cluster(&previas, true);
-                                        }
-                                    },
-                                )
-                                .icon(Symbol::Sparkle)
-                                .item_visible({
-                                    let t = Rc::clone(&t);
-                                    move || t.tem_terminal(alvo)
-                                })
-                                .item(format!("menu-{chave}-script"), t!("casca-rodar-script"), {
-                                    let t = Rc::clone(&t);
-                                    move || t.abrir_scripts(&t.previas_de_scripts(id))
-                                })
-                                .icon(Symbol::Code)
-                                .item_visible({
-                                    let t = Rc::clone(&t);
-                                    move || {
-                                        t.tree.with(|tr| {
-                                            if eh_grupo {
-                                                tr.connections_in(id)
-                                                    .iter()
-                                                    .any(|c| c.kind == Kind::Ssh)
-                                            } else {
-                                                tr.connection(id)
-                                                    .is_some_and(|c| c.kind == Kind::Ssh)
-                                            }
-                                        })
-                                    }
-                                })
-                                .item(
-                                    format!("menu-{chave}-arquivos"),
-                                    t!("casca-abrir-arquivos-sftp"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || t.abrir_arquivos(id)
-                                    },
-                                )
-                                .icon(Symbol::Folder)
-                                .item_visible(usa_ssh)
-                                .submenu(
-                                    format!("menu-{chave}-ia"),
-                                    t!("ia-remoto-menu"),
-                                    ia::submenu_ia(
-                                        &t,
-                                        &format!("menu-{chave}-ia"),
-                                        ia::AlvoIa::Conexao(id),
-                                    ),
-                                )
-                                .icon(Symbol::Sparkle)
-                                .item_visible(eh_ssh)
-                                .item(
-                                    format!("menu-{chave}-virt-manager"),
-                                    t!("casca-abrir-virt-manager"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || t.abrir_virt_manager(id)
-                                    },
-                                )
-                                .icon(Symbol::Desktop)
-                                .item_visible(eh_ssh)
-                                .item(
-                                    format!("menu-{chave}-virt-manager-local"),
-                                    t!("casca-abrir-virt-manager-local"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || t.abrir_virt_manager_local(id)
-                                    },
-                                )
-                                .icon(Symbol::Desktop)
-                                .item_visible({
-                                    let t = Rc::clone(&t);
-                                    move || eh_ssh && t.opener.virt_manager_local()
-                                })
-                                .item(
-                                    format!("menu-{chave}-executar"),
-                                    t!("casca-executar-aplicativo-grafico-remoto"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || t.abrir_executar(id)
-                                    },
-                                )
-                                .icon(Symbol::Play)
-                                .item_visible(eh_ssh)
-                                .item(format!("menu-{chave}-tuneis"), t!("casca-tuneis"), {
-                                    let t = Rc::clone(&t);
-                                    let chave = chave.to_owned();
-                                    move || t.abrir_tuneis_de(&chave)
-                                })
-                                .icon(Symbol::Link)
-                                .item_visible(eh_ssh)
-                                .item(format!("menu-{chave}-sessoes"), t!("sessoes-menu"), {
-                                    let t = Rc::clone(&t);
-                                    move || t.abrir_sessoes_do_servidor(id)
-                                })
-                                .icon(Symbol::AppsList)
-                                .item_visible(aceita_sessao)
-                                .submenu(
-                                    format!("menu-{chave}-mcp"),
-                                    t!("mcp-arvore-menu"),
-                                    mcp_propriedades::menu_da_arvore(&t, chave, id),
-                                )
-                                .icon(Symbol::Sparkle)
-                                .item_visible({
-                                    let t = Rc::clone(&t);
-                                    move || t.config.with(|c| c.ia.mcp_ligado)
-                                })
-                                .item(
-                                    format!("menu-{chave}-renomear"),
-                                    t!("comum-renomear"),
-                                    move || {
-                                        renomeando.set(Some(chave_renomear.clone()));
-                                    },
-                                )
-                                .icon(Symbol::Rename)
-                                .item(format!("menu-{chave}-duplicar"), t!("comum-duplicar"), {
-                                    let t = Rc::clone(&t);
-                                    move || t.duplicar_conexao(id)
-                                })
-                                .icon(Symbol::Copy)
-                                .item_visible(move || !eh_grupo)
-                                .item(
-                                    format!("menu-{chave}-copiar-chave"),
-                                    t!("casca-copiar-a-chave-para-o-servidor"),
-                                    {
-                                        let t = Rc::clone(&t);
-                                        move || {
-                                            t.selecionado.set(Some(chave_copiar.clone()));
-                                            t.abrir_copiar_chave(None);
-                                        }
-                                    },
-                                )
-                                .icon(Symbol::Send)
-                                .item_visible(eh_ssh)
-                                .separator()
-                                .item(
-                                    format!("menu-{chave}-apagar"),
-                                    t!("comum-apagar"),
-                                    move || apagar.set(true),
-                                )
-                                .icon(Symbol::Delete)
-                        }
-                    })
-            };
-
-            let arvore_vazia = move || tree.with(|t| t.nodes.is_empty());
-            Column::new()
-                .gap(4)
-                .padding(Insets::new(4.0, 4.0, 4.0, 8.0))
-                .child(botoes)
-                .child(campo_filtro)
-                .child(
-                    Text::new(t!("casca-nenhuma-conexao-use-arquivo-nova-conexao"))
-                        .id("dica-vazia")
-                        .secondary()
-                        .wrap()
-                        .visible(arvore_vazia),
-                )
-                .child(arvore)
-        }
+        move || painel_conexoes(&tela)
     };
 
     // --- Propriedades ---
+    let Tela {
+        resumo_tuneis,
+        resumo_comandos,
+        ..
+    } = *tela;
     // O resumo da linha "Túneis" ("Nenhum", "1 túnel"…) acompanha a lista da conexão.
-    let resumo_tuneis = signal(String::new());
     effect(move || resumo_tuneis.set(resumo_dos_tuneis(campos.tuneis.with(Vec::len))));
     // O resumo da linha "Comandos" acompanha os passos e o que a pasta passa.
-    let resumo_comandos = signal(String::new());
     effect(move || {
         let comandos = campos.comandos.get();
         let id = selecionado.get().and_then(|k| k.parse::<u64>().ok());
@@ -4926,464 +4667,7 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
     });
     let montar_propriedades = {
         let tela = Rc::clone(&tela);
-        let cofre = cofre.clone();
-        move || {
-            // O tipo da conexão escolhida e a tabela de campos (M60): a grade esconde o que nunca vale
-            // para o tipo e só desabilita o que depende de outro campo. Os valores escondidos ficam.
-            let tipo = move || {
-                Kind::TODOS
-                    .into_iter()
-                    .find(|k| campos.tipo.get() == k.nome())
-            };
-            let esconde = move |campo: CampoDaGrade| move || !tipo().is_some_and(|k| campo.vale(k));
-            let usa_ssh = move || tipo().is_some_and(Kind::usa_ssh);
-            // A porta padrão do tipo (a da segurança, no FTP): a Porta só fica em negrito se difere.
-            let porta_padrao = move || {
-                let porta = match tipo() {
-                    Some(Kind::Ftp) => FtpSeguranca::TODAS
-                        .into_iter()
-                        .find(|s| campos.ftp_seguranca.get() == s.nome())
-                        .unwrap_or_default()
-                        .porta_padrao(),
-                    Some(k) => k.porta_padrao(),
-                    None => Kind::Ssh.porta_padrao(),
-                };
-                i32::from(porta)
-            };
-            let sem_ca = move || campos.s3_certificado.get() != S3Certificado::CaPropria.nome();
-            let ftp_ativo = move || campos.ftp_modo.get() == FtpModo::Ativo.nome();
-            let sem_salto = move || campos.jump_host.get().trim().is_empty();
-            let sem_conexao = move || {
-                let _ = selecionado.get();
-                tree.with(|t| {
-                    selecionado
-                        .get_untracked()
-                        .and_then(|k| k.parse::<u64>().ok())
-                        .and_then(|id| t.connection(id))
-                        .is_none()
-                })
-            };
-            // O perfil de rede efetivo da conexão escolhida tem proxy (o FTP ativo não passa por ele).
-            let com_proxy = move || {
-                let _ = selecionado.get();
-                tree.with(|t| {
-                    selecionado
-                        .get_untracked()
-                        .and_then(|k| k.parse::<u64>().ok())
-                        .and_then(|id| rede_efetiva(t, id))
-                        .is_some_and(|p| p.proxy.is_some() || p.e_embutida())
-                })
-            };
-            let e_grupo = move || {
-                let _ = selecionado.get();
-                tree.with(|t| {
-                    selecionado
-                        .get_untracked()
-                        .and_then(|k| k.parse::<u64>().ok())
-                        .is_some_and(|id| matches!(t.find(id), Some(Node::Group(_))))
-                })
-            };
-            let perfis_de_ia = tela.assistente.perfis;
-            let propriedades = PropertyGrid::new()
-                .id("props")
-                .grow(1)
-                .category(t!("casca-conexao"))
-                .text(t!("comum-nome"), move || campos.nome)
-                .description(t!("casca-o-nome-da-conexao-na-arvore"))
-                .text(t!("casca-descricao"), move || campos.descricao)
-                .description(t!("casca-um-texto-livre-sobre-a-conexao"))
-                .choice(
-                    t!("comum-tipo"),
-                    move || campos.tipo,
-                    Kind::TODOS.map(Kind::nome),
-                )
-                .default(Kind::Ssh.nome())
-                .description(t!("casca-ssh-sftp-ftp-s3-ou-rclone"))
-                .text(t!("comum-host"), move || campos.host)
-                .hidden(esconde(CampoDaGrade::Host))
-                .description(t!("casca-nome-ou-endereco-do-servidor-no"))
-                .number(t!("comum-porta"), move || campos.porta, 0.0..=65535.0)
-                .default_with(porta_padrao)
-                .hidden(esconde(CampoDaGrade::Porta))
-                .description(t!("casca-a-porta-do-servidor-ssh-e"))
-                .text(t!("comum-usuario"), move || campos.usuario)
-                .hidden(esconde(CampoDaGrade::Usuario))
-                .description(t!("casca-o-usuario-no-servidor-no-s3"))
-                .choice_from(t!("comum-credencial"), move || campos.credencial, {
-                    let cofre = cofre.clone();
-                    move || opcoes_de_credencial_da_conexao(&cofre, usa_ssh())
-                })
-                .disabled({
-                    let cofre = cofre.clone();
-                    move || cofre.ler(|c| c.bloqueado())
-                })
-                .default(perguntar())
-                .hidden(esconde(CampoDaGrade::Login))
-                .description(t!("casca-credencial-da-conexao-descricao"))
-                .password(t!("comum-senha"), move || campos.senha)
-                .disabled({
-                    let cofre = cofre.clone();
-                    move || cofre.ler(|c| c.bloqueado())
-                })
-                .hidden(esconde(CampoDaGrade::Login))
-                .description(t!("casca-a-senha-do-item-da-credencial"))
-                .choice_from(t!("casca-chave-do-cofre"), move || campos.chave_cofre, {
-                    let cofre = cofre.clone();
-                    move || opcoes_de_chave_do_cofre(&cofre)
-                })
-                .disabled({
-                    let cofre = cofre.clone();
-                    move || cofre.ler(|c| c.bloqueado())
-                })
-                .default(sem_chave_do_cofre())
-                .hidden(esconde(CampoDaGrade::ChaveSsh))
-                .description(t!("casca-uma-chave-ssh-guardada-no-cofre"))
-                .file(t!("casca-chave-privada"), move || campos.chave)
-                .hidden(esconde(CampoDaGrade::ChaveSsh))
-                .description(t!("casca-o-arquivo-da-chave-openssh-pem"))
-                .category(t!("comum-rede"))
-                .choice_from(
-                    t!("comum-rede"),
-                    move || campos.rede,
-                    move || redes::opcoes_da_selecao(tree, selecionado),
-                )
-                .hidden(esconde(CampoDaGrade::Rede))
-                .description(t!("casca-por-onde-a-conexao-sai-a"))
-                .category(t!("ia-conexao-categoria"))
-                .choice_from(
-                    t!("ia-conexao-linha"),
-                    move || campos.perfil_ia,
-                    move || assistente::opcoes_de_perfil_ia(perfis_de_ia),
-                )
-                .hidden(esconde(CampoDaGrade::Ia))
-                .description(t!("ia-conexao-descricao"))
-                .category(t!("mcp-categoria"))
-                .choice_from(
-                    t!("mcp-linha"),
-                    move || campos.mcp,
-                    move || mcp_propriedades::opcoes_da_selecao(tree, selecionado),
-                )
-                .hidden(esconde(CampoDaGrade::Mcp))
-                .description(t!("mcp-linha-descricao"))
-                .category("S3")
-                .hidden(esconde(CampoDaGrade::S3))
-                .choice(
-                    t!("casca-provedor"),
-                    move || campos.s3_provedor,
-                    S3Provedor::TODOS.map(S3Provedor::nome),
-                )
-                .default(S3Provedor::Amazon.nome())
-                .description(t!("casca-s3-provedor-descricao"))
-                .text(t!("comum-endereco"), move || campos.s3_endpoint)
-                .description(t!("casca-o-endereco-do-servico-https-s3"))
-                .text(t!("casca-regiao"), move || campos.s3_regiao)
-                .default("us-east-1")
-                .description(t!("casca-a-regiao-do-bucket-us-east"))
-                .text(t!("casca-bucket"), move || campos.s3_bucket)
-                .description(t!("casca-o-bucket-que-a-conexao-abre"))
-                .choice(
-                    t!("casca-estilo-da-url"),
-                    move || campos.s3_estilo,
-                    S3Estilo::TODOS.map(S3Estilo::nome),
-                )
-                .default(S3Estilo::Caminho.nome())
-                .description(t!("casca-caminho-servidor-bucket-minio-ceph-virtual"))
-                .password(t!("casca-token-de-sessao"), move || campos.s3_token)
-                .disabled({
-                    let cofre = cofre.clone();
-                    move || cofre.ler(|c| c.bloqueado())
-                })
-                .description(t!("casca-o-token-das-chaves-temporarias-da"))
-                .category(t!("casca-s3-avancado"))
-                .hidden(esconde(CampoDaGrade::S3))
-                .collapsed()
-                .text(t!("casca-classe-de-armazenamento"), move || {
-                    campos.s3_classe
-                })
-                .description(t!("casca-a-classe-dos-arquivos-enviados-standard"))
-                .choice(
-                    t!("casca-certificado"),
-                    move || campos.s3_certificado,
-                    S3Certificado::TODOS.map(S3Certificado::nome),
-                )
-                .default(S3Certificado::Verificar.nome())
-                .description(t!("casca-como-o-certificado-do-servidor-e"))
-                .file(t!("casca-arquivo-da-ca"), move || campos.s3_ca)
-                .disabled(sem_ca)
-                .description(t!("casca-o-arquivo-pem-da-autoridade-que"))
-                .category(t!("casca-rclone"))
-                .hidden(esconde(CampoDaGrade::Rclone))
-                .text(t!("comum-remoto"), move || campos.rclone_remoto)
-                .description(t!("casca-o-nome-do-remoto-do-rclone"))
-                .text(t!("casca-caminho"), move || campos.rclone_caminho)
-                .description(t!("casca-a-pasta-do-remoto-em-que"))
-                .category("FTP")
-                .hidden(esconde(CampoDaGrade::Ftp))
-                .choice(
-                    t!("casca-seguranca"),
-                    move || campos.ftp_seguranca,
-                    FtpSeguranca::TODAS.map(FtpSeguranca::nome),
-                )
-                .default(FtpSeguranca::default().nome())
-                .description(t!("casca-como-a-conexao-e-protegida-ftp"))
-                .choice(
-                    t!("casca-modo"),
-                    move || campos.ftp_modo,
-                    FtpModo::TODOS.map(FtpModo::nome),
-                )
-                .disabled(com_proxy)
-                .default(FtpModo::default().nome())
-                .description(t!("casca-passivo-este-computador-abre-a-conexao"))
-                .category(t!("casca-ftp-avancado"))
-                .hidden(esconde(CampoDaGrade::Ftp))
-                .collapsed()
-                .choice(
-                    t!("casca-versao-do-tls"),
-                    move || campos.ftp_tls,
-                    FtpTls::TODAS.map(FtpTls::nome),
-                )
-                .default(FtpTls::Auto.nome())
-                .description(t!("casca-automatica-usa-o-tls-1-3"))
-                .choice(
-                    t!("casca-codificacao"),
-                    move || campos.ftp_codificacao,
-                    FtpCodificacao::TODAS.map(FtpCodificacao::nome),
-                )
-                .default(FtpCodificacao::Auto.nome())
-                .description(t!("casca-a-codificacao-dos-nomes-de-arquivo"))
-                .number(
-                    t!("casca-fuso-do-servidor"),
-                    move || campos.ftp_fuso,
-                    -840.0..=840.0,
-                )
-                .default(0)
-                .description(t!("casca-minutos-a-leste-do-utc-em"))
-                .text(t!("casca-portas-do-modo-ativo"), move || campos.ftp_portas)
-                .disabled(move || !ftp_ativo() || com_proxy())
-                .description(t!("casca-a-faixa-de-portas-em-que"))
-                .category(t!("casca-sessao"))
-                .choice(t!("casca-tipo-de-terminal"), move || campos.term, TERMINAIS)
-                .default(TERMINAIS[0])
-                .hidden(esconde(CampoDaGrade::TipoDeTerminal))
-                .description(t!("casca-o-term-que-o-servidor-recebe"))
-                .file(t!("casca-log"), move || campos.log)
-                .hidden(esconde(CampoDaGrade::Log))
-                .description(t!("casca-o-arquivo-onde-a-saida-da"))
-                .number(
-                    t!("casca-keepalive"),
-                    move || campos.keepalive,
-                    0.0..=3600.0,
-                )
-                .default(30)
-                .hidden(esconde(CampoDaGrade::SessaoSsh))
-                .description(t!("casca-segundos-entre-os-sinais-de-vida"))
-                .check(t!("casca-comprimir-a-conexao"), move || campos.comprimir)
-                .hidden(esconde(CampoDaGrade::SessaoSsh))
-                .description(t!("casca-comprime-o-que-passa-pela-conexao"))
-                .choice_from(
-                    t!("tmux-linha"),
-                    move || campos.persistente,
-                    move || sessao_tmux::opcoes_da_selecao(tree, selecionado),
-                )
-                .hidden(esconde(CampoDaGrade::Persistente))
-                .description(t!("tmux-linha-descricao"))
-                .text(t!("casca-programa"), move || campos.local_programa)
-                .hidden(esconde(CampoDaGrade::Programa))
-                .description(t!("casca-o-programa-que-o-terminal-desta"))
-                .text(t!("casca-argumentos"), move || campos.local_argumentos)
-                .hidden(esconde(CampoDaGrade::Programa))
-                .description(t!("casca-os-argumentos-do-programa-numa-linha"))
-                .folder(t!("casca-pasta-inicial"), move || campos.local_pasta)
-                .hidden(esconde(CampoDaGrade::Programa))
-                .description(t!("casca-a-pasta-onde-o-terminal-local-comeca"))
-                .category(t!("casca-colar-no-terminal"))
-                .hidden(esconde(CampoDaGrade::Colar))
-                .choice_from(
-                    t!("casca-ao-colar"),
-                    move || campos.colar_arquivos,
-                    opcoes_de_colar,
-                )
-                .default(rotulo_de_colar(None))
-                .description(t!("casca-o-que-fazer-ao-colar-imagem"))
-                .text(t!("casca-pasta-no-servidor"), move || campos.pasta_colar)
-                .default("")
-                .description(t!("casca-onde-o-que-e-colado-fica"))
-                .choice(
-                    t!("casca-shell-do-servidor"),
-                    move || campos.shell_remoto,
-                    ShellRemoto::TODOS.map(ShellRemoto::nome),
-                )
-                .default(ShellRemoto::Automatico.nome())
-                .description(t!("casca-o-shell-que-recebe-o-caminho"))
-                .category(t!("ia-remoto-categoria"))
-                .hidden(esconde(CampoDaGrade::IaNoServidor))
-                .collapsed()
-                .text(t!("ia-remoto-pasta"), move || campos.ia_pasta)
-                .default("")
-                .description(t!("ia-remoto-pasta-descricao"))
-                .choice_from(
-                    t!("ia-remoto-instalar-por"),
-                    move || campos.ia_metodo,
-                    ia::opcoes_de_metodo,
-                )
-                .default(ia::rotulo_do_metodo(None))
-                .description(t!("ia-remoto-instalar-por-descricao"))
-                .text(t!("ia-remoto-argumentos-claude"), move || {
-                    campos.ia_argumentos[0]
-                })
-                .default("")
-                .description(t!("ia-remoto-argumentos-descricao"))
-                .text(t!("ia-remoto-argumentos-codex"), move || {
-                    campos.ia_argumentos[1]
-                })
-                .default("")
-                .description(t!("ia-remoto-argumentos-descricao"))
-                .text(t!("ia-remoto-argumentos-opencode"), move || {
-                    campos.ia_argumentos[2]
-                })
-                .default("")
-                .description(t!("ia-remoto-argumentos-descricao"))
-                .category(t!("casca-arquivos"))
-                .hidden(esconde(CampoDaGrade::Arquivos))
-                .folder(t!("casca-pasta-local-padrao"), move || campos.pasta_local)
-                .description(t!("casca-a-pasta-do-computador-em-que"))
-                .text(t!("casca-pasta-remota-padrao"), move || campos.pasta_remota)
-                .description(t!("casca-a-pasta-do-servidor-em-que"))
-                .choice(
-                    t!("comum-comparar-pastas"),
-                    move || campos.comparar,
-                    Ativar::TODOS.map(Ativar::nome),
-                )
-                .default(Ativar::Padrao.nome())
-                .description(t!("casca-abre-os-dois-paineis-ja-comparando"))
-                .choice(
-                    t!("casca-sincronizar-pastas"),
-                    move || campos.sincronizar_pastas,
-                    Ativar::TODOS.map(Ativar::nome),
-                )
-                .default(Ativar::Padrao.nome())
-                .description(t!("casca-abre-os-dois-paineis-navegando-juntos"))
-                .category(t!("comandos-categoria"))
-                .hidden(esconde(CampoDaGrade::Comandos))
-                .button(t!("comandos-linha"), move || resumo_comandos, {
-                    let t = Rc::clone(&tela);
-                    move || t.abrir_comandos()
-                })
-                .description(t!("comandos-descricao-da-linha"))
-                .category(t!("casca-encaminhamento"))
-                .hidden(esconde(CampoDaGrade::Encaminhamento))
-                .choice_from(
-                    t!("casca-encaminhar-x11"),
-                    move || campos.x11,
-                    move || opcoes_de_x11(config.with(|c| c.x11.padrao)),
-                )
-                .default(ModoX11::Padrao.nome())
-                .description(t!("casca-mostra-aqui-as-janelas-dos-programas"))
-                .button(t!("casca-tuneis-linha"), move || resumo_tuneis, {
-                    let t = Rc::clone(&tela);
-                    move || t.abrir_tuneis()
-                })
-                .description(t!("casca-portas-que-o-ssh-encaminha-local"))
-                .check(t!("casca-so-tuneis-sem-shell"), move || campos.so_tuneis)
-                .description(t!("casca-a-conexao-so-segura-os-tuneis"))
-                .check(t!("casca-parar-se-tunel-falhar"), move || {
-                    campos.parar_se_falhar
-                })
-                .description(t!("casca-como-o-exitonforwardfailure-se-uma-porta"))
-                .category(t!("casca-jump-server"))
-                .hidden(esconde(CampoDaGrade::Salto))
-                .text(t!("casca-host-do-jump"), move || campos.jump_host)
-                .description(t!("casca-o-servidor-de-salto-vazio-conexao"))
-                .number(
-                    t!("casca-porta-do-jump"),
-                    move || campos.jump_porta,
-                    1.0..=65535.0,
-                )
-                .default(22)
-                .description(t!("comum-a-porta-do-servidor-de-salto"))
-                .text(t!("casca-usuario-do-jump"), move || campos.jump_usuario)
-                .description(t!("casca-o-usuario-no-servidor-de-salto"))
-                .choice_from(
-                    t!("casca-credencial-do-jump"),
-                    move || campos.jump_credencial,
-                    {
-                        let cofre = cofre.clone();
-                        move || opcoes_de_credencial(&cofre)
-                    },
-                )
-                .disabled({
-                    let cofre = cofre.clone();
-                    move || sem_salto() || cofre.ler(|c| c.bloqueado())
-                })
-                .default(perguntar())
-                .description(t!("casca-o-item-do-cofre-com-o"))
-                .password(t!("casca-senha-do-jump"), move || campos.jump_senha)
-                .disabled({
-                    let cofre = cofre.clone();
-                    move || sem_salto() || cofre.ler(|c| c.bloqueado())
-                })
-                .description(t!("casca-a-senha-do-servidor-de-salto"))
-                .visible(move || !sem_conexao());
-
-            // Um grupo só tem a rede, os comandos e a permissão dos assistentes: valem para tudo o
-            // que está dentro dele.
-            let propriedades_do_grupo = PropertyGrid::new()
-                .id("props-grupo")
-                .grow(1)
-                .category(t!("comum-rede"))
-                .choice_from(
-                    t!("comum-rede"),
-                    move || campos.rede,
-                    move || redes::opcoes_da_selecao(tree, selecionado),
-                )
-                .description(t!("casca-por-onde-saem-as-conexoes-do"))
-                .category(t!("mcp-categoria"))
-                .choice_from(
-                    t!("mcp-linha"),
-                    move || campos.mcp,
-                    move || mcp_propriedades::opcoes_da_selecao(tree, selecionado),
-                )
-                .description(t!("mcp-linha-descricao-pasta"))
-                .category(t!("casca-sessao"))
-                .choice_from(
-                    t!("tmux-linha"),
-                    move || campos.persistente,
-                    move || sessao_tmux::opcoes_da_selecao(tree, selecionado),
-                )
-                .description(t!("tmux-linha-descricao-pasta"))
-                .category(t!("comandos-categoria"))
-                .button(t!("comandos-linha"), move || resumo_comandos, {
-                    let t = Rc::clone(&tela);
-                    move || t.abrir_comandos()
-                })
-                .description(t!("comandos-descricao-da-pasta"))
-                .visible(e_grupo);
-
-            Column::new()
-                .child(propriedades)
-                .child(propriedades_do_grupo)
-                .child(
-                    Column::new()
-                        .padding(16)
-                        .grow(1)
-                        .visible(move || sem_conexao() && !e_grupo())
-                        .child(
-                            Text::new(move || match selecionado.get() {
-                                Some(chave) => match ChaveDeEspaco::de(&chave) {
-                                    Some(ChaveDeEspaco::Espaco(_)) => t!("casca-espaco-reabre"),
-                                    Some(_) => t!("casca-pastas-organizam"),
-                                    None => t!("casca-escolha-uma-conexao-editar"),
-                                },
-                                None => {
-                                    t!("casca-escolha-uma-conexao-propriedades")
-                                }
-                            })
-                            .id("sem-propriedades")
-                            .secondary()
-                            .wrap(),
-                        ),
-                )
-        }
+        move || painel_propriedades(&tela)
     };
 
     // --- Terminais ---
@@ -5436,59 +4720,6 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
         );
 
     // --- Diálogos ---
-    let dialogo_apagar = {
-        let t = Rc::clone(&tela);
-        ContentDialog::new(
-            move || {
-                let nome = selecionado.get().and_then(|k| {
-                    let id = k.parse().ok()?;
-                    tree.with(|t| t.find(id).map(|n| n.name().to_owned()))
-                });
-                t!("comum-apagar-titulo", nome = nome.unwrap_or_default())
-            },
-            apagar,
-        )
-        .id("apagar-dialogo")
-        .content(
-            Text::new(move || {
-                let grupo = selecionado.get().is_some_and(|k| {
-                    k.parse()
-                        .ok()
-                        .is_some_and(|id| tree.with(|t| matches!(t.find(id), Some(Node::Group(_)))))
-                });
-                if grupo {
-                    t!("casca-apagar-grupo-aviso")
-                } else {
-                    t!("casca-apagar-conexao-aviso")
-                }
-            })
-            .wrap(),
-        )
-        .primary(t!("comum-apagar"), move || t.confirmar_apagar())
-        .close(t!("comum-cancelar"))
-    };
-
-    let dialogo_apagar_espaco = {
-        let t = Rc::clone(&tela);
-        let texto = Rc::clone(&tela);
-        ContentDialog::new(
-            move || match selecionado.get().and_then(|c| ChaveDeEspaco::de(&c)) {
-                Some(ChaveDeEspaco::Pasta(c)) => {
-                    t!("casca-apagar-a-pasta-titulo", nome = nome_do_caminho(&c))
-                }
-                Some(ChaveDeEspaco::Espaco(c)) => {
-                    t!("casca-apagar-o-espaco-titulo", nome = nome_do_caminho(&c))
-                }
-                _ => t!("casca-apagar-interrogacao"),
-            },
-            apagar_espaco,
-        )
-        .id("apagar-espaco-dialogo")
-        .content(Text::new(move || texto.texto_de_apagar_espaco()).wrap())
-        .primary(t!("comum-apagar"), move || t.confirmar_apagar_espaco())
-        .close(t!("comum-cancelar"))
-    };
-
     let dialogo_salvar_espaco = {
         let t = Rc::clone(&tela);
         let espacos = tela.espacos.clone();
@@ -5740,17 +4971,15 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
         .child(botoes_envio);
     let pagina = Column::new().grow(1).child(cabecalho).child(area);
     let dialogos = Column::new()
+        .child(dialogos_da_arvore(&tela, principal.handle))
         .child(bandeja::dialogo_fechar_ou_bandeja(&tela))
         .child(dialogo_fechar_tudo)
         .child(abas_caidas::dialogo(&tela))
         .child(sessao_tmux::dialogo(&tela))
         .child(controlar::dialogo(&tela))
-        .child(sessoes_servidor::dialogo(&tela))
         .child(openvpn_perguntas::dialogo(&tela))
         .child(cluster::dialogo(&tela))
         .child(scripts::dialogo_novo(&tela))
-        .child(dialogo_apagar)
-        .child(dialogo_apagar_espaco)
         .child(dialogo_salvar_espaco)
         .child(dialogo_substituir_espaco)
         .child(dialogo_senha)
@@ -5759,15 +4988,959 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
         .child(dialogo_chave_mudou)
         .child(dialogo_certificado)
         .child(dialogo_atalhos)
-        .child(tuneis::dialogo_do_editor(&tela))
-        .child(comandos_editor::dialogo_do_editor(&tela))
         .child(tuneis::dialogo_dos_ativos(&tela))
         .child(portas::dialogo(&tela))
-        .child(programas::dialogo_executar(&tela))
         .child(ia::dialogo_instalar(&tela))
         .child(ia::dialogo_pasta(&tela))
         .child(instalar::dialogos(&tela));
     (pagina, dialogos)
+}
+
+/// Os diálogos que a árvore e as Propriedades abrem: apagar, túneis, comandos, executar e as
+/// sessões do servidor. Cada janela de terminais tem os seus, e só os da última janela ativa
+/// aparecem: o diálogo abre onde a pessoa clicou. Trocar de janela com um deles aberto leva o
+/// diálogo junto.
+fn dialogos_da_arvore(tela: &Rc<Tela>, handle: WindowHandle) -> Column {
+    let Tela {
+        tree,
+        selecionado,
+        apagar,
+        apagar_espaco,
+        ..
+    } = **tela;
+    let dialogo_apagar = {
+        let t = Rc::clone(tela);
+        ContentDialog::new(
+            move || {
+                let nome = selecionado.get().and_then(|k| {
+                    let id = k.parse().ok()?;
+                    tree.with(|t| t.find(id).map(|n| n.name().to_owned()))
+                });
+                t!("comum-apagar-titulo", nome = nome.unwrap_or_default())
+            },
+            apagar,
+        )
+        .id("apagar-dialogo")
+        .content(
+            Text::new(move || {
+                let grupo = selecionado.get().is_some_and(|k| {
+                    k.parse()
+                        .ok()
+                        .is_some_and(|id| tree.with(|t| matches!(t.find(id), Some(Node::Group(_)))))
+                });
+                if grupo {
+                    t!("casca-apagar-grupo-aviso")
+                } else {
+                    t!("casca-apagar-conexao-aviso")
+                }
+            })
+            .wrap(),
+        )
+        .primary(t!("comum-apagar"), move || t.confirmar_apagar())
+        .close(t!("comum-cancelar"))
+    };
+
+    let dialogo_apagar_espaco = {
+        let t = Rc::clone(tela);
+        let texto = Rc::clone(tela);
+        ContentDialog::new(
+            move || match selecionado.get().and_then(|c| ChaveDeEspaco::de(&c)) {
+                Some(ChaveDeEspaco::Pasta(c)) => {
+                    t!("casca-apagar-a-pasta-titulo", nome = nome_do_caminho(&c))
+                }
+                Some(ChaveDeEspaco::Espaco(c)) => {
+                    t!("casca-apagar-o-espaco-titulo", nome = nome_do_caminho(&c))
+                }
+                _ => t!("casca-apagar-interrogacao"),
+            },
+            apagar_espaco,
+        )
+        .id("apagar-espaco-dialogo")
+        .content(Text::new(move || texto.texto_de_apagar_espaco()).wrap())
+        .primary(t!("comum-apagar"), move || t.confirmar_apagar_espaco())
+        .close(t!("comum-cancelar"))
+    };
+
+    let aqui = {
+        let t = Rc::clone(tela);
+        move || t.dialogos_na_janela(handle)
+    };
+    Column::new()
+        .visible(aqui)
+        .child(dialogo_apagar)
+        .child(dialogo_apagar_espaco)
+        .child(tuneis::dialogo_do_editor(tela))
+        .child(comandos_editor::dialogo_do_editor(tela))
+        .child(programas::dialogo_executar(tela))
+        .child(sessoes_servidor::dialogo(tela))
+}
+
+/// A árvore de conexões com os botões e o filtro: o painel Conexões, montado em cada janela de
+/// terminais (e de novo quando o painel muda de lugar, M54). A escolha, as pastas abertas e o
+/// filtro são signals da `Tela`, os mesmos em todas as janelas.
+fn painel_conexoes(tela: &Rc<Tela>) -> Column {
+    let tela = Rc::clone(tela);
+    let Tela {
+        tree,
+        itens,
+        selecionado,
+        abertos,
+        filtro,
+        filtro_aberto,
+        renomeando,
+        apagar,
+        apagar_espaco,
+        ..
+    } = *tela;
+    // Subir e descer só valem para as conexões; o grupo dos espaços não se apaga.
+    let sem_conexao_escolhida = move || {
+        selecionado
+            .get()
+            .is_none_or(|c| ChaveDeEspaco::de(&c).is_some())
+    };
+    let sem_apagar = move || {
+        selecionado
+            .get()
+            .is_none_or(|c| ChaveDeEspaco::de(&c) == Some(ChaveDeEspaco::Raiz))
+    };
+    let botoes = Row::new()
+        .gap(2)
+        .child(
+            Button::icon_only(Symbol::Add)
+                .id("nova-conexao")
+                .label(t!("comum-nova-conexao"))
+                .on_click(acao(&tela, |t| t.nova_conexao())),
+        )
+        .child(
+            Button::icon_only(Symbol::FolderAdd)
+                .id("novo-grupo")
+                .label(t!("casca-novo-grupo"))
+                .on_click(acao(&tela, |t| t.novo_grupo())),
+        )
+        .child(
+            Button::icon_only(Symbol::ArrowUp)
+                .id("subir")
+                .label(t!("casca-subir"))
+                .disabled(sem_conexao_escolhida)
+                .on_click(acao(&tela, |t| t.subir())),
+        )
+        .child(
+            Button::icon_only(Symbol::ArrowDown)
+                .id("descer")
+                .label(t!("casca-descer"))
+                .disabled(sem_conexao_escolhida)
+                .on_click(acao(&tela, |t| t.descer())),
+        )
+        .child(
+            Button::icon_only(Symbol::Delete)
+                .id("apagar")
+                .label(t!("comum-apagar"))
+                .disabled(sem_apagar)
+                .on_click(move || pedir_apagar(selecionado, apagar, apagar_espaco)),
+        )
+        .child(
+            ToggleButton::icon_only(filtro_aberto, Symbol::Search)
+                .id("filtrar")
+                .label(t!("casca-filtrar-as-conexoes")),
+        );
+    // O campo do filtro fica logo abaixo da barra, enquanto a lupa está ligada; o Esc
+    // desliga a lupa e devolve o foco à árvore.
+    let campo_filtro = Column::new()
+        .visible(move || filtro_aberto.get())
+        .accelerator(Shortcut::key(Key::Escape), move || {
+            filtro_aberto.set(false);
+            request_focus("arvore");
+        })
+        .child(
+            Edit::bind(filtro)
+                .id("filtro")
+                .placeholder(t!("casca-nome-ip-usuario-ou-descricao")),
+        );
+
+    let arvore = {
+        let invocar = Rc::clone(&tela);
+        let renomear = Rc::clone(&tela);
+        let mover = Rc::clone(&tela);
+        estado_conexoes::com_estado(TreeView::bind(itens, selecionado), &tela)
+            .id("arvore")
+            .grow(1)
+            .expanded(abertos)
+            .filter(filtro)
+            .renaming(renomeando)
+            .on_invoke(move |chave| match ChaveDeEspaco::de(&chave) {
+                Some(ChaveDeEspaco::Espaco(caminho)) => {
+                    invocar.abrir_espaco(&caminho, ComoAbrir::Padrao);
+                }
+                Some(_) => {}
+                None => {
+                    if let Ok(id) = chave.parse() {
+                        invocar.abrir(id, invocar.lugar_novo());
+                    }
+                }
+            })
+            .on_rename(move |chave, texto| match ChaveDeEspaco::de(&chave) {
+                Some(espaco) => renomear.renomear_espaco(&espaco, &texto),
+                None => renomear.renomear(&chave, &texto),
+            })
+            .on_delete(move |chave| {
+                selecionado.set(Some(chave));
+                pedir_apagar(selecionado, apagar, apagar_espaco);
+            })
+            .on_move(move |chave, pai, posicao| match ChaveDeEspaco::de(&chave) {
+                Some(espaco) => mover.mover_espaco(&espaco, pai.as_deref()),
+                None => mover.mover(&chave, pai.as_deref(), posicao),
+            })
+            .can_drop(pode_soltar)
+            .item_context_flyout({
+                let t = Rc::clone(&tela);
+                move |chave| {
+                    if let Some(espaco) = ChaveDeEspaco::de(chave) {
+                        return menu_de_espaco(&t, chave, &espaco);
+                    }
+                    let id = chave.parse().unwrap_or(0);
+                    let abrir = Rc::clone(&t);
+                    let chave_renomear = chave.to_owned();
+                    let chave_copiar = chave.to_owned();
+                    let eh_ssh = t
+                        .tree
+                        .with_untracked(|tr| tr.connection(id).map(|c| c.kind == Kind::Ssh))
+                        == Some(true);
+                    let aceita_sessao = t
+                        .tree
+                        .with_untracked(|tr| tr.connection(id).is_some_and(tmux::aceita_sessao));
+                    let usa_ssh = t
+                        .tree
+                        .with_untracked(|tr| tr.connection(id).map(|c| c.kind.usa_ssh()))
+                        == Some(true);
+                    // Numa pasta, "Abrir" e "Abrir todas em" valem para as conexões de terminal
+                    // dela (em qualquer profundidade).
+                    let eh_grupo = t
+                        .tree
+                        .with_untracked(|tr| matches!(tr.find(id), Some(Node::Group(_))));
+                    let alvo = if eh_grupo {
+                        AlvoAbrir::Pasta(id)
+                    } else {
+                        AlvoAbrir::Conexao(id)
+                    };
+                    let com_terminal = Rc::clone(&t);
+                    let mut menu = MenuFlyout::new()
+                        .id(format!("menu-{chave}"))
+                        .item(
+                            format!("menu-{chave}-abrir"),
+                            if eh_grupo {
+                                t!("casca-abrir-todas")
+                            } else {
+                                t!("comum-abrir")
+                            },
+                            move || {
+                                if eh_grupo {
+                                    abrir.abrir_pasta(id);
+                                } else {
+                                    abrir.abrir(id, abrir.lugar_novo());
+                                }
+                            },
+                        )
+                        .icon(Symbol::Open);
+                    if eh_grupo {
+                        menu = menu.item_visible(move || com_terminal.tem_terminal(alvo));
+                    }
+                    let base = if eh_grupo {
+                        format!("menu-{chave}-todas")
+                    } else {
+                        format!("menu-{chave}")
+                    };
+                    abrir_em::com_abrir_em(&t, menu, &base, alvo)
+                        .submenu(
+                            format!("menu-{chave}-todas-ia"),
+                            t!("casca-abrir-todas-com-ia"),
+                            cluster::submenu_da_pasta(&t, &format!("menu-{chave}-todas-ia"), id),
+                        )
+                        .icon(Symbol::Sparkle)
+                        .item_visible({
+                            let t = Rc::clone(&t);
+                            move || {
+                                eh_grupo
+                                    && t.tem_terminal(alvo)
+                                    && t.config.with(|c| {
+                                        Ferramenta::TODAS.into_iter().any(|f| c.ia.mostra(f))
+                                    })
+                            }
+                        })
+                        .item(
+                            format!("menu-{chave}-ir-para-aba"),
+                            t!("casca-ir-para-a-aba"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || t.ir_para_a_aba(id)
+                            },
+                        )
+                        .icon(Symbol::Next)
+                        .item_visible({
+                            let t = Rc::clone(&t);
+                            move || !eh_grupo && t.linha_com_sessao(id)
+                        })
+                        .item(
+                            format!("menu-{chave}-reconectar"),
+                            t!("casca-reconectar"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || t.reconectar_linha(id)
+                            },
+                        )
+                        .icon(Symbol::ArrowSync)
+                        .item_visible({
+                            let t = Rc::clone(&t);
+                            move || t.linha_com_queda(id)
+                        })
+                        .item(
+                            format!("menu-{chave}-cluster"),
+                            t!("casca-abrir-em-modo-cluster"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || {
+                                    let previas = t.previas_do_cluster(id);
+                                    t.na_principal(|t| t.abrir_dialogo_do_cluster(&previas, false));
+                                }
+                            },
+                        )
+                        .icon(Symbol::Grid)
+                        .item_visible({
+                            let t = Rc::clone(&t);
+                            move || t.tem_terminal(alvo)
+                        })
+                        .item(
+                            format!("menu-{chave}-cluster-ia"),
+                            t!("casca-abrir-em-cluster-com-ia"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || {
+                                    let previas = t.previas_do_cluster(id);
+                                    t.na_principal(|t| t.abrir_dialogo_do_cluster(&previas, true));
+                                }
+                            },
+                        )
+                        .icon(Symbol::Sparkle)
+                        .item_visible({
+                            let t = Rc::clone(&t);
+                            move || t.tem_terminal(alvo)
+                        })
+                        .item(format!("menu-{chave}-script"), t!("casca-rodar-script"), {
+                            let t = Rc::clone(&t);
+                            move || t.na_principal(|t| t.abrir_scripts(&t.previas_de_scripts(id)))
+                        })
+                        .icon(Symbol::Code)
+                        .item_visible({
+                            let t = Rc::clone(&t);
+                            move || {
+                                t.tree.with(|tr| {
+                                    if eh_grupo {
+                                        tr.connections_in(id).iter().any(|c| c.kind == Kind::Ssh)
+                                    } else {
+                                        tr.connection(id).is_some_and(|c| c.kind == Kind::Ssh)
+                                    }
+                                })
+                            }
+                        })
+                        .item(
+                            format!("menu-{chave}-arquivos"),
+                            t!("casca-abrir-arquivos-sftp"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || t.na_principal(|t| t.abrir_arquivos(id))
+                            },
+                        )
+                        .icon(Symbol::Folder)
+                        .item_visible(usa_ssh)
+                        .submenu(
+                            format!("menu-{chave}-ia"),
+                            t!("ia-remoto-menu"),
+                            ia::submenu_ia(
+                                &t,
+                                &format!("menu-{chave}-ia"),
+                                ia::AlvoIa::Conexao(id),
+                            ),
+                        )
+                        .icon(Symbol::Sparkle)
+                        .item_visible(eh_ssh)
+                        .item(
+                            format!("menu-{chave}-virt-manager"),
+                            t!("casca-abrir-virt-manager"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || t.abrir_virt_manager(id)
+                            },
+                        )
+                        .icon(Symbol::Desktop)
+                        .item_visible(eh_ssh)
+                        .item(
+                            format!("menu-{chave}-virt-manager-local"),
+                            t!("casca-abrir-virt-manager-local"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || t.abrir_virt_manager_local(id)
+                            },
+                        )
+                        .icon(Symbol::Desktop)
+                        .item_visible({
+                            let t = Rc::clone(&t);
+                            move || eh_ssh && t.opener.virt_manager_local()
+                        })
+                        .item(
+                            format!("menu-{chave}-executar"),
+                            t!("casca-executar-aplicativo-grafico-remoto"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || t.abrir_executar(id)
+                            },
+                        )
+                        .icon(Symbol::Play)
+                        .item_visible(eh_ssh)
+                        .item(format!("menu-{chave}-tuneis"), t!("casca-tuneis"), {
+                            let t = Rc::clone(&t);
+                            let chave = chave.to_owned();
+                            move || t.abrir_tuneis_de(&chave)
+                        })
+                        .icon(Symbol::Link)
+                        .item_visible(eh_ssh)
+                        .item(format!("menu-{chave}-sessoes"), t!("sessoes-menu"), {
+                            let t = Rc::clone(&t);
+                            move || t.abrir_sessoes_do_servidor(id)
+                        })
+                        .icon(Symbol::AppsList)
+                        .item_visible(aceita_sessao)
+                        .submenu(
+                            format!("menu-{chave}-mcp"),
+                            t!("mcp-arvore-menu"),
+                            mcp_propriedades::menu_da_arvore(&t, chave, id),
+                        )
+                        .icon(Symbol::Sparkle)
+                        .item_visible({
+                            let t = Rc::clone(&t);
+                            move || t.config.with(|c| c.ia.mcp_ligado)
+                        })
+                        .item(
+                            format!("menu-{chave}-renomear"),
+                            t!("comum-renomear"),
+                            move || {
+                                renomeando.set(Some(chave_renomear.clone()));
+                            },
+                        )
+                        .icon(Symbol::Rename)
+                        .item(format!("menu-{chave}-duplicar"), t!("comum-duplicar"), {
+                            let t = Rc::clone(&t);
+                            move || t.duplicar_conexao(id)
+                        })
+                        .icon(Symbol::Copy)
+                        .item_visible(move || !eh_grupo)
+                        .item(
+                            format!("menu-{chave}-copiar-chave"),
+                            t!("casca-copiar-a-chave-para-o-servidor"),
+                            {
+                                let t = Rc::clone(&t);
+                                move || {
+                                    t.selecionado.set(Some(chave_copiar.clone()));
+                                    t.na_principal(|t| t.abrir_copiar_chave(None));
+                                }
+                            },
+                        )
+                        .icon(Symbol::Send)
+                        .item_visible(eh_ssh)
+                        .separator()
+                        .item(
+                            format!("menu-{chave}-apagar"),
+                            t!("comum-apagar"),
+                            move || apagar.set(true),
+                        )
+                        .icon(Symbol::Delete)
+                }
+            })
+    };
+
+    let arvore_vazia = move || tree.with(|t| t.nodes.is_empty());
+    Column::new()
+        .gap(4)
+        .padding(Insets::new(4.0, 4.0, 4.0, 8.0))
+        .child(botoes)
+        .child(campo_filtro)
+        .child(
+            Text::new(t!("casca-nenhuma-conexao-use-arquivo-nova-conexao"))
+                .id("dica-vazia")
+                .secondary()
+                .wrap()
+                .visible(arvore_vazia),
+        )
+        .child(arvore)
+}
+
+/// A grade das propriedades da conexão escolhida: o painel Propriedades, montado em cada janela
+/// de terminais. Os campos são os da `Tela`, os mesmos em todas as janelas.
+fn painel_propriedades(tela: &Rc<Tela>) -> Column {
+    let tela = Rc::clone(tela);
+    let cofre = tela.cofre.clone();
+    let Tela {
+        tree,
+        selecionado,
+        campos,
+        resumo_tuneis,
+        resumo_comandos,
+        config,
+        ..
+    } = *tela;
+    // O tipo da conexão escolhida e a tabela de campos (M60): a grade esconde o que nunca vale
+    // para o tipo e só desabilita o que depende de outro campo. Os valores escondidos ficam.
+    let tipo = move || {
+        Kind::TODOS
+            .into_iter()
+            .find(|k| campos.tipo.get() == k.nome())
+    };
+    let esconde = move |campo: CampoDaGrade| move || !tipo().is_some_and(|k| campo.vale(k));
+    let usa_ssh = move || tipo().is_some_and(Kind::usa_ssh);
+    // A porta padrão do tipo (a da segurança, no FTP): a Porta só fica em negrito se difere.
+    let porta_padrao = move || {
+        let porta = match tipo() {
+            Some(Kind::Ftp) => FtpSeguranca::TODAS
+                .into_iter()
+                .find(|s| campos.ftp_seguranca.get() == s.nome())
+                .unwrap_or_default()
+                .porta_padrao(),
+            Some(k) => k.porta_padrao(),
+            None => Kind::Ssh.porta_padrao(),
+        };
+        i32::from(porta)
+    };
+    let sem_ca = move || campos.s3_certificado.get() != S3Certificado::CaPropria.nome();
+    let ftp_ativo = move || campos.ftp_modo.get() == FtpModo::Ativo.nome();
+    let sem_salto = move || campos.jump_host.get().trim().is_empty();
+    let sem_conexao = move || {
+        let _ = selecionado.get();
+        tree.with(|t| {
+            selecionado
+                .get_untracked()
+                .and_then(|k| k.parse::<u64>().ok())
+                .and_then(|id| t.connection(id))
+                .is_none()
+        })
+    };
+    // O perfil de rede efetivo da conexão escolhida tem proxy (o FTP ativo não passa por ele).
+    let com_proxy = move || {
+        let _ = selecionado.get();
+        tree.with(|t| {
+            selecionado
+                .get_untracked()
+                .and_then(|k| k.parse::<u64>().ok())
+                .and_then(|id| rede_efetiva(t, id))
+                .is_some_and(|p| p.proxy.is_some() || p.e_embutida())
+        })
+    };
+    let e_grupo = move || {
+        let _ = selecionado.get();
+        tree.with(|t| {
+            selecionado
+                .get_untracked()
+                .and_then(|k| k.parse::<u64>().ok())
+                .is_some_and(|id| matches!(t.find(id), Some(Node::Group(_))))
+        })
+    };
+    let perfis_de_ia = tela.assistente.perfis;
+    let propriedades = PropertyGrid::new()
+        .id("props")
+        .grow(1)
+        .category(t!("casca-conexao"))
+        .text(t!("comum-nome"), move || campos.nome)
+        .description(t!("casca-o-nome-da-conexao-na-arvore"))
+        .text(t!("casca-descricao"), move || campos.descricao)
+        .description(t!("casca-um-texto-livre-sobre-a-conexao"))
+        .choice(
+            t!("comum-tipo"),
+            move || campos.tipo,
+            Kind::TODOS.map(Kind::nome),
+        )
+        .default(Kind::Ssh.nome())
+        .description(t!("casca-ssh-sftp-ftp-s3-ou-rclone"))
+        .text(t!("comum-host"), move || campos.host)
+        .hidden(esconde(CampoDaGrade::Host))
+        .description(t!("casca-nome-ou-endereco-do-servidor-no"))
+        .number(t!("comum-porta"), move || campos.porta, 0.0..=65535.0)
+        .default_with(porta_padrao)
+        .hidden(esconde(CampoDaGrade::Porta))
+        .description(t!("casca-a-porta-do-servidor-ssh-e"))
+        .text(t!("comum-usuario"), move || campos.usuario)
+        .hidden(esconde(CampoDaGrade::Usuario))
+        .description(t!("casca-o-usuario-no-servidor-no-s3"))
+        .choice_from(t!("comum-credencial"), move || campos.credencial, {
+            let cofre = cofre.clone();
+            move || opcoes_de_credencial_da_conexao(&cofre, usa_ssh())
+        })
+        .disabled({
+            let cofre = cofre.clone();
+            move || cofre.ler(|c| c.bloqueado())
+        })
+        .default(perguntar())
+        .hidden(esconde(CampoDaGrade::Login))
+        .description(t!("casca-credencial-da-conexao-descricao"))
+        .password(t!("comum-senha"), move || campos.senha)
+        .disabled({
+            let cofre = cofre.clone();
+            move || cofre.ler(|c| c.bloqueado())
+        })
+        .hidden(esconde(CampoDaGrade::Login))
+        .description(t!("casca-a-senha-do-item-da-credencial"))
+        .choice_from(t!("casca-chave-do-cofre"), move || campos.chave_cofre, {
+            let cofre = cofre.clone();
+            move || opcoes_de_chave_do_cofre(&cofre)
+        })
+        .disabled({
+            let cofre = cofre.clone();
+            move || cofre.ler(|c| c.bloqueado())
+        })
+        .default(sem_chave_do_cofre())
+        .hidden(esconde(CampoDaGrade::ChaveSsh))
+        .description(t!("casca-uma-chave-ssh-guardada-no-cofre"))
+        .file(t!("casca-chave-privada"), move || campos.chave)
+        .hidden(esconde(CampoDaGrade::ChaveSsh))
+        .description(t!("casca-o-arquivo-da-chave-openssh-pem"))
+        .category(t!("comum-rede"))
+        .choice_from(
+            t!("comum-rede"),
+            move || campos.rede,
+            move || redes::opcoes_da_selecao(tree, selecionado),
+        )
+        .hidden(esconde(CampoDaGrade::Rede))
+        .description(t!("casca-por-onde-a-conexao-sai-a"))
+        .category(t!("ia-conexao-categoria"))
+        .choice_from(
+            t!("ia-conexao-linha"),
+            move || campos.perfil_ia,
+            move || assistente::opcoes_de_perfil_ia(perfis_de_ia),
+        )
+        .hidden(esconde(CampoDaGrade::Ia))
+        .description(t!("ia-conexao-descricao"))
+        .category(t!("mcp-categoria"))
+        .choice_from(
+            t!("mcp-linha"),
+            move || campos.mcp,
+            move || mcp_propriedades::opcoes_da_selecao(tree, selecionado),
+        )
+        .hidden(esconde(CampoDaGrade::Mcp))
+        .description(t!("mcp-linha-descricao"))
+        .category("S3")
+        .hidden(esconde(CampoDaGrade::S3))
+        .choice(
+            t!("casca-provedor"),
+            move || campos.s3_provedor,
+            S3Provedor::TODOS.map(S3Provedor::nome),
+        )
+        .default(S3Provedor::Amazon.nome())
+        .description(t!("casca-s3-provedor-descricao"))
+        .text(t!("comum-endereco"), move || campos.s3_endpoint)
+        .description(t!("casca-o-endereco-do-servico-https-s3"))
+        .text(t!("casca-regiao"), move || campos.s3_regiao)
+        .default("us-east-1")
+        .description(t!("casca-a-regiao-do-bucket-us-east"))
+        .text(t!("casca-bucket"), move || campos.s3_bucket)
+        .description(t!("casca-o-bucket-que-a-conexao-abre"))
+        .choice(
+            t!("casca-estilo-da-url"),
+            move || campos.s3_estilo,
+            S3Estilo::TODOS.map(S3Estilo::nome),
+        )
+        .default(S3Estilo::Caminho.nome())
+        .description(t!("casca-caminho-servidor-bucket-minio-ceph-virtual"))
+        .password(t!("casca-token-de-sessao"), move || campos.s3_token)
+        .disabled({
+            let cofre = cofre.clone();
+            move || cofre.ler(|c| c.bloqueado())
+        })
+        .description(t!("casca-o-token-das-chaves-temporarias-da"))
+        .category(t!("casca-s3-avancado"))
+        .hidden(esconde(CampoDaGrade::S3))
+        .collapsed()
+        .text(t!("casca-classe-de-armazenamento"), move || {
+            campos.s3_classe
+        })
+        .description(t!("casca-a-classe-dos-arquivos-enviados-standard"))
+        .choice(
+            t!("casca-certificado"),
+            move || campos.s3_certificado,
+            S3Certificado::TODOS.map(S3Certificado::nome),
+        )
+        .default(S3Certificado::Verificar.nome())
+        .description(t!("casca-como-o-certificado-do-servidor-e"))
+        .file(t!("casca-arquivo-da-ca"), move || campos.s3_ca)
+        .disabled(sem_ca)
+        .description(t!("casca-o-arquivo-pem-da-autoridade-que"))
+        .category(t!("casca-rclone"))
+        .hidden(esconde(CampoDaGrade::Rclone))
+        .text(t!("comum-remoto"), move || campos.rclone_remoto)
+        .description(t!("casca-o-nome-do-remoto-do-rclone"))
+        .text(t!("casca-caminho"), move || campos.rclone_caminho)
+        .description(t!("casca-a-pasta-do-remoto-em-que"))
+        .category("FTP")
+        .hidden(esconde(CampoDaGrade::Ftp))
+        .choice(
+            t!("casca-seguranca"),
+            move || campos.ftp_seguranca,
+            FtpSeguranca::TODAS.map(FtpSeguranca::nome),
+        )
+        .default(FtpSeguranca::default().nome())
+        .description(t!("casca-como-a-conexao-e-protegida-ftp"))
+        .choice(
+            t!("casca-modo"),
+            move || campos.ftp_modo,
+            FtpModo::TODOS.map(FtpModo::nome),
+        )
+        .disabled(com_proxy)
+        .default(FtpModo::default().nome())
+        .description(t!("casca-passivo-este-computador-abre-a-conexao"))
+        .category(t!("casca-ftp-avancado"))
+        .hidden(esconde(CampoDaGrade::Ftp))
+        .collapsed()
+        .choice(
+            t!("casca-versao-do-tls"),
+            move || campos.ftp_tls,
+            FtpTls::TODAS.map(FtpTls::nome),
+        )
+        .default(FtpTls::Auto.nome())
+        .description(t!("casca-automatica-usa-o-tls-1-3"))
+        .choice(
+            t!("casca-codificacao"),
+            move || campos.ftp_codificacao,
+            FtpCodificacao::TODAS.map(FtpCodificacao::nome),
+        )
+        .default(FtpCodificacao::Auto.nome())
+        .description(t!("casca-a-codificacao-dos-nomes-de-arquivo"))
+        .number(
+            t!("casca-fuso-do-servidor"),
+            move || campos.ftp_fuso,
+            -840.0..=840.0,
+        )
+        .default(0)
+        .description(t!("casca-minutos-a-leste-do-utc-em"))
+        .text(t!("casca-portas-do-modo-ativo"), move || campos.ftp_portas)
+        .disabled(move || !ftp_ativo() || com_proxy())
+        .description(t!("casca-a-faixa-de-portas-em-que"))
+        .category(t!("casca-sessao"))
+        .choice(t!("casca-tipo-de-terminal"), move || campos.term, TERMINAIS)
+        .default(TERMINAIS[0])
+        .hidden(esconde(CampoDaGrade::TipoDeTerminal))
+        .description(t!("casca-o-term-que-o-servidor-recebe"))
+        .file(t!("casca-log"), move || campos.log)
+        .hidden(esconde(CampoDaGrade::Log))
+        .description(t!("casca-o-arquivo-onde-a-saida-da"))
+        .number(
+            t!("casca-keepalive"),
+            move || campos.keepalive,
+            0.0..=3600.0,
+        )
+        .default(30)
+        .hidden(esconde(CampoDaGrade::SessaoSsh))
+        .description(t!("casca-segundos-entre-os-sinais-de-vida"))
+        .check(t!("casca-comprimir-a-conexao"), move || campos.comprimir)
+        .hidden(esconde(CampoDaGrade::SessaoSsh))
+        .description(t!("casca-comprime-o-que-passa-pela-conexao"))
+        .choice_from(
+            t!("tmux-linha"),
+            move || campos.persistente,
+            move || sessao_tmux::opcoes_da_selecao(tree, selecionado),
+        )
+        .hidden(esconde(CampoDaGrade::Persistente))
+        .description(t!("tmux-linha-descricao"))
+        .text(t!("casca-programa"), move || campos.local_programa)
+        .hidden(esconde(CampoDaGrade::Programa))
+        .description(t!("casca-o-programa-que-o-terminal-desta"))
+        .text(t!("casca-argumentos"), move || campos.local_argumentos)
+        .hidden(esconde(CampoDaGrade::Programa))
+        .description(t!("casca-os-argumentos-do-programa-numa-linha"))
+        .folder(t!("casca-pasta-inicial"), move || campos.local_pasta)
+        .hidden(esconde(CampoDaGrade::Programa))
+        .description(t!("casca-a-pasta-onde-o-terminal-local-comeca"))
+        .category(t!("casca-colar-no-terminal"))
+        .hidden(esconde(CampoDaGrade::Colar))
+        .choice_from(
+            t!("casca-ao-colar"),
+            move || campos.colar_arquivos,
+            opcoes_de_colar,
+        )
+        .default(rotulo_de_colar(None))
+        .description(t!("casca-o-que-fazer-ao-colar-imagem"))
+        .text(t!("casca-pasta-no-servidor"), move || campos.pasta_colar)
+        .default("")
+        .description(t!("casca-onde-o-que-e-colado-fica"))
+        .choice(
+            t!("casca-shell-do-servidor"),
+            move || campos.shell_remoto,
+            ShellRemoto::TODOS.map(ShellRemoto::nome),
+        )
+        .default(ShellRemoto::Automatico.nome())
+        .description(t!("casca-o-shell-que-recebe-o-caminho"))
+        .category(t!("ia-remoto-categoria"))
+        .hidden(esconde(CampoDaGrade::IaNoServidor))
+        .collapsed()
+        .text(t!("ia-remoto-pasta"), move || campos.ia_pasta)
+        .default("")
+        .description(t!("ia-remoto-pasta-descricao"))
+        .choice_from(
+            t!("ia-remoto-instalar-por"),
+            move || campos.ia_metodo,
+            ia::opcoes_de_metodo,
+        )
+        .default(ia::rotulo_do_metodo(None))
+        .description(t!("ia-remoto-instalar-por-descricao"))
+        .text(t!("ia-remoto-argumentos-claude"), move || {
+            campos.ia_argumentos[0]
+        })
+        .default("")
+        .description(t!("ia-remoto-argumentos-descricao"))
+        .text(t!("ia-remoto-argumentos-codex"), move || {
+            campos.ia_argumentos[1]
+        })
+        .default("")
+        .description(t!("ia-remoto-argumentos-descricao"))
+        .text(t!("ia-remoto-argumentos-opencode"), move || {
+            campos.ia_argumentos[2]
+        })
+        .default("")
+        .description(t!("ia-remoto-argumentos-descricao"))
+        .category(t!("casca-arquivos"))
+        .hidden(esconde(CampoDaGrade::Arquivos))
+        .folder(t!("casca-pasta-local-padrao"), move || campos.pasta_local)
+        .description(t!("casca-a-pasta-do-computador-em-que"))
+        .text(t!("casca-pasta-remota-padrao"), move || campos.pasta_remota)
+        .description(t!("casca-a-pasta-do-servidor-em-que"))
+        .choice(
+            t!("comum-comparar-pastas"),
+            move || campos.comparar,
+            Ativar::TODOS.map(Ativar::nome),
+        )
+        .default(Ativar::Padrao.nome())
+        .description(t!("casca-abre-os-dois-paineis-ja-comparando"))
+        .choice(
+            t!("casca-sincronizar-pastas"),
+            move || campos.sincronizar_pastas,
+            Ativar::TODOS.map(Ativar::nome),
+        )
+        .default(Ativar::Padrao.nome())
+        .description(t!("casca-abre-os-dois-paineis-navegando-juntos"))
+        .category(t!("comandos-categoria"))
+        .hidden(esconde(CampoDaGrade::Comandos))
+        .button(t!("comandos-linha"), move || resumo_comandos, {
+            let t = Rc::clone(&tela);
+            move || t.abrir_comandos()
+        })
+        .description(t!("comandos-descricao-da-linha"))
+        .category(t!("casca-encaminhamento"))
+        .hidden(esconde(CampoDaGrade::Encaminhamento))
+        .choice_from(
+            t!("casca-encaminhar-x11"),
+            move || campos.x11,
+            move || opcoes_de_x11(config.with(|c| c.x11.padrao)),
+        )
+        .default(ModoX11::Padrao.nome())
+        .description(t!("casca-mostra-aqui-as-janelas-dos-programas"))
+        .button(t!("casca-tuneis-linha"), move || resumo_tuneis, {
+            let t = Rc::clone(&tela);
+            move || t.abrir_tuneis()
+        })
+        .description(t!("casca-portas-que-o-ssh-encaminha-local"))
+        .check(t!("casca-so-tuneis-sem-shell"), move || campos.so_tuneis)
+        .description(t!("casca-a-conexao-so-segura-os-tuneis"))
+        .check(t!("casca-parar-se-tunel-falhar"), move || {
+            campos.parar_se_falhar
+        })
+        .description(t!("casca-como-o-exitonforwardfailure-se-uma-porta"))
+        .category(t!("casca-jump-server"))
+        .hidden(esconde(CampoDaGrade::Salto))
+        .text(t!("casca-host-do-jump"), move || campos.jump_host)
+        .description(t!("casca-o-servidor-de-salto-vazio-conexao"))
+        .number(
+            t!("casca-porta-do-jump"),
+            move || campos.jump_porta,
+            1.0..=65535.0,
+        )
+        .default(22)
+        .description(t!("comum-a-porta-do-servidor-de-salto"))
+        .text(t!("casca-usuario-do-jump"), move || campos.jump_usuario)
+        .description(t!("casca-o-usuario-no-servidor-de-salto"))
+        .choice_from(
+            t!("casca-credencial-do-jump"),
+            move || campos.jump_credencial,
+            {
+                let cofre = cofre.clone();
+                move || opcoes_de_credencial(&cofre)
+            },
+        )
+        .disabled({
+            let cofre = cofre.clone();
+            move || sem_salto() || cofre.ler(|c| c.bloqueado())
+        })
+        .default(perguntar())
+        .description(t!("casca-o-item-do-cofre-com-o"))
+        .password(t!("casca-senha-do-jump"), move || campos.jump_senha)
+        .disabled({
+            let cofre = cofre.clone();
+            move || sem_salto() || cofre.ler(|c| c.bloqueado())
+        })
+        .description(t!("casca-a-senha-do-servidor-de-salto"))
+        .visible(move || !sem_conexao());
+
+    // Um grupo só tem a rede, os comandos e a permissão dos assistentes: valem para tudo o
+    // que está dentro dele.
+    let propriedades_do_grupo = PropertyGrid::new()
+        .id("props-grupo")
+        .grow(1)
+        .category(t!("comum-rede"))
+        .choice_from(
+            t!("comum-rede"),
+            move || campos.rede,
+            move || redes::opcoes_da_selecao(tree, selecionado),
+        )
+        .description(t!("casca-por-onde-saem-as-conexoes-do"))
+        .category(t!("mcp-categoria"))
+        .choice_from(
+            t!("mcp-linha"),
+            move || campos.mcp,
+            move || mcp_propriedades::opcoes_da_selecao(tree, selecionado),
+        )
+        .description(t!("mcp-linha-descricao-pasta"))
+        .category(t!("casca-sessao"))
+        .choice_from(
+            t!("tmux-linha"),
+            move || campos.persistente,
+            move || sessao_tmux::opcoes_da_selecao(tree, selecionado),
+        )
+        .description(t!("tmux-linha-descricao-pasta"))
+        .category(t!("comandos-categoria"))
+        .button(t!("comandos-linha"), move || resumo_comandos, {
+            let t = Rc::clone(&tela);
+            move || t.abrir_comandos()
+        })
+        .description(t!("comandos-descricao-da-pasta"))
+        .visible(e_grupo);
+
+    Column::new()
+        .child(propriedades)
+        .child(propriedades_do_grupo)
+        .child(
+            Column::new()
+                .padding(16)
+                .grow(1)
+                .visible(move || sem_conexao() && !e_grupo())
+                .child(
+                    Text::new(move || match selecionado.get() {
+                        Some(chave) => match ChaveDeEspaco::de(&chave) {
+                            Some(ChaveDeEspaco::Espaco(_)) => t!("casca-espaco-reabre"),
+                            Some(_) => t!("casca-pastas-organizam"),
+                            None => t!("casca-escolha-uma-conexao-editar"),
+                        },
+                        None => {
+                            t!("casca-escolha-uma-conexao-propriedades")
+                        }
+                    })
+                    .id("sem-propriedades")
+                    .secondary()
+                    .wrap(),
+                ),
+        )
 }
 
 /// A página Sobre.
@@ -5837,12 +6010,22 @@ fn nova_tela(
     opener: impl FnOnce(FilaChaves) -> Rc<dyn Opener>,
 ) -> (Rc<Tela>, FilaChaves, bool) {
     let armazenamento = Armazenamento::new(pasta);
+    // Uma segunda cópia do app não grava nada da configuração: a pasta de dados fica só de
+    // leitura antes de qualquer leitura (que pode migrar, ou tirar do lugar um arquivo ilegível),
+    // e a do cofre e a dos espaços, assim que se sabe onde estão.
+    let so_leitura = !ambiente.dono_do_estado;
+    if so_leitura {
+        crate::armazenamento::somente_leitura_em(armazenamento.pasta());
+    }
     controlar::limpar_arquivos_antigos(armazenamento.pasta());
     tomni_ui::dialogs::set_folder_memory(Rc::new(crate::pastas::Pastas::carregar(&armazenamento)));
-    let (arvore_lida, aviso_inicial) = armazenamento.carregar();
+    let (arvore_lida, aviso_inicial, visto_conexoes) = armazenamento.carregar_visto();
     let (configuracoes, avisos_da_configuracao) = Configuracoes::carregar(&armazenamento);
-    let (cofre_lido, aviso_do_cofre) =
-        Cofre::abrir(&configuracoes.pasta_do_cofre(armazenamento.pasta()));
+    let pasta_do_cofre = configuracoes.pasta_do_cofre(armazenamento.pasta());
+    if so_leitura {
+        crate::armazenamento::somente_leitura_em(&pasta_do_cofre);
+    }
+    let (cofre_lido, aviso_do_cofre) = Cofre::abrir(&pasta_do_cofre);
     let cofre = CofreCompartilhado::new(cofre_lido);
     let aviso_inicial = aviso_inicial.or(aviso_do_cofre);
     let estado_lido = estado::ler(&armazenamento);
@@ -5867,6 +6050,12 @@ fn nova_tela(
     );
 
     let fila: FilaChaves = signal(Vec::new());
+    // As Conexões e as Propriedades da principal: o arranjo delas é o da página Terminais.
+    let paineis_terminais = PaineisDaPagina::novo(paineis::layout_inicial(
+        estado_lido.as_ref(),
+        paineis::TERMINAIS,
+        None,
+    ));
     let principal = Janela {
         handle: WindowHandle::current(),
         layout: signal(PaneLayout::with(Vec::new())),
@@ -5875,11 +6064,15 @@ fn nova_tela(
         ia_comando: signal(false),
         colar_dialogo: signal(false),
         mcp_aprovar: signal(false),
+        paineis: paineis_terminais.layout,
     };
     let espacos = match configuracoes.janelas.pasta_espacos.trim() {
         "" => Espacos::new(armazenamento.pasta()),
         escolhida => Espacos::na_pasta(PathBuf::from(escolhida)),
     };
+    if so_leitura {
+        crate::armazenamento::somente_leitura_em(espacos.raiz());
+    }
     let opener = opener(fila);
     let aviso: Signal<Option<(InfoBarSeverity, String)>> =
         signal(aviso_inicial.map(|a| (InfoBarSeverity::Warning, a)));
@@ -5904,6 +6097,8 @@ fn nova_tela(
         abertos: signal(BTreeSet::new()),
         filtro: signal(String::new()),
         filtro_aberto: signal(false),
+        resumo_tuneis: signal(String::new()),
+        resumo_comandos: signal(String::new()),
         renomeando: signal(None),
         campos: Campos::novo(),
         janelas,
@@ -5962,11 +6157,7 @@ fn nova_tela(
             estado_lido.as_ref().and_then(|e| e.notas.as_ref()),
             config.with_untracked(|c| c.notas.modo),
         ),
-        paineis_terminais: PaineisDaPagina::novo(paineis::layout_inicial(
-            estado_lido.as_ref(),
-            paineis::TERMINAIS,
-            None,
-        )),
+        paineis_terminais,
         paineis_notas: PaineisDaPagina::novo(paineis::layout_inicial(
             estado_lido.as_ref(),
             paineis::NOTAS,
@@ -5987,8 +6178,9 @@ fn nova_tela(
         logs_pagina: pagina_logs::Estado::novo(),
         liberado: Cell::new(false),
         encerrando: Cell::new(false),
-        estado_alheio: Cell::new(!dono_do_estado),
-        trava_do_estado: RefCell::new(None),
+        so_leitura,
+        dona_aberta: signal(so_leitura),
+        visto_conexoes: RefCell::new(visto_conexoes),
         alarmes,
         realce_menu: signal(None),
         identificando: signal(None),
@@ -6083,6 +6275,7 @@ pub fn tela_com_ferramentas(
     receber(Rc::clone(&tela.ferramentas));
     tela.ligar_bandeja();
     tela.vigiar_cofre();
+    tela.vigiar_conexoes();
     tela.vigiar_logs();
     tela.vigiar_chave_dos_logs();
     tela.vigiar_redes();
@@ -6413,6 +6606,7 @@ pub fn tela_com_ferramentas(
                 .child(barra_aviso("aviso-atencao", InfoBarSeverity::Warning))
                 .child(barra_aviso("aviso-sucesso", InfoBarSeverity::Success))
                 .child(barra_aviso("aviso-info", InfoBarSeverity::Informational))
+                .child(aviso_so_leitura(&tela))
                 .child(bandeja::aviso_sem_bandeja(&tela))
                 .child(cofre_portatil::aviso_de_conflito(&tela))
                 .child(programas::avisos(&tela))
@@ -6429,6 +6623,28 @@ pub fn tela_com_ferramentas(
                 .child(cofre_portatil::dialogos(&tela))
                 .child(importacao::dialogos(&tela)),
         )
+}
+
+/// A barra fixa de uma cópia só de leitura do app (outra cópia é a dona da configuração), com o
+/// "Reiniciar": enquanto a dona está aberta, a cópia nova também abre só de leitura; depois que
+/// ela fecha, a cópia nova é a dona.
+fn aviso_so_leitura(tela: &Rc<Tela>) -> impl View + use<> {
+    let dona_aberta = tela.dona_aberta;
+    InfoBar::new(InfoBarSeverity::Warning)
+        .id("so-leitura")
+        .title(t!("armazenamento-so-leitura-titulo"))
+        .message(move || {
+            if dona_aberta.get() {
+                t!("armazenamento-so-leitura-aviso")
+            } else {
+                t!("armazenamento-so-leitura-dona-fechou")
+            }
+        })
+        .action(
+            t!("armazenamento-so-leitura-reiniciar"),
+            crate::reinicio::pedir,
+        )
+        .visible(tela.so_leitura)
 }
 
 /// A busca global da barra de título: conexões e itens do cofre. Escolher uma conexão a abre

@@ -627,19 +627,25 @@ pub fn certificado_confiado(arquivo: &Path, host_porta: &str, sha256: &str) -> b
         .is_some_and(|confiado| confiado == sha256)
 }
 
-/// Grava a confiança no certificado (substitui o anterior do mesmo servidor).
+/// Grava a confiança no certificado (substitui o anterior do mesmo servidor), de forma atômica.
+/// Numa pasta só de leitura ([`crate::armazenamento::so_leitura`]), não grava: vale só para esta
+/// conexão.
 pub fn confiar_no_certificado(
     arquivo: &Path,
     host_porta: &str,
     sha256: &str,
 ) -> Result<(), String> {
+    if crate::armazenamento::so_leitura(arquivo) {
+        return Ok(());
+    }
     let mut todos = ler_certificados(arquivo);
     todos.insert(host_porta.to_owned(), sha256.to_owned());
     if let Some(pasta) = arquivo.parent() {
         std::fs::create_dir_all(pasta).map_err(|erro| erro.to_string())?;
     }
     let texto = serde_json::to_string_pretty(&todos).map_err(|erro| erro.to_string())?;
-    std::fs::write(arquivo, texto).map_err(|erro| erro.to_string())
+    crate::armazenamento::gravar_atomico(arquivo, texto.as_bytes(), false)
+        .map_err(|erro| erro.to_string())
 }
 
 /// A data (UTC) no formato do idioma.

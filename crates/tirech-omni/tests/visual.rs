@@ -418,6 +418,7 @@ fn semear_espacos(pasta: &Pasta) {
                 posicao: None,
                 tamanho: None,
                 cluster_ia: None,
+                laterais: None,
             }],
         )
     };
@@ -432,6 +433,7 @@ fn semear_espacos(pasta: &Pasta) {
             posicao: None,
             tamanho: None,
             cluster_ia: None,
+            laterais: None,
         }],
     );
     espacos.criar_pasta("", "Produção").unwrap();

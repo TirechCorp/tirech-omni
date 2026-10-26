@@ -12,7 +12,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -27,6 +27,10 @@ use serde::{Deserialize, Serialize};
 use tomni_ui::clipboard;
 use tomni_ui::prelude::*;
 
+use crate::armazenamento::{
+    carimbo, conferir_gravacao, copia_do_dia, copia_do_dia_existe, gravar_atomico,
+    guardar_ilegivel, so_leitura, sufixo_da_copia,
+};
 use crate::busca::normalizar;
 use crate::configuracoes::Configuracoes;
 use crate::gerador::Gerador;
@@ -1329,25 +1333,11 @@ fn bloqueado_erro() -> io::Error {
     )
 }
 
-/// Grava `nome` na `pasta` de forma atômica (um `.tmp` ao lado e `rename`), no Unix com a
-/// permissão `0o600`: o cofre e a chave são só de quem os criou.
+/// Grava `nome` na `pasta` de forma atômica ([`gravar_atomico`]), no Unix com a permissão
+/// `0o600`: o cofre e a chave são só de quem os criou.
 fn gravar_privado(pasta: &Path, nome: &str, bytes: &[u8]) -> io::Result<()> {
     fs::create_dir_all(pasta)?;
-    let arquivo = pasta.join(nome);
-    let tmp = pasta.join(format!("{nome}.tmp"));
-    let _ = fs::remove_file(&tmp);
-    let mut opcoes = fs::OpenOptions::new();
-    opcoes.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opcoes.mode(0o600);
-    }
-    let mut f = opcoes.open(&tmp)?;
-    f.write_all(bytes)?;
-    f.sync_all()?;
-    drop(f);
-    fs::rename(&tmp, &arquivo)
+    gravar_atomico(&pasta.join(nome), bytes, true)
 }
 
 /// Grava `bytes` em `caminho` como o `vault.json`: atômico e, no Unix, só do dono. É o
@@ -1375,8 +1365,12 @@ fn ler_chave(pasta: &Path) -> Option<Chave> {
 }
 
 /// Os nomes antigos (`cofre.json` e `chave`) passam a `vault.json` e `vault.key`. Só renomeia
-/// quando o novo não existe; com os dois, não mexe em nenhum. Não decifra nada.
+/// quando o novo não existe; com os dois, não mexe em nenhum. Não decifra nada. Numa pasta só de
+/// leitura ([`so_leitura`]) não renomeia: quem migra é a cópia do app dona da pasta.
 fn migrar_nomes(pasta: &Path) {
+    if so_leitura(pasta) {
+        return;
+    }
     for (antigo, novo) in [
         (ARQUIVO_ANTIGO, ARQUIVO),
         (ARQUIVO_CHAVE_ANTIGO, ARQUIVO_CHAVE),
@@ -1523,6 +1517,14 @@ impl Cofre {
                 );
             }
         };
+        // Gravado por uma versão mais nova do app: não está corrompido, só não se entende aqui.
+        // Abre vazio e trancado (não grava por cima nem tira o arquivo do lugar), com o motivo.
+        if versao_de(&bytes).is_some_and(|v| v > VERSAO) {
+            let mut cofre = Self::vazio(pasta);
+            cofre.trancado = Some(t!("cofre-versao-mais-nova"));
+            cofre.no_disco = bytes;
+            return (cofre, Some(t!("cofre-versao-mais-nova")));
+        }
         // Só o `vault.json`, sem a chave: o cofre não está corrompido, e gravar por cima o
         // perderia. Abre vazio e trancado, com o motivo.
         if let Ok(a) = serde_json::from_slice::<Arquivo>(&bytes)
@@ -1536,9 +1538,24 @@ impl Cofre {
             return (cofre, Some(sem_chave()));
         }
         match Self::ler(pasta, bytes) {
-            Some(cofre) => (cofre, None),
+            Some(cofre) => {
+                cofre.copia_do_dia(&cofre.no_disco);
+                (cofre, None)
+            }
             None => Self::corrompido(pasta),
         }
+    }
+
+    /// Guarda `bytes` (um `vault.json` que se leu) e o `vault.key` de agora como a cópia de
+    /// hoje, em `copias/`, se ela ainda não existe ([`copia_do_dia`]).
+    fn copia_do_dia(&self, bytes: &[u8]) {
+        if bytes.is_empty() || copia_do_dia_existe(&self.pasta, ARQUIVO) {
+            return;
+        }
+        if let Ok(chave) = fs::read(self.pasta.join(ARQUIVO_CHAVE)) {
+            let _ = copia_do_dia(&self.pasta, ARQUIVO_CHAVE, &chave, true);
+        }
+        let _ = copia_do_dia(&self.pasta, ARQUIVO, bytes, true);
     }
 
     fn ler(pasta: &Path, bytes: Vec<u8>) -> Option<Cofre> {
@@ -1618,8 +1635,21 @@ impl Cofre {
         conteudo
     }
 
+    /// Tira do caminho o `vault.json` que não se lê e o `vault.key`, com o mesmo final (`.bak`,
+    /// ou `.bak-<data>` se já há um: nunca por cima de uma cópia de antes), e abre vazio. Numa
+    /// pasta só de leitura não tira nada do lugar: abre vazio e trancado, com o motivo.
     fn corrompido(pasta: &Path) -> (Cofre, Option<String>) {
-        let copia = pasta.join(format!("{ARQUIVO}.bak"));
+        if so_leitura(pasta) {
+            let aviso = t!(
+                "cofre-corrompido-sem-copia",
+                erro = crate::armazenamento::erro_so_leitura().to_string()
+            );
+            let mut cofre = Self::vazio(pasta);
+            cofre.trancado = Some(aviso.clone());
+            return (cofre, Some(aviso));
+        }
+        let sufixo = sufixo_da_copia(&[pasta.join(ARQUIVO), pasta.join(ARQUIVO_CHAVE)]);
+        let copia = pasta.join(format!("{ARQUIVO}{sufixo}"));
         let aviso = match fs::rename(pasta.join(ARQUIVO), &copia) {
             Ok(()) => t!(
                 "cofre-corrompido-com-copia",
@@ -1630,7 +1660,7 @@ impl Cofre {
         if pasta.join(ARQUIVO_CHAVE).exists() {
             let _ = fs::rename(
                 pasta.join(ARQUIVO_CHAVE),
-                pasta.join(format!("{ARQUIVO_CHAVE}.bak")),
+                pasta.join(format!("{ARQUIVO_CHAVE}{sufixo}")),
             );
         }
         (Self::vazio(pasta), Some(aviso))
@@ -2249,6 +2279,7 @@ impl Cofre {
 
     /// `Some` define ou troca a senha mestra; `None` remove. Recifra tudo e grava.
     pub fn definir_senha_mestra(&mut self, nova: Option<&str>) -> io::Result<()> {
+        conferir_gravacao(&self.pasta)?;
         if self.bloqueado() {
             return Err(bloqueado_erro());
         }
@@ -2297,7 +2328,8 @@ impl Cofre {
         std::mem::take(&mut self.conflitos_novos)
     }
 
-    /// Sem senha mestra, a chave nasce na primeira gravação.
+    /// Sem senha mestra, a chave nasce na primeira gravação (numa pasta só de leitura, não nasce:
+    /// o cofre fica só na memória).
     fn garantir_chave(&mut self) -> io::Result<()> {
         if self.chave.is_some() {
             return Ok(());
@@ -2307,6 +2339,7 @@ impl Cofre {
         }
         let chave = match ler_chave(&self.pasta) {
             Some(chave) => chave,
+            None if so_leitura(&self.pasta) => return Ok(()),
             None => {
                 let chave = aleatorio::<32>()?;
                 gravar_chave(&self.pasta, &chave)?;
@@ -2344,13 +2377,22 @@ impl Cofre {
                 t!("cofre-alterado-com-outra-chave")
             })
         };
-        let chave = self.chave.ok_or_else(bloqueado_erro)?;
+        // Sem senha mestra e ainda sem a chave (a outra cópia do app criou o cofre depois de esta
+        // abrir), a chave é a do `vault.key` que nasceu com ele.
+        let chave = match self.chave {
+            Some(chave) => chave,
+            None if !self.tem_senha_mestra() && arquivo.protecao == Protecao::Chave => {
+                ler_chave(&self.pasta).ok_or_else(outra_senha)?
+            }
+            None => return Err(bloqueado_erro()),
+        };
         if arquivo.protecao != self.protecao {
             return Err(outra_senha());
         }
         let outro = decifrar(&chave, &arquivo.itens)
             .and_then(|claro| conteudo_de(arquivo.versao, &claro))
             .ok_or_else(outra_senha)?;
+        self.chave = Some(chave);
         let resumo = self.conteudo.juntar(outro);
         self.no_disco = bytes;
         // Sem nada a regravar, o que há aqui é o que está no disco; com, quem chama grava e o
@@ -2465,6 +2507,7 @@ impl Cofre {
     /// proteção daqui continua (senha mestra ou chave); só um cofre bloqueado ou sem a chave
     /// adota a do cofre de fora, e um cofre de fora sem senha ganha uma `vault.key` nova.
     pub fn substituir_por(&mut self, externo: &Externo) -> io::Result<Option<PathBuf>> {
+        conferir_gravacao(&self.pasta)?;
         let conteudo = externo.conteudo.clone().ok_or_else(externo_trancado)?;
         let copia = guardar_copia(&self.pasta, false)?;
         if self.bloqueado() || self.trancado.is_some() {
@@ -2494,13 +2537,15 @@ impl Cofre {
     }
 
     /// Leva o `vault.json` e o `vault.key` para a pasta `nova` e passa a usá-la; os de agora
-    /// ficam como `.bak`. O que já houvesse lá vira `.bak-<data>`. A pasta `vault/` dos anexos
+    /// ficam como `.bak` (ou `.bak-<data>`, se já há um). O que já houvesse lá vira `.bak-<data>`. A pasta `vault/` dos anexos
     /// quem copia é a tela (em segundo plano, com progresso), antes; aqui a de agora só vira
     /// `vault.bak/` (ou `vault.bak-<data>/`, se já há uma).
     pub fn levar_para(&mut self, nova: &Path) -> io::Result<()> {
         if nova == self.pasta {
             return Ok(());
         }
+        conferir_gravacao(&self.pasta)?;
+        conferir_gravacao(nova)?;
         fs::create_dir_all(nova)?;
         guardar_copia(nova, true)?;
         for nome in [ARQUIVO, ARQUIVO_CHAVE] {
@@ -2509,10 +2554,11 @@ impl Cofre {
                 gravar_privado(nova, nome, &fs::read(&origem)?)?;
             }
         }
+        let sufixo = sufixo_da_copia(&[self.pasta.join(ARQUIVO), self.pasta.join(ARQUIVO_CHAVE)]);
         for nome in [ARQUIVO, ARQUIVO_CHAVE] {
             let origem = self.pasta.join(nome);
             if origem.exists() {
-                fs::rename(&origem, self.pasta.join(format!("{nome}.bak")))?;
+                fs::rename(&origem, self.pasta.join(format!("{nome}{sufixo}")))?;
             }
         }
         let anexos = self.pasta.join(crate::anexos::PASTA);
@@ -2563,6 +2609,7 @@ impl Cofre {
 
     /// Guarda uma cópia já juntada ao lado, com o nome acrescido de `.juntado`.
     pub fn arquivar_copia(caminho: &Path) -> io::Result<PathBuf> {
+        conferir_gravacao(caminho)?;
         let mut nome = caminho.as_os_str().to_owned();
         nome.push(".juntado");
         let destino = PathBuf::from(nome);
@@ -2570,10 +2617,31 @@ impl Cofre {
         Ok(destino)
     }
 
-    /// Cifra e grava, sem conferir o disco (quem chama já conferiu).
+    /// Cifra e grava, sem juntar o que mudou no disco (quem chama já juntou). Antes, as travas
+    /// contra perder o que está lá: um `vault.json` de uma versão mais nova do app não é
+    /// sobrescrito, um que não se lê vai antes para um `.bak` e o de agora vira a cópia do dia.
+    /// Numa pasta só de leitura ([`so_leitura`]) não grava nada: o que mudou fica na memória e se
+    /// perde ao fechar, e o `no_disco` continua o do arquivo, para juntar o que a outra cópia do
+    /// app gravar.
     fn escrever(&mut self) -> io::Result<()> {
+        if so_leitura(&self.pasta) {
+            return Ok(());
+        }
+        let chave = self.chave.ok_or_else(bloqueado_erro)?;
+        let arquivo = self.pasta.join(ARQUIVO);
+        if let Ok(atual) = fs::read(&arquivo)
+            && atual != self.no_disco
+        {
+            if versao_de(&atual).is_some_and(|v| v > VERSAO) {
+                return Err(io::Error::other(t!("cofre-versao-mais-nova")));
+            }
+            if serde_json::from_slice::<Arquivo>(&atual).is_err() {
+                guardar_ilegivel(&arquivo)?;
+            }
+        }
+        self.copia_do_dia(&self.no_disco);
         self.conteudo.podar(agora());
-        let chave = self.chave.as_ref().ok_or_else(bloqueado_erro)?;
+        let chave = &chave;
         let claro = serde_json::to_vec(&self.conteudo).map_err(io::Error::other)?;
         let arquivo = Arquivo {
             versao: VERSAO,
@@ -2595,22 +2663,20 @@ fn e_copia_em_conflito(nome: &str) -> bool {
         || nome.starts_with("vault-")
 }
 
+/// O campo `versao` de um `vault.json`, mesmo de um formato que este código não entende inteiro.
+fn versao_de(bytes: &[u8]) -> Option<u32> {
+    #[derive(Deserialize)]
+    struct SoVersao {
+        versao: u32,
+    }
+    serde_json::from_slice::<SoVersao>(bytes)
+        .ok()
+        .map(|a| a.versao)
+}
+
 /// O erro de usar o cofre de fora antes de destravá-lo.
 fn externo_trancado() -> io::Error {
     io::Error::other(t!("cofre-de-fora-trancado"))
-}
-
-/// Os segundos desde 1970 como `aaaammdd-hhmmss` (UTC), para o nome das cópias.
-fn carimbo() -> String {
-    let t = agora();
-    let (ano, mes, dia) = crate::recentes::data_civil(t / 86_400);
-    let s = t % 86_400;
-    format!(
-        "{ano:04}{mes:02}{dia:02}-{:02}{:02}{:02}",
-        s / 3600,
-        s % 3600 / 60,
-        s % 60
-    )
 }
 
 /// Guarda o `vault.json` e o `vault.key` da `pasta` como `.bak-<data>` (copiando, ou movendo
@@ -3221,11 +3287,13 @@ mod tests {
 
     #[test]
     fn json_invalido_e_versao_desconhecida_viram_copia() {
+        // A versão 0 nunca existiu. Uma mais nova que esta não vira cópia: fica onde está, e o
+        // cofre abre trancado (`cofre_de_versao_mais_nova_abre_trancado_sem_mexer_no_arquivo`).
         for (nome, texto) in [
             ("json", "isto não é json".to_owned()),
             (
                 "versao",
-                r#"{"versao":9,"protecao":{"tipo":"chave"},"itens":{"nonce":"","dados":""}}"#
+                r#"{"versao":0,"protecao":{"tipo":"chave"},"itens":{"nonce":"","dados":""}}"#
                     .to_owned(),
             ),
         ] {
@@ -4740,5 +4808,207 @@ mod tests {
         la.atualizar_do_disco().unwrap();
         assert_eq!(la.notas().count(), 1);
         assert_eq!(la.item(id).unwrap().notas, "5");
+    }
+
+    /// Os nomes da pasta que começam com `prefixo`, em ordem.
+    fn nomes_com(pasta: &Path, prefixo: &str) -> Vec<String> {
+        let mut nomes: Vec<String> = fs::read_dir(pasta)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(prefixo))
+            .collect();
+        nomes.sort();
+        nomes
+    }
+
+    #[test]
+    fn cofre_de_versao_mais_nova_abre_trancado_sem_mexer_no_arquivo() {
+        let (_cofre, pasta) = cofre_com_itens("mais-nova");
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(pasta.0.join("vault.json")).unwrap()).unwrap();
+        json["versao"] = (VERSAO + 1).into();
+        json["campo_que_ainda_nao_existe"] = "x".into();
+        fs::write(pasta.0.join("vault.json"), json.to_string()).unwrap();
+        let antes = texto_do_cofre(&pasta.0);
+        let chave = fs::read(pasta.0.join("vault.key")).unwrap();
+
+        let (mut cofre, aviso) = Cofre::abrir(&pasta.0);
+        assert_eq!(aviso, Some(t!("cofre-versao-mais-nova")));
+        assert!(cofre.itens().is_empty());
+        assert!(!cofre.pode_coletar_anexos());
+        assert!(!cofre.mudou_no_disco(), "a vigia não acusa mudança à toa");
+        assert!(cofre.salvar(item("novo")).is_err());
+        assert_eq!(cofre.atualizar_do_disco().unwrap(), None);
+        assert_eq!(texto_do_cofre(&pasta.0), antes);
+        assert_eq!(fs::read(pasta.0.join("vault.key")).unwrap(), chave);
+        assert_eq!(nomes_com(&pasta.0, "vault.json."), Vec::<String>::new());
+        assert_eq!(nomes_com(&pasta.0, "vault.key."), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_gravacao_nao_pisa_num_cofre_de_versao_mais_nova_gravado_por_outra_copia() {
+        let (mut cofre, pasta) = cofre_com_itens("mais-nova-depois");
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(pasta.0.join("vault.json")).unwrap()).unwrap();
+        json["versao"] = (VERSAO + 1).into();
+        fs::write(pasta.0.join("vault.json"), json.to_string()).unwrap();
+        let antes = texto_do_cofre(&pasta.0);
+        let erro = cofre.salvar(item("novo")).unwrap_err();
+        assert_eq!(erro.to_string(), t!("cofre-versao-mais-nova"));
+        assert_eq!(texto_do_cofre(&pasta.0), antes);
+    }
+
+    #[test]
+    fn duas_corrupcoes_guardam_duas_copias_sem_pisar_na_primeira() {
+        let pasta = PastaTemporaria::nova("duas-corrupcoes");
+        let (mut cofre, _) = Cofre::abrir(&pasta.0);
+        cofre.salvar(item("web")).unwrap();
+        let chave_1 = fs::read(pasta.0.join("vault.key")).unwrap();
+        fs::write(pasta.0.join("vault.json"), "{ estragado 1").unwrap();
+        let (mut cofre, aviso) = Cofre::abrir(&pasta.0);
+        assert!(aviso.is_some());
+        cofre.salvar(item("banco")).unwrap();
+        fs::write(pasta.0.join("vault.json"), "{ estragado 2").unwrap();
+        let (_cofre, aviso) = Cofre::abrir(&pasta.0);
+        let aviso = aviso.unwrap();
+
+        assert_eq!(
+            fs::read_to_string(pasta.0.join("vault.json.bak")).unwrap(),
+            "{ estragado 1"
+        );
+        assert_eq!(fs::read(pasta.0.join("vault.key.bak")).unwrap(), chave_1);
+        let jsons = nomes_com(&pasta.0, "vault.json.bak-");
+        let chaves = nomes_com(&pasta.0, "vault.key.bak-");
+        assert_eq!(jsons.len(), 1, "{jsons:?}");
+        assert_eq!(chaves.len(), 1, "{chaves:?}");
+        assert_eq!(
+            jsons[0].strip_prefix("vault.json"),
+            chaves[0].strip_prefix("vault.key"),
+            "o par fica com o mesmo final"
+        );
+        assert!(aviso.contains(&jsons[0]), "{aviso}");
+        assert_eq!(
+            fs::read_to_string(pasta.0.join(&jsons[0])).unwrap(),
+            "{ estragado 2"
+        );
+    }
+
+    #[test]
+    fn gravar_por_cima_de_um_cofre_ilegivel_guarda_antes_o_ilegivel() {
+        let (mut cofre, pasta) = cofre_com_itens("ilegivel-no-disco");
+        fs::write(pasta.0.join("vault.json"), "{ meio arquivo").unwrap();
+        cofre.salvar(item("novo")).unwrap();
+        assert_eq!(
+            fs::read_to_string(pasta.0.join("vault.json.bak")).unwrap(),
+            "{ meio arquivo"
+        );
+        let (reaberto, aviso) = Cofre::abrir(&pasta.0);
+        assert_eq!(aviso, None);
+        assert_eq!(titulos_do(&reaberto), ["banco", "novo", "web"]);
+    }
+
+    #[test]
+    fn o_cofre_ganha_uma_copia_por_dia_que_abre_igual() {
+        const DIA: u64 = 86_400;
+        let inicio = 20_000 * DIA + 3_600;
+        crate::recentes::fixar_relogio(Some(inicio));
+        let (mut cofre, pasta) = cofre_com_itens("copia-do-dia");
+        let copias = pasta.0.join(crate::armazenamento::PASTA_COPIAS);
+        // O cofre novo não tinha o que copiar; a segunda gravação copia a primeira.
+        assert_eq!(
+            nomes_com(&copias, ""),
+            ["20241004-vault.json", "20241004-vault.key"]
+        );
+        crate::recentes::fixar_relogio(Some(inicio + DIA));
+        cofre.salvar(item("terca")).unwrap();
+        crate::recentes::fixar_relogio(Some(inicio + DIA + 60));
+        cofre.salvar(item("terca-de-novo")).unwrap();
+        let nomes = nomes_com(&copias, "");
+        assert_eq!(nomes.len(), 4, "{nomes:?}");
+        crate::recentes::fixar_relogio(None);
+
+        // A cópia de um dia, posta no lugar, abre com o que havia nele.
+        let fora = PastaTemporaria::nova("copia-do-dia-fora");
+        fs::create_dir_all(&fora.0).unwrap();
+        for nome in ["vault.json", "vault.key"] {
+            fs::copy(copias.join(format!("20241005-{nome}")), fora.0.join(nome)).unwrap();
+        }
+        let (antiga, aviso) = Cofre::abrir(&fora.0);
+        assert_eq!(aviso, None);
+        assert_eq!(titulos_do(&antiga), ["banco", "web"]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let modo = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+            assert_eq!(modo(&copias), 0o700);
+            assert_eq!(modo(&copias.join("20241005-vault.key")), 0o600);
+        }
+    }
+
+    #[test]
+    fn numa_pasta_so_de_leitura_o_cofre_nao_grava_nada() {
+        let pasta = PastaTemporaria::nova("cofre-so-leitura");
+        let (mut cofre, _) = Cofre::abrir(&pasta.0);
+        cofre.salvar(item("web")).unwrap();
+        let antes = texto_do_cofre(&pasta.0);
+        let chave = fs::read(pasta.0.join("vault.key")).unwrap();
+        crate::armazenamento::somente_leitura_em(&pasta.0);
+
+        let (mut outra, aviso) = Cofre::abrir(&pasta.0);
+        assert_eq!(aviso, None);
+        assert_eq!(
+            outra.itens()[0].titulo,
+            "web",
+            "a cópia só de leitura lê o cofre"
+        );
+        assert!(!pasta.0.join("copias").exists(), "nem a cópia do dia nasce");
+        // Mexer no cofre fica só na memória.
+        outra.salvar(item("db")).unwrap();
+        outra.remover(outra.itens()[0].id).unwrap();
+        assert_eq!(texto_do_cofre(&pasta.0), antes);
+        assert_eq!(fs::read(pasta.0.join("vault.key")).unwrap(), chave);
+        // O que a pessoa pede e mexeria nos arquivos devolve o erro.
+        let erro = outra.definir_senha_mestra(Some("m")).unwrap_err();
+        assert_eq!(erro.kind(), io::ErrorKind::ReadOnlyFilesystem);
+        let fora = PastaTemporaria::nova("cofre-so-leitura-destino");
+        let erro = outra.levar_para(&fora.0).unwrap_err();
+        assert_eq!(erro.kind(), io::ErrorKind::ReadOnlyFilesystem);
+        assert!(!fora.0.join("vault.json").exists());
+        assert_eq!(texto_do_cofre(&pasta.0), antes);
+        assert!(pasta.0.join("vault.key").exists());
+    }
+
+    #[test]
+    fn numa_pasta_so_de_leitura_sem_cofre_nao_nasce_a_chave() {
+        let pasta = PastaTemporaria::nova("cofre-so-leitura-vazio");
+        fs::create_dir_all(&pasta.0).unwrap();
+        crate::armazenamento::somente_leitura_em(&pasta.0);
+        let (mut cofre, aviso) = Cofre::abrir(&pasta.0);
+        assert_eq!(aviso, None);
+        cofre.salvar(item("web")).unwrap();
+        assert!(!pasta.0.join("vault.key").exists());
+        assert!(!pasta.0.join("vault.json").exists());
+    }
+
+    #[test]
+    fn numa_pasta_so_de_leitura_o_cofre_ilegivel_fica_no_lugar_e_trancado() {
+        let pasta = PastaTemporaria::nova("cofre-so-leitura-ilegivel");
+        let (mut cofre, _) = Cofre::abrir(&pasta.0);
+        cofre.salvar(item("web")).unwrap();
+        fs::write(pasta.0.join("vault.json"), "{ pela metade").unwrap();
+        crate::armazenamento::somente_leitura_em(&pasta.0);
+
+        let (mut outra, aviso) = Cofre::abrir(&pasta.0);
+        assert!(aviso.is_some());
+        assert_eq!(texto_do_cofre(&pasta.0), "{ pela metade");
+        assert!(pasta.0.join("vault.key").exists());
+        assert!(!pasta.0.join("vault.json.bak").exists());
+        assert!(!pasta.0.join("vault.key.bak").exists());
+        assert!(
+            outra.salvar(item("db")).is_err(),
+            "trancado, como o de versão mais nova"
+        );
+        assert_eq!(texto_do_cofre(&pasta.0), "{ pela metade");
     }
 }

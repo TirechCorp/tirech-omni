@@ -64,6 +64,7 @@ pub fn do_valor(valor: &Value) -> Option<Espaco> {
             posicao: None,
             tamanho: None,
             cluster_ia: None,
+            laterais: None,
         }],
     ))
 }
@@ -110,6 +111,7 @@ mod testes {
                     posicao: None,
                     tamanho: None,
                     cluster_ia: None,
+                    laterais: None,
                 },
                 JanelaSalva {
                     grade: (2, 2),
@@ -117,6 +119,7 @@ mod testes {
                     posicao: Some((40, 60)),
                     tamanho: Some((900, 600)),
                     cluster_ia: None,
+                    laterais: None,
                 },
             ],
         );
@@ -153,6 +156,7 @@ mod testes {
                 posicao: None,
                 tamanho: None,
                 cluster_ia: None,
+                laterais: None,
             }],
         );
         gravar(&armazenamento, &estado);

@@ -31,13 +31,18 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
 
 ## Janelas e espaços de trabalho
 
-- **Várias janelas**: Janela ▸ Nova janela (Ctrl+Alt+N) abre outra janela só com os terminais
-  (barra de título, a mesma barra de menus da principal e os painéis). A árvore, as propriedades,
-  o cofre e as demais páginas ficam na janela principal. Nas outras janelas, as ações de sessão
+- **Várias janelas**: Janela ▸ Nova janela (Ctrl+Alt+N) abre outra janela com os terminais e
+  os painéis **Conexões** e **Propriedades**, fixados como na principal (barra de título, a mesma
+  barra de menus da principal e os painéis). A seleção, o filtro e as pastas abertas da árvore
+  são os mesmos em todas as janelas; o Exibir de cada janela mostra e esconde os painéis dela, e o
+  arranjo de cada uma volta na próxima execução. Apagar, editar túneis e comandos, executar e as
+  sessões do servidor perguntam na janela da árvore em que a pessoa mexeu. O cofre e as demais
+  páginas ficam na janela principal. Nas outras janelas, as ações de sessão
   (Reconectar, Parar o log, Fechar a aba…) agem na janela do menu; as que só existem na
-  principal (Nova conexão, Importar, Exportar, Cofre, Notas, Atalhos, Sobre) trazem a principal
-  para a frente, até da bandeja, e agem lá; os itens dos painéis do Exibir ficam desabilitados. Um clique duplo numa conexão abre a aba na última
-  janela em que a pessoa mexeu. Arrastar uma aba para outra janela (ou para fora de todas, que
+  principal (Nova conexão, Importar, Exportar, Cofre, Notas, Atalhos, Sobre, o cluster, o script,
+  os arquivos e copiar a chave do menu da árvore) trazem a principal para a frente, até da
+  bandeja, e agem lá; os itens dos outros painéis do Exibir ficam desabilitados. Um clique duplo
+  numa conexão abre a aba na última janela em que a pessoa mexeu. Arrastar uma aba para outra janela (ou para fora de todas, que
   abre uma janela nova) e o menu da aba "Mover para a janela" levam a **mesma sessão**: nada
   reconecta e o histórico continua. O menu Janela lista as janelas abertas e dá o foco.
 - **Estado das conexões na árvore**: um selo no canto do ícone mostra o estado de cada conexão
@@ -996,7 +1001,7 @@ terminal, no menu da aba e em Ferramentas › Assistentes de IA (que controla a 
 - No Claude Code, os avisos do app (a aba dada, os arquivos soltos na aba) chegam junto da
   próxima mensagem que você manda, sem esperar o assistente chamar uma ferramenta: o app lança o
   Claude com `--settings` apontando para um hook `UserPromptSubmit` (`tirech-omni mcp --avisos
-  <código>`), num arquivo `lancar-<n>-avisos.json` ao lado do `lancar-<n>.json`. As suas
+  <código>`), num arquivo `lancar-<pid>-<n>-avisos.json` ao lado do `lancar-<pid>-<n>.json`. As suas
   configurações do Claude Code não mudam.
 - O servidor do app também oferece três comandos com barra no Claude Code (prompts do MCP):
   `/mcp__tirech-omni-aba__abas` (as abas abertas e quais ele controla),
@@ -1068,14 +1073,21 @@ assistentes fazem" desliga.
 Na pasta de configuração do sistema (`~/.config/tirech-omni` no Linux), ou na pasta que a
 variável `TIRECH_OMNI_CONFIG` apontar:
 
-- `connections.json`: as conexões e os grupos, gravado na hora, de forma atômica. Se estiver
-  corrompido, vai para `connections.json.bak` e o app avisa.
+- `connections.json`: as conexões e os grupos, gravado na hora, de forma atômica (cada gravação
+  num `.tmp` próprio, que só substitui o arquivo inteiro). Se estiver corrompido, vai para
+  `connections.json.bak` (ou `.bak-<data e hora>`, sem pisar numa cópia de antes) e o app
+  avisa. Campos que esta versão não conhece (de uma versão mais nova) continuam no arquivo ao
+  gravar; um arquivo com `version` maior que a desta versão é lido no que se entende e não é
+  sobrescrito. Quando outro programa (outra cópia do app, um editor, a sincronização) muda o
+  arquivo, o app relê sozinho em poucos segundos; se a mudança de fora chega entre a leitura e
+  uma gravação daqui, a versão de fora fica guardada como `connections.json.conflito-<data e
+  hora>` e o app avisa.
 - `estado.json`: todas as janelas, com a grade e as conexões abertas em cada painel, e a sessão
   do tmux das abas com a sessão persistente (o formato de um espaço; o de uma janela só, das primeiras versões, ainda é lido). Guarda também o layout dos painéis
   com alfinete de cada página (Terminais, Notas e Arquivos: modo, lado, tamanhos, ordem e a
   janela dos flutuantes). Com duas cópias do app abertas na mesma pasta, só a primeira restaura
-  e grava este arquivo: a segunda abre sem as abas (elas já estão abertas na primeira) e passa a
-  gravar quando a primeira fecha.
+  e grava este arquivo: a segunda abre sem as abas (elas já estão abertas na primeira) e é só de
+  leitura (ver `trava.lock`).
 - `conversas.json`: o diário das conversas dos assistentes do "Controlar com", por aba (o id da
   conexão; `0` é o shell local avulso): o assistente, o id da conversa nele, quando foi aberta e
   a primeira mensagem. Até 20 por aba e assistente. Apagar só faz o app esquecer as conversas
@@ -1093,8 +1105,14 @@ variável `TIRECH_OMNI_CONFIG` apontar:
   mantidos ao gravar. Corrompido, vai para `configuracoes.json.bak` e o app avisa.
 - `pasta.txt` (na pasta de configuração do sistema, não na de dados): o caminho da pasta de dados,
   quando ela foi mudada pela página Configurações.
-- `trava.lock`: a trava da primeira cópia aberta com a pasta. No modo portable, ela impede a
-  segunda cópia; fora dele, diz quem é a dona do `estado.json`.
+- `trava.lock`: a trava da primeira cópia aberta com a pasta, a dona da configuração. No modo
+  portable, ela impede a segunda cópia. Fora dele, a segunda abre **só de leitura**, como no
+  WinSSHTerm: uma barra no topo avisa, e nada da pasta de dados nem do cofre é gravado por ela
+  (conexões, estado, cofre, configurações, espaços, anexos, recentes, a cópia do dia, a limpeza
+  dos arquivos do "Controlar com"); o que se muda nela fica na memória e se perde ao fechar. O
+  que a dona grava aparece sozinho na segunda (as conexões e o cofre são relidos). Quando a dona
+  fecha, a barra diz que dá para gravar depois de reiniciar, e o botão Reiniciar da barra abre
+  esta cópia de novo, agora como dona. A ponte `tirech-omni mcp` também não grava nada da pasta.
 - `agente.json`: se o agente embutido liga com o app, o tempo de vida padrão e as chaves de
   arquivo que ele carrega ao iniciar (só o caminho do arquivo, a confirmação e a vida; nunca a
   passphrase). As chaves do cofre não entram aqui: ficam no próprio `vault.json`. O socket do
@@ -1110,7 +1128,7 @@ variável `TIRECH_OMNI_CONFIG` apontar:
 - `ia.json`: os provedores de IA (nome, URL, dialeto, modelo, rede, TLS e cabeçalhos) e o
   provedor padrão. **A chave da API não entra aqui**: fica num item do cofre ("Chave de API — …")
   e o perfil guarda só o id dele. Corrompido, vai para `ia.json.bak` e o app avisa.
-- `mcp/lancar-<n>.json`, `mcp/lancar-<n>-avisos.json` e `mcp/conversa-<n>.json`: os arquivos de
+- `mcp/lancar-<pid>-<n>.json`, `mcp/lancar-<pid>-<n>-avisos.json` e `mcp/conversa-<pid>-<n>.json`: os arquivos de
   cada lançamento do "Controlar com" (a ponte, o hook dos avisos do Claude Code e o id da
   conversa nova do Codex, que o `notify` grava). Ficam enquanto o app está aberto (o
   Reconectar reusa) e são apagados na próxima abertura.
@@ -1136,9 +1154,15 @@ variável `TIRECH_OMNI_CONFIG` apontar:
   `uid`, lápides das remoções e as chaves SSH) e a chave que o abre (some quando há senha
   mestra). O `cofre.json` e o `chave` das versões antigas são renomeados na primeira abertura, e
   os cofres das versões 1 e 2 passam para a 3 na primeira gravação. Gravado com 0600 no Unix. Se
-  o `vault.json` estiver corrompido, vai para `vault.json.bak` e o app avisa. "Usar no lugar
+  o `vault.json` estiver corrompido, vai para `vault.json.bak` (ou `.bak-<data e hora>`, nunca
+  por cima de uma cópia de antes, com o `vault.key` junto) e o app avisa; um `vault.json` de uma
+  versão mais nova do app abre trancado, sem ser sobrescrito. "Usar no lugar
   deste" deixa o cofre anterior como `vault.json.bak-<data e hora>` (e o `vault.key`).
   A pasta do cofre pode ser outra que a de dados ("Local do cofre", em `configuracoes.json`).
+- `copias/`: uma cópia por dia do `connections.json`, do `vault.json` e do `vault.key`
+  (`<aaaammdd>-<nome>`, o arquivo como estava antes da primeira mudança do dia), só dos últimos 7
+  dias. Um arquivo que se perde ou estraga volta com, no máximo, um dia de mudanças a menos:
+  feche o app e copie a cópia por cima. A pasta é só do dono no Unix.
 - `vault/`: os anexos das notas, um arquivo cifrado por anexo (nome = id), ao lado do `vault.json`.
   Os que ficam sem ficha (um salvar interrompido) são apagados depois de 24 horas.
   Ao trocar de cofre, o `vault/` antigo vira `vault.bak/` (ou `vault.bak-<data e hora>/`).

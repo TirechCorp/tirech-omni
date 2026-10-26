@@ -1589,13 +1589,11 @@ impl Configuracoes {
     }
 }
 
-/// Move o `configuracoes.json` ilegível para `.bak` e devolve o aviso.
+/// Move o `configuracoes.json` ilegível para `.bak` (ou `.bak-<data>`, se aquele já existe) e
+/// devolve o aviso.
 fn guardar_copia(arquivo: &std::path::Path) -> String {
-    let mut copia = arquivo.as_os_str().to_owned();
-    copia.push(".bak");
-    let copia = PathBuf::from(copia);
-    match fs::rename(arquivo, &copia) {
-        Ok(()) => t!("config-ilegivel-copia", copia = copia.display().to_string()),
+    match crate::armazenamento::guardar_ilegivel(arquivo) {
+        Ok(copia) => t!("config-ilegivel-copia", copia = copia.display().to_string()),
         Err(erro) => t!("config-ilegivel-sem-copia", erro = erro.to_string()),
     }
 }
@@ -1668,6 +1666,9 @@ fn migrar_rclone(armazenamento: &Armazenamento, raiz: &mut Map<String, Value>) -
 }
 
 fn renomear_para_migrado(_armazenamento: &Armazenamento, antigo: &std::path::Path) {
+    if crate::armazenamento::so_leitura(antigo) {
+        return;
+    }
     let mut novo = antigo.as_os_str().to_owned();
     novo.push(".migrado");
     let _ = fs::rename(antigo, novo);

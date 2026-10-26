@@ -3,13 +3,17 @@
 //! pasta temporária própria.
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
+use std::time::SystemTime;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde_json::Value;
 
-use crate::modelo::Tree;
+use crate::modelo::{Tree, VERSAO};
 use crate::t;
 
 /// A variável de ambiente que troca a pasta de configuração (o lint e os screenshots rodam o
@@ -30,6 +34,16 @@ pub const PASTA_PORTATIL: &str = "tirech-omnidata";
 
 /// O arquivo que o modo portable trava enquanto o app está aberto (M66).
 pub const ARQUIVO_TRAVA: &str = "trava.lock";
+
+/// O arquivo das conexões, na pasta de dados.
+const ARQUIVO_CONEXOES: &str = "connections.json";
+
+/// A pasta das cópias automáticas (uma por dia de cada arquivo), dentro da pasta de dados e, se o
+/// cofre mora em outra, dentro da do cofre também.
+pub const PASTA_COPIAS: &str = "copias";
+
+/// Quantos dias de cópias automáticas ficam de cada arquivo.
+pub const DIAS_DE_COPIAS: usize = 7;
 
 /// De onde veio a pasta de dados.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,6 +116,74 @@ pub fn travar(pasta: &Path) -> io::Result<Trava> {
         Ok(()) => Ok(Trava::Travada(arquivo)),
         Err(fs::TryLockError::WouldBlock) => Ok(Trava::Ocupada),
         Err(fs::TryLockError::Error(erro)) => Err(erro),
+    }
+}
+
+/// As pastas (e os arquivos) que esta cópia do app só lê. Uma segunda cópia aberta enquanto a
+/// primeira trava a pasta de dados registra aqui a pasta de dados, a do cofre e a dos espaços: o
+/// que se muda nela fica na memória e se perde ao fechar, como no WinSSHTerm, e nenhum arquivo
+/// da configuração é tocado. Um `connections.json` de uma versão mais nova do app entra sozinho.
+static SO_LEITURA: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Registra `caminho` (uma pasta, ou um arquivo) como só de leitura até o processo acabar. As
+/// gravações da configuração dentro dele não acontecem: as automáticas (o `connections.json`, o
+/// `vault.json`, as cópias do dia) são puladas em silêncio, e as que a pessoa pede (trocar a senha
+/// mestra, levar o cofre, salvar um espaço) devolvem [`erro_so_leitura`].
+pub fn somente_leitura_em(caminho: &Path) {
+    let mut lista = SO_LEITURA.lock().unwrap_or_else(PoisonError::into_inner);
+    for forma in [Some(caminho.to_owned()), canonico(caminho)]
+        .into_iter()
+        .flatten()
+    {
+        if !lista.contains(&forma) {
+            lista.push(forma);
+        }
+    }
+}
+
+/// Se `caminho` fica dentro de algo registrado por [`somente_leitura_em`]. Confere o caminho
+/// como veio e o canônico (com os links resolvidos), para um `..` ou um link não escaparem.
+pub fn so_leitura(caminho: &Path) -> bool {
+    let lista = SO_LEITURA.lock().unwrap_or_else(PoisonError::into_inner);
+    if lista.is_empty() {
+        return false;
+    }
+    if lista.iter().any(|p| caminho.starts_with(p)) {
+        return true;
+    }
+    canonico(caminho).is_some_and(|c| lista.iter().any(|p| c.starts_with(p)))
+}
+
+/// O erro de uma gravação recusada por [`so_leitura`].
+pub fn erro_so_leitura() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::ReadOnlyFilesystem,
+        t!("armazenamento-somente-leitura"),
+    )
+}
+
+/// `Err(`[`erro_so_leitura`]`)` se `caminho` é só de leitura; o começo das gravações que a pessoa
+/// pede.
+pub fn conferir_gravacao(caminho: &Path) -> io::Result<()> {
+    if so_leitura(caminho) {
+        Err(erro_so_leitura())
+    } else {
+        Ok(())
+    }
+}
+
+/// O caminho canônico de `caminho`, que ainda pode não existir: o do maior antepassado que
+/// existe, com o resto do nome no fim.
+fn canonico(caminho: &Path) -> Option<PathBuf> {
+    let mut resto = Vec::new();
+    let mut atual = caminho;
+    loop {
+        if let Ok(mut real) = fs::canonicalize(atual) {
+            real.extend(resto.iter().rev());
+            return Some(real);
+        }
+        resto.push(atual.file_name()?);
+        atual = atual.parent()?;
     }
 }
 
@@ -349,7 +431,7 @@ impl Armazenamento {
 
     /// O `connections.json`.
     pub fn arquivo_conexoes(&self) -> PathBuf {
-        self.pasta.join("connections.json")
+        self.pasta.join(ARQUIVO_CONEXOES)
     }
 
     /// O `estado.json`.
@@ -412,11 +494,8 @@ impl Armazenamento {
         match serde_json::from_str::<T>(&texto) {
             Ok(valor) => (valor, None),
             Err(_) => {
-                let mut copia = arquivo.as_os_str().to_owned();
-                copia.push(".bak");
-                let copia = PathBuf::from(copia);
-                let aviso = match fs::rename(arquivo, &copia) {
-                    Ok(()) => t!(
+                let aviso = match guardar_ilegivel(arquivo) {
+                    Ok(copia) => t!(
                         "armazenamento-corrompido-copia",
                         o_que = o_que,
                         copia = copia.display().to_string()
@@ -433,13 +512,22 @@ impl Armazenamento {
     }
 
     /// Lê as conexões. Arquivo ausente dá uma árvore vazia. JSON inválido vai para
-    /// `connections.json.bak`, a árvore começa vazia e o aviso (para a tela mostrar) diz onde
-    /// ficou a cópia.
+    /// `connections.json.bak` (ou `.bak-<data>`, se aquele já existe), a árvore começa vazia e o
+    /// aviso (para a tela mostrar) diz onde ficou a cópia. O arquivo bom ganha a cópia do dia
+    /// ([`copia_do_dia`]). Um arquivo de uma versão mais nova do app (`version` maior que
+    /// [`VERSAO`]) não é tocado: fica só de leitura ([`somente_leitura_em`]), com o aviso.
     pub fn carregar(&self) -> (Tree, Option<String>) {
+        let (tree, aviso, _) = self.carregar_visto();
+        (tree, aviso)
+    }
+
+    /// O [`Armazenamento::carregar`], com o que se viu do arquivo, para a vigia
+    /// ([`Armazenamento::reler_se_mudou`]) e a gravação ([`Armazenamento::salvar_visto`])
+    /// saberem se outro programa o mudou depois.
+    pub fn carregar_visto(&self) -> (Tree, Option<String>, Visto) {
         let arquivo = self.arquivo_conexoes();
-        let texto = match fs::read_to_string(&arquivo) {
-            Ok(texto) => texto,
-            Err(erro) if erro.kind() == io::ErrorKind::NotFound => return (Tree::default(), None),
+        let visto = match Visto::ler(&arquivo) {
+            Ok(visto) => visto,
             Err(erro) => {
                 return (
                     Tree::default(),
@@ -448,52 +536,323 @@ impl Armazenamento {
                         arquivo = arquivo.display().to_string(),
                         erro = erro.to_string()
                     )),
+                    Visto::default(),
                 );
             }
         };
-        match serde_json::from_str::<Tree>(&texto) {
-            Ok(mut tree) => {
-                // Um `next_id` perdido ou velho não pode repetir um id que já existe.
-                tree.next_id = tree.next_id.max(maior_id(&tree) + 1);
-                (tree, None)
-            }
-            Err(_) => {
-                let copia = self.pasta.join("connections.json.bak");
-                let aviso = match fs::rename(&arquivo, &copia) {
-                    Ok(()) => t!(
-                        "armazenamento-conexoes-corrompido-copia",
-                        copia = copia.display().to_string()
-                    ),
-                    Err(erro) => t!(
-                        "armazenamento-conexoes-corrompido-sem-copia",
-                        erro = erro.to_string()
-                    ),
-                };
-                (Tree::default(), Some(aviso))
-            }
+        let Some(bytes) = &visto.bytes else {
+            return (Tree::default(), None, visto);
+        };
+        if let Some((tree, aviso)) = self.entender(bytes) {
+            return (tree, aviso, visto);
+        }
+        match guardar_ilegivel(&arquivo) {
+            Ok(copia) => (
+                Tree::default(),
+                Some(t!(
+                    "armazenamento-conexoes-corrompido-copia",
+                    copia = copia.display().to_string()
+                )),
+                Visto::default(),
+            ),
+            // Sem tirar o arquivo do lugar (só de leitura, ou um erro de disco), o que se viu
+            // continua lá: a vigia só relê quando ele mudar de novo.
+            Err(erro) => (
+                Tree::default(),
+                Some(t!(
+                    "armazenamento-conexoes-corrompido-sem-copia",
+                    erro = erro.to_string()
+                )),
+                visto,
+            ),
         }
     }
 
-    /// Grava as conexões (atômico: escreve num `.tmp` e renomeia).
-    pub fn salvar(&self, tree: &Tree) -> io::Result<()> {
-        self.gravar(&self.arquivo_conexoes(), tree)
+    /// A árvore de um `connections.json` lido, com o aviso; `None` se não é JSON, ou se não é uma
+    /// árvore desta versão. Um arquivo de uma versão mais nova fica só de leitura, entendido ou
+    /// não; um desta versão ganha a cópia do dia.
+    fn entender(&self, bytes: &[u8]) -> Option<(Tree, Option<String>)> {
+        let valor: Value = serde_json::from_slice(bytes).ok()?;
+        let tree = serde_json::from_value::<Tree>(valor.clone()).ok();
+        if versao_do_json(&valor) > VERSAO {
+            somente_leitura_em(&self.arquivo_conexoes());
+            let mut tree = tree.unwrap_or_default();
+            tree.next_id = tree.next_id.max(maior_id(&tree) + 1);
+            return Some((tree, Some(t!("armazenamento-conexoes-versao-mais-nova"))));
+        }
+        let mut tree = tree?;
+        // Um `next_id` perdido ou velho não pode repetir um id que já existe.
+        tree.next_id = tree.next_id.max(maior_id(&tree) + 1);
+        let _ = copia_do_dia(&self.pasta, ARQUIVO_CONEXOES, bytes, false);
+        Some((tree, None))
     }
 
-    /// Grava um valor como JSON bonito, de forma atômica.
-    pub(crate) fn gravar<T: Serialize>(&self, arquivo: &Path, valor: &T) -> io::Result<()> {
+    /// Relê as conexões se o arquivo mudou desde `visto` (outra cópia do app, outro programa,
+    /// a sincronização), e anota em `visto` o que se viu. Confere primeiro o tamanho e a data;
+    /// só lê o conteúdo se um deles mudou, e só devolve a árvore se o conteúdo mudou de fato e se
+    /// lê. Um arquivo que sumiu ou que não se lê (um editor no meio da gravação) não muda nada
+    /// aqui e não é tirado do lugar.
+    pub fn reler_se_mudou(&self, visto: &mut Visto) -> Option<(Tree, Option<String>)> {
+        let arquivo = self.arquivo_conexoes();
+        let meta = fs::metadata(&arquivo).ok()?;
+        if visto.mesma_data(&meta) {
+            return None;
+        }
+        let novo = Visto::ler(&arquivo).ok()?;
+        let bytes = novo.bytes.clone()?;
+        if novo.bytes == visto.bytes {
+            *visto = novo;
+            return None;
+        }
+        *visto = novo;
+        self.entender(&bytes)
+    }
+
+    /// Grava as conexões (atômico: escreve num `.tmp` e renomeia). A primeira gravação do dia
+    /// guarda antes o arquivo de agora como a cópia do dia, se ela ainda não existe. Não confere
+    /// se outro programa mudou o arquivo: a tela usa [`Armazenamento::salvar_visto`].
+    pub fn salvar(&self, tree: &Tree) -> io::Result<()> {
+        self.salvar_com(tree, None).map(|_| ())
+    }
+
+    /// O [`Armazenamento::salvar`] que confere antes se o arquivo ainda é o de `visto`. Se outro
+    /// programa o mudou e a tela ainda não releu, a versão de fora não se perde: fica ao lado,
+    /// como `connections.json.conflito-<data>`, e volta o caminho dela para o aviso. Depois de
+    /// gravar, `visto` passa a ser o que se gravou.
+    pub fn salvar_visto(&self, tree: &Tree, visto: &mut Visto) -> io::Result<Option<PathBuf>> {
+        self.salvar_com(tree, Some(visto))
+    }
+
+    fn salvar_com(&self, tree: &Tree, visto: Option<&mut Visto>) -> io::Result<Option<PathBuf>> {
+        let arquivo = self.arquivo_conexoes();
+        // Só de leitura (outra cópia do app é a dona, ou o arquivo é de uma versão mais nova):
+        // a árvore fica na memória.
+        if so_leitura(&arquivo) {
+            return Ok(None);
+        }
         fs::create_dir_all(&self.pasta)?;
-        let texto = serde_json::to_string_pretty(valor).map_err(io::Error::other)?;
-        let mut tmp = arquivo.as_os_str().to_owned();
-        tmp.push(".tmp");
-        let tmp = PathBuf::from(tmp);
-        fs::write(&tmp, texto)?;
-        fs::rename(&tmp, arquivo)
+        let atual = Visto::ler(&arquivo)?;
+        let mut disco = None;
+        let mut conflito = None;
+        if let Some(antes) = &atual.bytes {
+            match serde_json::from_slice::<Value>(antes) {
+                Ok(valor) => {
+                    // Gravado por uma versão mais nova depois de lido: daqui em diante, só leitura.
+                    if versao_do_json(&valor) > VERSAO {
+                        somente_leitura_em(&arquivo);
+                        return Err(io::Error::other(t!(
+                            "armazenamento-conexoes-versao-mais-nova"
+                        )));
+                    }
+                    if let Some(visto) = &visto
+                        && visto.bytes != atual.bytes
+                    {
+                        let copia = nome_livre(&arquivo, &format!(".conflito-{}", carimbo()));
+                        gravar_atomico(&copia, antes, false)?;
+                        conflito = Some(copia);
+                    }
+                    if !copia_do_dia_existe(&self.pasta, ARQUIVO_CONEXOES) {
+                        let _ = copia_do_dia(&self.pasta, ARQUIVO_CONEXOES, antes, false);
+                    }
+                    disco = Some(valor);
+                }
+                // Não é JSON (um editor que gravou pela metade): vai para um `.bak`, e não some
+                // debaixo da gravação.
+                Err(_) => {
+                    guardar_ilegivel(&arquivo)?;
+                }
+            }
+        }
+        let texto = texto_com_enxerto(tree, disco.as_ref())?;
+        gravar_atomico(&arquivo, texto.as_bytes(), false)?;
+        if let Some(visto) = visto {
+            *visto = Visto::gravado(&arquivo, texto.into_bytes());
+        }
+        Ok(conflito)
+    }
+
+    /// Grava um valor como JSON bonito, de forma atômica ([`gravar_atomico`]). O que o arquivo
+    /// tem e este app não conhece (os campos de uma versão mais nova) continua lá
+    /// ([`enxertar`]). Num arquivo só de leitura ([`so_leitura`]), não grava nada e não é erro:
+    /// o valor fica na memória.
+    pub(crate) fn gravar<T: Serialize + DeserializeOwned>(
+        &self,
+        arquivo: &Path,
+        valor: &T,
+    ) -> io::Result<()> {
+        if so_leitura(arquivo) {
+            return Ok(());
+        }
+        fs::create_dir_all(&self.pasta)?;
+        let disco = fs::read(arquivo)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+        let texto = texto_com_enxerto(valor, disco.as_ref())?;
+        gravar_atomico(arquivo, texto.as_bytes(), false)
     }
 
     /// Lê um JSON; `None` se o arquivo não existe ou não serve.
     pub(crate) fn ler<T: DeserializeOwned>(&self, arquivo: &Path) -> Option<T> {
         serde_json::from_str(&fs::read_to_string(arquivo).ok()?).ok()
     }
+}
+
+/// Um nome de `.tmp` só desta gravação, ao lado de `arquivo`. Duas cópias do app (ou duas
+/// threads) que gravam o mesmo arquivo ao mesmo tempo não escrevem no mesmo `.tmp`, e uma não
+/// renomeia para o lugar do arquivo o `.tmp` que a outra ainda está escrevendo.
+fn tmp_unico(arquivo: &Path) -> PathBuf {
+    static N: AtomicU64 = AtomicU64::new(0);
+    let mut nome = arquivo.as_os_str().to_owned();
+    nome.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    PathBuf::from(nome)
+}
+
+/// Grava `bytes` em `arquivo` de forma atômica e durável: um `.tmp` só desta gravação
+/// ([`tmp_unico`]), `fsync` e `rename`. Quem lê o arquivo, inclusive depois de o computador
+/// desligar no meio, vê o conteúdo velho ou o novo, nunca a metade. Com `privado`, no Unix o
+/// arquivo nasce só do dono (`0o600`).
+pub(crate) fn gravar_atomico(arquivo: &Path, bytes: &[u8], privado: bool) -> io::Result<()> {
+    conferir_gravacao(arquivo)?;
+    let tmp = tmp_unico(arquivo);
+    let mut opcoes = fs::OpenOptions::new();
+    opcoes.write(true).create_new(true);
+    #[cfg(unix)]
+    if privado {
+        use std::os::unix::fs::OpenOptionsExt;
+        opcoes.mode(0o600);
+    }
+    #[cfg(not(unix))]
+    let _ = privado;
+    let resultado = opcoes.open(&tmp).and_then(|mut f| {
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        fs::rename(&tmp, arquivo)
+    });
+    if resultado.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    resultado
+}
+
+/// Os segundos de agora como `aaaammdd-hhmmss` (UTC), para o nome das cópias.
+pub(crate) fn carimbo() -> String {
+    let t = crate::recentes::agora();
+    let (ano, mes, dia) = crate::recentes::data_civil(t / 86_400);
+    let s = t % 86_400;
+    format!(
+        "{ano:04}{mes:02}{dia:02}-{:02}{:02}{:02}",
+        s / 3600,
+        s % 3600 / 60,
+        s % 60
+    )
+}
+
+/// `arquivo` com `sufixo` no fim do nome, e `-2`, `-3`… depois dele se o nome já existe.
+fn nome_livre(arquivo: &Path, sufixo: &str) -> PathBuf {
+    let mut nome = com_sufixo(arquivo, sufixo);
+    let mut n = 2;
+    while nome.exists() {
+        nome = com_sufixo(arquivo, &format!("{sufixo}-{n}"));
+        n += 1;
+    }
+    nome
+}
+
+/// `arquivo` com `sufixo` no fim do nome.
+fn com_sufixo(arquivo: &Path, sufixo: &str) -> PathBuf {
+    let mut nome = arquivo.as_os_str().to_owned();
+    nome.push(sufixo);
+    PathBuf::from(nome)
+}
+
+/// O final do nome das cópias de `arquivos` (que andam juntos, como o `vault.json` e o
+/// `vault.key`): `.bak` se nenhum `.bak` deles existe e, se algum existe, `.bak-<data>` (com
+/// `-2`, `-3`… se preciso). Nunca um nome que já existe: a cópia de uma vez não apaga a de outra.
+pub(crate) fn sufixo_da_copia(arquivos: &[PathBuf]) -> String {
+    let livre = |sufixo: &str| arquivos.iter().all(|a| !com_sufixo(a, sufixo).exists());
+    if livre(".bak") {
+        return ".bak".into();
+    }
+    let carimbo = carimbo();
+    let mut sufixo = format!(".bak-{carimbo}");
+    let mut n = 2;
+    while !livre(&sufixo) {
+        sufixo = format!(".bak-{carimbo}-{n}");
+        n += 1;
+    }
+    sufixo
+}
+
+/// Tira do caminho o `arquivo` que não se lê, para um nome de cópia livre
+/// ([`sufixo_da_copia`]), e devolve onde ficou.
+pub(crate) fn guardar_ilegivel(arquivo: &Path) -> io::Result<PathBuf> {
+    conferir_gravacao(arquivo)?;
+    let copia = com_sufixo(arquivo, &sufixo_da_copia(&[arquivo.to_owned()]));
+    fs::rename(arquivo, &copia)?;
+    Ok(copia)
+}
+
+/// O caminho da cópia de hoje de `nome` em `pasta`: `copias/<aaaammdd>-<nome>`.
+fn copia_de_hoje(pasta: &Path, nome: &str) -> PathBuf {
+    pasta
+        .join(PASTA_COPIAS)
+        .join(format!("{}-{nome}", &carimbo()[..8]))
+}
+
+/// Se `nome` já tem a cópia de hoje em `pasta`.
+pub(crate) fn copia_do_dia_existe(pasta: &Path, nome: &str) -> bool {
+    copia_de_hoje(pasta, nome).exists()
+}
+
+/// Guarda `bytes` (um conteúdo bom de `nome`) como a cópia de hoje, em
+/// `pasta/copias/<aaaammdd>-<nome>`, se ela ainda não existe, e apaga as de `nome` além dos
+/// [`DIAS_DE_COPIAS`] dias mais recentes. Um arquivo que se perde ou estraga volta com, no
+/// máximo, um dia de mudanças a menos. A pasta `copias` é só do dono no Unix. Numa pasta só de
+/// leitura ([`so_leitura`]), não faz nada: as cópias são da cópia do app que é a dona.
+pub(crate) fn copia_do_dia(
+    pasta: &Path,
+    nome: &str,
+    bytes: &[u8],
+    privado: bool,
+) -> io::Result<()> {
+    if so_leitura(&pasta.join(PASTA_COPIAS)) {
+        return Ok(());
+    }
+    let hoje = copia_de_hoje(pasta, nome);
+    if hoje.exists() {
+        return Ok(());
+    }
+    let copias = pasta.join(PASTA_COPIAS);
+    fs::create_dir_all(&copias)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&copias, fs::Permissions::from_mode(0o700))?;
+    }
+    gravar_atomico(&hoje, bytes, privado)?;
+    let sufixo = format!("-{nome}");
+    let mut dias: Vec<PathBuf> = fs::read_dir(&copias)?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+                n.len() == 8 + sufixo.len()
+                    && n.ends_with(&sufixo)
+                    && n.as_bytes()[..8].iter().all(u8::is_ascii_digit)
+            })
+        })
+        .collect();
+    dias.sort();
+    let sobra = dias.len().saturating_sub(DIAS_DE_COPIAS);
+    for velha in &dias[..sobra] {
+        let _ = fs::remove_file(velha);
+    }
+    Ok(())
 }
 
 /// O maior id de qualquer item (grupos incluídos).
@@ -509,6 +868,151 @@ fn maior_id(tree: &Tree) -> u64 {
             .unwrap_or(0)
     }
     visita(&tree.nodes)
+}
+
+/// O que se viu de um arquivo: o tamanho, a data e o conteúdo. A vigia compara o tamanho e a data
+/// para não ler o arquivo à toa; a gravação compara o conteúdo, para não passar por cima do que
+/// outro programa gravou depois.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Visto {
+    tamanho: u64,
+    modificado: Option<SystemTime>,
+    /// O conteúdo; `None` se o arquivo não existia.
+    bytes: Option<Vec<u8>>,
+}
+
+impl Visto {
+    /// Lê `arquivo`: a data antes do conteúdo, para uma gravação no meio deixar a data velha e a
+    /// próxima olhada reler. Um arquivo que não existe dá o `Visto` vazio.
+    pub fn ler(arquivo: &Path) -> io::Result<Self> {
+        let ausente = |erro: &io::Error| erro.kind() == io::ErrorKind::NotFound;
+        let meta = match fs::metadata(arquivo) {
+            Ok(meta) => meta,
+            Err(erro) if ausente(&erro) => return Ok(Self::default()),
+            Err(erro) => return Err(erro),
+        };
+        let bytes = match fs::read(arquivo) {
+            Ok(bytes) => bytes,
+            Err(erro) if ausente(&erro) => return Ok(Self::default()),
+            Err(erro) => return Err(erro),
+        };
+        Ok(Self {
+            tamanho: meta.len(),
+            modificado: meta.modified().ok(),
+            bytes: Some(bytes),
+        })
+    }
+
+    /// O que se acabou de gravar em `arquivo`. Se o tamanho no disco já não é o de `bytes`
+    /// (outro programa gravou logo depois), a data fica de fora, e a próxima olhada relê.
+    fn gravado(arquivo: &Path, bytes: Vec<u8>) -> Self {
+        let meta = fs::metadata(arquivo).ok();
+        let modificado = meta
+            .as_ref()
+            .filter(|m| m.len() == bytes.len() as u64)
+            .and_then(|m| m.modified().ok());
+        Self {
+            tamanho: bytes.len() as u64,
+            modificado,
+            bytes: Some(bytes),
+        }
+    }
+
+    /// Se `meta` tem o mesmo tamanho e a mesma data do que se viu (sem precisar ler de novo).
+    fn mesma_data(&self, meta: &fs::Metadata) -> bool {
+        self.bytes.is_some()
+            && self.tamanho == meta.len()
+            && self.modificado.is_some()
+            && self.modificado == meta.modified().ok()
+    }
+}
+
+/// A versão de um `connections.json` lido (`version`); sem ela, a 1.
+fn versao_do_json(valor: &Value) -> u32 {
+    valor
+        .get("version")
+        .and_then(Value::as_u64)
+        .map_or(1, |v| u32::try_from(v).unwrap_or(u32::MAX))
+}
+
+/// O JSON bonito de `valor` com o que `disco` (o arquivo de agora) tem e este app não conhece:
+/// os campos de uma versão mais nova continuam lá depois que esta grava ([`enxertar`]). Sem nada
+/// a enxertar, é o JSON de `valor` como sempre, na ordem dos campos do struct.
+fn texto_com_enxerto<T: Serialize + DeserializeOwned>(
+    valor: &T,
+    disco: Option<&Value>,
+) -> io::Result<String> {
+    if let Some(disco) = disco {
+        let mut nosso = serde_json::to_value(valor)?;
+        // O que este app entende do disco: o que ficou de fora daqui foi apagado de propósito
+        // (um campo zerado, um item tirado de um mapa), e não volta.
+        let entendido = serde_json::from_value::<T>(disco.clone())
+            .ok()
+            .and_then(|t| serde_json::to_value(t).ok());
+        if enxertar(&mut nosso, disco, entendido.as_ref()) {
+            return Ok(serde_json::to_string_pretty(&nosso)?);
+        }
+    }
+    Ok(serde_json::to_string_pretty(valor)?)
+}
+
+/// Copia para `nosso` as chaves de `disco` que este app não conhece: as que faltam em `nosso` e
+/// em `entendido` (o `disco` lido e escrito de novo por este app; `None` se não se lê, e então
+/// tudo o que falta volta). Desce nos objetos e nas listas: um item de lista acha o seu no disco
+/// pelo `id` (ou `Variante:id`, no enum marcado por fora, como os `Node`) e, sem id, pela
+/// igualdade com o entendido. Devolve se copiou algo.
+fn enxertar(nosso: &mut Value, disco: &Value, entendido: Option<&Value>) -> bool {
+    match (nosso, disco) {
+        (Value::Object(nosso), Value::Object(disco)) => {
+            let entendido = entendido.and_then(Value::as_object);
+            let mut copiou = false;
+            for (chave, do_disco) in disco {
+                let entendido_aqui = entendido.and_then(|e| e.get(chave));
+                match nosso.get_mut(chave) {
+                    Some(valor) => copiou |= enxertar(valor, do_disco, entendido_aqui),
+                    None if entendido.is_none_or(|e| !e.contains_key(chave)) => {
+                        nosso.insert(chave.clone(), do_disco.clone());
+                        copiou = true;
+                    }
+                    None => {}
+                }
+            }
+            copiou
+        }
+        (Value::Array(nosso), Value::Array(disco)) => {
+            let entendido = entendido.and_then(Value::as_array);
+            let mut copiou = false;
+            for item in nosso {
+                let par = match identidade(item) {
+                    Some(id) => disco
+                        .iter()
+                        .position(|d| identidade(d).as_ref() == Some(&id)),
+                    None => entendido.and_then(|e| e.iter().position(|d| d == &*item)),
+                };
+                if let Some(j) = par {
+                    copiou |= enxertar(item, &disco[j], entendido.and_then(|e| e.get(j)));
+                }
+            }
+            copiou
+        }
+        _ => false,
+    }
+}
+
+/// A identidade de um item de lista para o [`enxertar`]: o `id` dele ou, num enum marcado por
+/// fora (`{"Group": {"id": 3, ..}}`), a variante com o `id` de dentro.
+fn identidade(valor: &Value) -> Option<String> {
+    let objeto = valor.as_object()?;
+    if let Some(id) = objeto.get("id").filter(|id| !id.is_null()) {
+        return Some(id.to_string());
+    }
+    let mut campos = objeto.iter();
+    let (variante, dentro) = campos.next()?;
+    if campos.next().is_some() {
+        return None;
+    }
+    let id = dentro.as_object()?.get("id").filter(|id| !id.is_null())?;
+    Some(format!("{variante}:{id}"))
 }
 
 #[cfg(test)]
@@ -611,7 +1115,9 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(arquivos, ["connections.json"]);
+        let mut arquivos = arquivos;
+        arquivos.sort();
+        assert_eq!(arquivos, ["connections.json", PASTA_COPIAS]);
     }
 
     #[test]
@@ -819,5 +1325,334 @@ mod tests {
 
     fn exemplo_em(pasta: &Path) {
         Armazenamento::new(pasta).salvar(&exemplo()).unwrap();
+    }
+
+    /// Os nomes de `pasta`, em ordem.
+    fn nomes(pasta: &Path) -> Vec<String> {
+        let mut nomes: Vec<String> = fs::read_dir(pasta)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        nomes.sort();
+        nomes
+    }
+
+    #[test]
+    fn cada_gravacao_tem_o_seu_tmp_e_nao_deixa_sobra() {
+        let pasta = PastaTemporaria::nova("tmp-unico");
+        fs::create_dir_all(&pasta.0).unwrap();
+        let arquivo = pasta.0.join("a.json");
+        assert_ne!(tmp_unico(&arquivo), tmp_unico(&arquivo));
+        // O `.tmp` largado por outra cópia do app não atrapalha nem é apagado por esta.
+        let alheio = pasta.0.join("a.json.1-0.tmp");
+        fs::write(&alheio, "da outra").unwrap();
+        gravar_atomico(&arquivo, b"um", false).unwrap();
+        gravar_atomico(&arquivo, b"dois", true).unwrap();
+        assert_eq!(fs::read(&arquivo).unwrap(), b"dois");
+        assert_eq!(nomes(&pasta.0), ["a.json", "a.json.1-0.tmp"]);
+    }
+
+    #[test]
+    fn gravacoes_ao_mesmo_tempo_deixam_um_arquivo_inteiro() {
+        let pasta = PastaTemporaria::nova("ao-mesmo-tempo");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        let mut grande = exemplo();
+        for i in 0..300 {
+            grande.add_connection(None, Connection::new(format!("host-{i}"), Kind::Ssh));
+        }
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    for _ in 0..10 {
+                        armazenamento.salvar(&grande).unwrap();
+                    }
+                });
+            }
+        });
+        let (lida, aviso) = armazenamento.carregar();
+        assert_eq!(aviso, None);
+        assert_eq!(lida.connections().len(), grande.connections().len());
+        assert!(!nomes(&pasta.0).iter().any(|n| n.ends_with(".tmp")));
+    }
+
+    #[test]
+    fn duas_conexoes_ilegiveis_guardam_duas_copias() {
+        let pasta = PastaTemporaria::nova("duas-ilegiveis");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        fs::create_dir_all(&pasta.0).unwrap();
+        fs::write(armazenamento.arquivo_conexoes(), "{ um").unwrap();
+        assert!(armazenamento.carregar().1.is_some());
+        fs::write(armazenamento.arquivo_conexoes(), "{ dois").unwrap();
+        let aviso = armazenamento.carregar().1.unwrap();
+        let copias: Vec<String> = nomes(&pasta.0)
+            .into_iter()
+            .filter(|n| n.starts_with("connections.json.bak"))
+            .collect();
+        assert_eq!(copias.len(), 2, "{copias:?}");
+        assert_eq!(
+            fs::read_to_string(pasta.0.join("connections.json.bak")).unwrap(),
+            "{ um"
+        );
+        assert_eq!(
+            fs::read_to_string(pasta.0.join(&copias[1])).unwrap(),
+            "{ dois"
+        );
+        assert!(aviso.contains(&copias[1]), "{aviso}");
+    }
+
+    #[test]
+    fn copia_do_dia_guarda_uma_por_dia_e_so_os_ultimos_sete() {
+        const DIA: u64 = 86_400;
+        let pasta = PastaTemporaria::nova("copia-do-dia");
+        let copias = pasta.0.join(PASTA_COPIAS);
+        fs::create_dir_all(&copias).unwrap();
+        fs::write(copias.join("leia-me.txt"), "não é cópia").unwrap();
+        for dia in 0..10u64 {
+            crate::recentes::fixar_relogio(Some((20_000 + dia) * DIA));
+            copia_do_dia(&pasta.0, "a.json", format!("dia {dia}").as_bytes(), false).unwrap();
+            copia_do_dia(&pasta.0, "a.json", b"depois, no mesmo dia", false).unwrap();
+            copia_do_dia(&pasta.0, "b.json", b"outro", false).unwrap();
+        }
+        crate::recentes::fixar_relogio(None);
+        let todas = nomes(&copias);
+        let de_a: Vec<&String> = todas.iter().filter(|n| n.ends_with("-a.json")).collect();
+        assert_eq!(de_a.len(), DIAS_DE_COPIAS, "{todas:?}");
+        assert_eq!(de_a[0], "20241007-a.json");
+        assert_eq!(
+            fs::read_to_string(copias.join("20241013-a.json")).unwrap(),
+            "dia 9",
+            "a primeira do dia fica"
+        );
+        assert_eq!(todas.iter().filter(|n| n.ends_with("-b.json")).count(), 7);
+        assert!(todas.contains(&"leia-me.txt".to_owned()));
+    }
+
+    #[test]
+    fn as_conexoes_ganham_a_copia_do_dia_de_antes_da_mudanca() {
+        let pasta = PastaTemporaria::nova("conexoes-copia");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        crate::recentes::fixar_relogio(Some(20_000 * 86_400));
+        armazenamento.salvar(&Tree::default()).unwrap();
+        assert!(
+            !pasta.0.join(PASTA_COPIAS).exists(),
+            "não havia o que copiar"
+        );
+        armazenamento.salvar(&exemplo()).unwrap();
+        armazenamento.salvar(&Tree::default()).unwrap();
+        crate::recentes::fixar_relogio(None);
+        let copia = pasta.0.join(PASTA_COPIAS).join("20241004-connections.json");
+        let guardada: Tree = serde_json::from_slice(&fs::read(copia).unwrap()).unwrap();
+        assert_eq!(
+            guardada.connections().len(),
+            0,
+            "a de antes da 1ª mudança do dia"
+        );
+    }
+
+    #[test]
+    fn uma_pasta_so_de_leitura_nao_e_tocada() {
+        let pasta = PastaTemporaria::nova("so-leitura");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        armazenamento.salvar(&exemplo()).unwrap();
+        let antes = fs::read(armazenamento.arquivo_conexoes()).unwrap();
+        somente_leitura_em(&pasta.0);
+        assert!(so_leitura(&armazenamento.arquivo_conexoes()));
+        assert!(so_leitura(&pasta.0.join("vault").join("ab12")));
+        // As gravações automáticas são puladas em silêncio.
+        armazenamento.salvar(&Tree::default()).unwrap();
+        let mut visto = Visto::default();
+        assert_eq!(
+            armazenamento
+                .salvar_visto(&Tree::default(), &mut visto)
+                .unwrap(),
+            None
+        );
+        armazenamento
+            .gravar(&armazenamento.arquivo_estado(), &exemplo())
+            .unwrap();
+        assert_eq!(fs::read(armazenamento.arquivo_conexoes()).unwrap(), antes);
+        assert!(!armazenamento.arquivo_estado().exists());
+        // As que a pessoa pede devolvem o erro.
+        let erro = gravar_atomico(&pasta.0.join("outro.json"), b"{}", false).unwrap_err();
+        assert_eq!(erro.kind(), io::ErrorKind::ReadOnlyFilesystem);
+        assert!(!pasta.0.join("outro.json").exists());
+        // Um arquivo ilegível não sai do lugar.
+        fs::write(armazenamento.arquivo_conexoes(), "{ pela metade").unwrap();
+        let (tree, aviso) = armazenamento.carregar();
+        assert!(tree.nodes.is_empty());
+        assert!(aviso.is_some());
+        assert_eq!(
+            fs::read_to_string(armazenamento.arquivo_conexoes()).unwrap(),
+            "{ pela metade"
+        );
+        assert!(!pasta.0.join("connections.json.bak").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn um_link_para_a_pasta_so_de_leitura_tambem_e_so_de_leitura() {
+        let pasta = PastaTemporaria::nova("so-leitura-link");
+        let outra = PastaTemporaria::nova("so-leitura-link-2");
+        fs::create_dir_all(&pasta.0).unwrap();
+        fs::create_dir_all(&outra.0).unwrap();
+        let link = outra.0.join("atalho");
+        std::os::unix::fs::symlink(&pasta.0, &link).unwrap();
+        somente_leitura_em(&pasta.0);
+        assert!(so_leitura(&link.join("connections.json")));
+        assert!(so_leitura(&link.join("nova").join("vault.json")));
+        assert!(!so_leitura(&outra.0.join("connections.json")));
+    }
+
+    #[test]
+    fn o_que_esta_versao_nao_conhece_continua_no_arquivo() {
+        let pasta = PastaTemporaria::nova("enxerto");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        let mut tree = exemplo();
+        let outro = tree.add_group(None, "Homologação");
+        let mut valor = serde_json::to_value(&tree).unwrap();
+        valor["campo_do_futuro"] = Value::from(7);
+        valor["nodes"][0]["Group"]["children"][0]["Connection"]["opcao_nova"] = Value::from("sim");
+        valor["nodes"][1]["Group"]["cor_nova"] = Value::from("azul");
+        fs::create_dir_all(&pasta.0).unwrap();
+        fs::write(armazenamento.arquivo_conexoes(), valor.to_string()).unwrap();
+
+        let (mut lida, aviso) = armazenamento.carregar();
+        assert_eq!(aviso, None);
+        // Muda um nome, tira um grupo e põe outro.
+        if let Some(crate::modelo::Node::Group(grupo)) = lida.nodes.first_mut() {
+            grupo.name = "Prod".to_owned();
+        }
+        assert!(lida.remove(outro));
+        lida.add_group(None, "Novo");
+        armazenamento.salvar(&lida).unwrap();
+
+        let gravado: Value =
+            serde_json::from_slice(&fs::read(armazenamento.arquivo_conexoes()).unwrap()).unwrap();
+        assert_eq!(gravado["campo_do_futuro"], 7);
+        assert_eq!(gravado["nodes"][0]["Group"]["name"], "Prod");
+        assert_eq!(
+            gravado["nodes"][0]["Group"]["children"][0]["Connection"]["opcao_nova"],
+            "sim"
+        );
+        let texto = gravado.to_string();
+        assert!(
+            !texto.contains("cor_nova"),
+            "o grupo tirado não volta: {texto}"
+        );
+        assert!(!texto.contains("Homologação"), "{texto}");
+        assert!(texto.contains("Novo"), "{texto}");
+        // E o que se grava ainda se lê como a árvore desta versão.
+        let (volta, _) = armazenamento.carregar();
+        assert_eq!(volta, lida);
+    }
+
+    #[test]
+    fn gravar_por_cima_de_uma_mudanca_de_fora_guarda_a_versao_dela() {
+        let pasta = PastaTemporaria::nova("conflito");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        armazenamento.salvar(&exemplo()).unwrap();
+        let (mut nossa, _, mut visto) = armazenamento.carregar_visto();
+        // Outro programa grava depois de lermos.
+        let mut de_fora = exemplo();
+        de_fora.add_group(None, "De fora");
+        Armazenamento::new(&pasta.0).salvar(&de_fora).unwrap();
+        let bytes_de_fora = fs::read(armazenamento.arquivo_conexoes()).unwrap();
+
+        nossa.add_group(None, "Nossa");
+        let copia = armazenamento
+            .salvar_visto(&nossa, &mut visto)
+            .unwrap()
+            .expect("a versão de fora fica numa cópia");
+        assert!(
+            copia
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("connections.json.conflito-"),
+            "{}",
+            copia.display()
+        );
+        assert_eq!(fs::read(&copia).unwrap(), bytes_de_fora);
+        let (lida, _) = armazenamento.carregar();
+        assert_eq!(lida, nossa);
+        // Sem nova mudança de fora, a próxima gravação não cria cópia.
+        nossa.add_group(None, "Mais uma");
+        assert_eq!(
+            armazenamento.salvar_visto(&nossa, &mut visto).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn um_arquivo_de_uma_versao_mais_nova_fica_so_de_leitura() {
+        let pasta = PastaTemporaria::nova("versao-nova");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        let mut valor = serde_json::to_value(exemplo()).unwrap();
+        valor["version"] = Value::from(VERSAO + 1);
+        let texto = valor.to_string();
+        fs::create_dir_all(&pasta.0).unwrap();
+        fs::write(armazenamento.arquivo_conexoes(), &texto).unwrap();
+        let (lida, aviso) = armazenamento.carregar();
+        assert_eq!(lida.connections().len(), 1, "o que se entende, aparece");
+        assert_eq!(aviso, Some(t!("armazenamento-conexoes-versao-mais-nova")));
+        armazenamento.salvar(&Tree::default()).unwrap();
+        assert_eq!(
+            fs::read_to_string(armazenamento.arquivo_conexoes()).unwrap(),
+            texto
+        );
+    }
+
+    #[test]
+    fn uma_versao_mais_nova_gravada_depois_de_ler_nao_e_sobrescrita() {
+        let pasta = PastaTemporaria::nova("versao-nova-depois");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        armazenamento.salvar(&exemplo()).unwrap();
+        let (tree, _, mut visto) = armazenamento.carregar_visto();
+        let mut valor = serde_json::to_value(exemplo()).unwrap();
+        valor["version"] = Value::from(VERSAO + 1);
+        let texto = valor.to_string();
+        fs::write(armazenamento.arquivo_conexoes(), &texto).unwrap();
+        let erro = armazenamento.salvar_visto(&tree, &mut visto).unwrap_err();
+        assert_eq!(
+            erro.to_string(),
+            t!("armazenamento-conexoes-versao-mais-nova")
+        );
+        // Daí em diante, só leitura, em silêncio.
+        assert_eq!(armazenamento.salvar_visto(&tree, &mut visto).unwrap(), None);
+        assert_eq!(
+            fs::read_to_string(armazenamento.arquivo_conexoes()).unwrap(),
+            texto
+        );
+    }
+
+    #[test]
+    fn reler_so_devolve_a_arvore_quando_o_arquivo_mudou_e_se_le() {
+        let pasta = PastaTemporaria::nova("reler");
+        let armazenamento = Armazenamento::new(&pasta.0);
+        armazenamento.salvar(&exemplo()).unwrap();
+        let (mut nossa, _, mut visto) = armazenamento.carregar_visto();
+        assert_eq!(armazenamento.reler_se_mudou(&mut visto), None);
+
+        let mut de_fora = exemplo();
+        de_fora.add_group(None, "De fora");
+        Armazenamento::new(&pasta.0).salvar(&de_fora).unwrap();
+        let (lida, aviso) = armazenamento
+            .reler_se_mudou(&mut visto)
+            .expect("o arquivo mudou");
+        assert_eq!(lida, de_fora);
+        assert_eq!(aviso, None);
+        assert_eq!(armazenamento.reler_se_mudou(&mut visto), None);
+
+        // Um editor no meio da gravação: não muda nada aqui, e o arquivo não sai do lugar.
+        fs::write(armazenamento.arquivo_conexoes(), "{ pela").unwrap();
+        assert_eq!(armazenamento.reler_se_mudou(&mut visto), None);
+        assert!(armazenamento.arquivo_conexoes().exists());
+        assert!(!pasta.0.join("connections.json.bak").exists());
+
+        // O que esta cópia grava não volta como mudança de fora.
+        nossa.add_group(None, "Nossa");
+        armazenamento.salvar_visto(&nossa, &mut visto).unwrap();
+        assert_eq!(armazenamento.reler_se_mudou(&mut visto), None);
     }
 }

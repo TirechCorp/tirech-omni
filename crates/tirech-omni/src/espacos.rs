@@ -155,6 +155,10 @@ pub struct JanelaSalva {
     /// assistentes (`conversas_reabrir`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cluster_ia: Option<ClusterIaSalvo>,
+    /// Os painéis Conexões e Propriedades de uma janela secundária. A principal guarda os dela
+    /// em `Espaco.paineis`, como as outras páginas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub laterais: Option<PaineisSalvos>,
 }
 
 /// O assistente de um cluster com IA num espaço de trabalho.
@@ -295,6 +299,7 @@ impl JanelaSalva {
             posicao: None,
             tamanho: None,
             cluster_ia: None,
+            laterais: None,
         }
     }
 
@@ -312,6 +317,7 @@ impl JanelaSalva {
             posicao: None,
             tamanho: None,
             cluster_ia: None,
+            laterais: None,
         }
     }
 
@@ -598,6 +604,7 @@ impl Espacos {
         espaco: &Espaco,
         substituir: bool,
     ) -> Result<String, Erro> {
+        crate::armazenamento::conferir_gravacao(&self.raiz)?;
         if !nome_valido(nome) {
             return Err(Erro::NomeInvalido);
         }
@@ -610,11 +617,7 @@ impl Espacos {
             fs::create_dir_all(dir)?;
         }
         let texto = serde_json::to_string_pretty(espaco).map_err(io::Error::other)?;
-        let mut tmp = arquivo.as_os_str().to_owned();
-        tmp.push(".tmp");
-        let tmp = PathBuf::from(tmp);
-        fs::write(&tmp, texto)?;
-        fs::rename(&tmp, &arquivo)?;
+        crate::armazenamento::gravar_atomico(&arquivo, texto.as_bytes(), false)?;
         Ok(caminho)
     }
 
@@ -652,6 +655,7 @@ impl Espacos {
     /// Cria a pasta `nome` dentro de `pai` e devolve o caminho dela. Uma pasta que já existe
     /// vale como criada.
     pub fn criar_pasta(&self, pai: &str, nome: &str) -> Result<String, Erro> {
+        crate::armazenamento::conferir_gravacao(&self.raiz)?;
         let caminho = Self::juntar(pai, nome);
         if !nome_valido(nome) {
             return Err(Erro::NomeInvalido);
@@ -684,6 +688,7 @@ impl Espacos {
     }
 
     fn mover_arquivo(&self, de: &str, para: &str, pasta: bool) -> Result<(), Erro> {
+        crate::armazenamento::conferir_gravacao(&self.raiz)?;
         let (origem, destino) = if pasta {
             (self.pasta_no_disco(de), self.pasta_no_disco(para))
         } else {
@@ -705,6 +710,7 @@ impl Espacos {
 
     /// Apaga o espaço `caminho`.
     pub fn apagar(&self, caminho: &str) -> Result<(), Erro> {
+        crate::armazenamento::conferir_gravacao(&self.raiz)?;
         let arquivo = self.arquivo(caminho).ok_or(Erro::NomeInvalido)?;
         fs::remove_file(arquivo)?;
         Ok(())
@@ -712,6 +718,7 @@ impl Espacos {
 
     /// Apaga a pasta `caminho`. Com `tudo` falso, só se estiver vazia ([`Erro::NaoVazia`]).
     pub fn apagar_pasta(&self, caminho: &str, tudo: bool) -> Result<(), Erro> {
+        crate::armazenamento::conferir_gravacao(&self.raiz)?;
         let dir = self.pasta_no_disco(caminho).ok_or(Erro::NomeInvalido)?;
         if dir == self.raiz {
             return Err(Erro::NomeInvalido);
@@ -850,6 +857,7 @@ mod testes {
                 posicao: Some((10, -20)),
                 tamanho: Some((800, 600)),
                 cluster_ia: None,
+                laterais: None,
             }],
         )
     }

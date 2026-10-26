@@ -2,9 +2,10 @@
 //! "Abrir em ›", "Mover para uma janela nova" e o modo cluster têm Arquivo, Exibir, Janela,
 //! Ferramentas e Ajuda, com os mesmos ids, ícones, atalhos e teclas de acesso.
 //!
-//! As ações de sessão agem na janela do menu. As que abrem algo que só existe na principal (a
-//! árvore, os diálogos, as páginas) trazem a principal para a frente, também da bandeja, e agem
-//! lá ([`Tela::na_principal`]).
+//! As ações de sessão agem na janela do menu, e o Exibir mostra e esconde as Conexões e as
+//! Propriedades dela. As que abrem algo que só existe na principal (os diálogos fora da árvore,
+//! as páginas) trazem a principal para a frente, também da bandeja, e agem lá
+//! ([`Tela::na_principal`]).
 
 use std::rc::Rc;
 
@@ -23,7 +24,7 @@ use crate::tela_configuracoes::ligar;
 
 impl Tela {
     /// Leva a janela principal para a frente (mostrando o app se ele está na bandeja) e roda `f`
-    /// com a tela. Para o que só existe na principal: a árvore, as páginas e os diálogos. Na
+    /// com a tela. Para o que só existe na principal: as páginas e os diálogos fora da árvore. Na
     /// própria principal só dá o foco.
     pub(super) fn na_principal(self: &Rc<Self>, f: impl FnOnce(&Rc<Self>)) {
         if self.escondido.get_untracked() {
@@ -35,15 +36,18 @@ impl Tela {
     }
 }
 
-/// A barra de menus de `janela`. A principal tem os painéis do Exibir; nas outras eles ficam
-/// desabilitados.
-pub(super) fn barra_de_menus(tela: &Rc<Tela>, janela: Janela) -> MenuBar {
+/// A barra de menus da janela `janela`. `paineis` é o controlador das Conexões e das Propriedades
+/// dela (o da principal ou o da secundária); o chat e as portas só existem na principal.
+pub(super) fn barra_de_menus(tela: &Rc<Tela>, janela: Janela, paineis: &DockController) -> MenuBar {
     let principal = janela.handle == tela.janelas.principal().handle;
     MenuBar::new()
         .id("menus")
         .menu(t!("casca-arquivo"), menu_arquivo(tela))
         .access_key('A')
-        .menu(t!("casca-exibir"), menu_exibir(tela, janela, principal))
+        .menu(
+            t!("casca-exibir"),
+            menu_exibir(tela, janela, paineis, principal),
+        )
         .access_key('E')
         .menu(t!("casca-janela"), menu_janela(tela, janela))
         .access_key('N')
@@ -313,9 +317,15 @@ fn menu_ajuda(tela: &Rc<Tela>) -> MenuFlyout {
         .icon(Symbol::Info)
 }
 
-/// O menu Exibir de uma janela. Os painéis com alfinete (M54) só existem na principal: nas
-/// outras janelas os itens deles aparecem desabilitados.
-fn menu_exibir(tela: &Rc<Tela>, janela: Janela, com_paineis: bool) -> MenuFlyout {
+/// O menu Exibir de uma janela. Conexões e Propriedades existem em todas as janelas de
+/// terminais, cada uma com os seus (`paineis`); o chat e as portas, só na principal: nas outras
+/// janelas os itens deles aparecem desabilitados.
+fn menu_exibir(
+    tela: &Rc<Tela>,
+    janela: Janela,
+    paineis: &DockController,
+    principal: bool,
+) -> MenuFlyout {
     let envio = janela.envio;
     let mut menu = MenuFlyout::new()
         .id("exibir")
@@ -353,12 +363,12 @@ fn menu_exibir(tela: &Rc<Tela>, janela: Janela, com_paineis: bool) -> MenuFlyout
             t!("casca-enviar-o-que-se-digita-para"),
             envio.submenu(),
         );
-    // Os painéis só existem na principal: nas outras janelas os itens aparecem, desabilitados
-    // (o menu é igual em todas as janelas).
+    // As páginas só existem na principal: nas outras janelas valem os painéis da página
+    // Terminais; o chat e as portas aparecem, desabilitados (o menu é igual em todas).
     let pagina = tela.pagina;
-    let em = move |nome: &'static str| move || !com_paineis || pagina.get() == nome;
+    let em = move |nome: &'static str| move || !principal || pagina.get() == nome;
     let em_alguma = move || {
-        !com_paineis
+        !principal
             || pagina.with(|p| {
                 [paineis::TERMINAIS, paineis::NOTAS, paineis::ARQUIVOS].contains(&p.as_str())
             })
@@ -368,21 +378,19 @@ fn menu_exibir(tela: &Rc<Tela>, janela: Janela, com_paineis: bool) -> MenuFlyout
         .toggle(
             "painel-conexoes",
             t!("casca-painel-conexoes"),
-            tela.paineis_terminais.controle.shown("conexoes"),
+            paineis.shown("conexoes"),
         )
         .icon(Symbol::Server)
         .shortcut(atalhos::atalho(tela.config, "painel_conexoes"))
         .item_visible(em(paineis::TERMINAIS))
-        .item_enabled(com_paineis)
         .toggle(
             "painel-propriedades",
             t!("casca-painel-propriedades"),
-            tela.paineis_terminais.controle.shown("propriedades"),
+            paineis.shown("propriedades"),
         )
         .icon(Symbol::Info)
         .shortcut(atalhos::atalho(tela.config, "painel_propriedades"))
         .item_visible(em(paineis::TERMINAIS))
-        .item_enabled(com_paineis)
         .toggle(
             "painel-chat",
             t!("casca-painel-chat"),
@@ -391,7 +399,7 @@ fn menu_exibir(tela: &Rc<Tela>, janela: Janela, com_paineis: bool) -> MenuFlyout
         .icon(Symbol::Chat)
         .shortcut(atalhos::atalho(tela.config, "ia_chat"))
         .item_visible(em(paineis::TERMINAIS))
-        .item_enabled(com_paineis)
+        .item_enabled(principal)
         .toggle(
             "painel-portas",
             t!("casca-painel-portas"),
@@ -399,7 +407,7 @@ fn menu_exibir(tela: &Rc<Tela>, janela: Janela, com_paineis: bool) -> MenuFlyout
         )
         .icon(Symbol::PlugConnected)
         .item_visible(em(paineis::TERMINAIS))
-        .item_enabled(com_paineis)
+        .item_enabled(principal)
         .toggle(
             "mostrar-aba-na-arvore",
             t!("casca-mostrar-aba-na-arvore"),
@@ -419,7 +427,7 @@ fn menu_exibir(tela: &Rc<Tela>, janela: Janela, com_paineis: bool) -> MenuFlyout
         .icon(Symbol::Notepad)
         .shortcut(atalhos::atalho(tela.config, "painel_notas"))
         .item_visible(em(paineis::NOTAS))
-        .item_enabled(com_paineis)
+        .item_enabled(principal)
         .toggle(
             "painel-fila",
             t!("casca-painel-fila"),
@@ -428,7 +436,7 @@ fn menu_exibir(tela: &Rc<Tela>, janela: Janela, com_paineis: bool) -> MenuFlyout
         .icon(Symbol::ArrowSync)
         .shortcut(atalhos::atalho(tela.config, "painel_fila"))
         .item_visible(em(paineis::ARQUIVOS))
-        .item_enabled(com_paineis);
+        .item_enabled(principal);
     menu
 }
 

@@ -161,10 +161,11 @@ pub struct Ambiente {
     /// que sumiu (M65). Desligado com a pasta de dados trocada por variável, como a migração do
     /// nome (testes e `lint`).
     pub repontar_ao_abrir: bool,
-    /// Se esta cópia do app é a dona do `estado.json` (as abas que voltam na próxima abertura).
-    /// O `main` trava o `trava.lock` da pasta de dados: a primeira cópia aberta fica com ele, e as
-    /// outras abrem sem as abas da primeira (que já estão abertas nela) e não gravam por cima do
-    /// estado dela, até a primeira fechar. `true` nos testes.
+    /// Se esta cópia do app é a dona da configuração. O `main` trava o `trava.lock` da pasta de
+    /// dados: a primeira cópia aberta fica com ele, e as outras abrem só de leitura, como no
+    /// WinSSHTerm: sem as abas da primeira (que já estão abertas nela) e sem gravar nada da pasta
+    /// de dados, do cofre e dos espaços ([`crate::armazenamento::somente_leitura_em`]), até
+    /// reiniciar depois de a primeira fechar. `true` nos testes.
     pub dono_do_estado: bool,
     /// Quanto esperar até conferir se o sistema tem bandeja (o `--bandeja` e o aviso).
     pub espera_da_bandeja: std::time::Duration,

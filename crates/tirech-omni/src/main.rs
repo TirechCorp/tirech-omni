@@ -22,8 +22,10 @@ use tomni_ui::platform::CrashReport;
 fn main() -> Result<(), tomni_ui::platform::Error> {
     // `tirech-omni mcp`: a ponte que o Claude Code e o Codex rodam. Não abre o app nem a janela.
     if std::env::args().nth(1).as_deref() == Some("mcp") {
-        let (configuradas, _) =
-            Configuracoes::carregar(&Armazenamento::new(armazenamento::pasta()));
+        // A ponte só lê a configuração: quem grava é o app.
+        let pasta = armazenamento::pasta();
+        armazenamento::somente_leitura_em(&pasta);
+        let (configuradas, _) = Configuracoes::carregar(&Armazenamento::new(pasta));
         i18n::iniciar(
             configuradas.geral.idioma,
             sys_locale::get_locale().as_deref(),
@@ -40,40 +42,38 @@ fn main() -> Result<(), tomni_ui::platform::Error> {
         }
     }
     let pasta = armazenamento::pasta();
+    // A trava vem antes de ler a configuração, que pode gravar (uma migração, um arquivo ilegível
+    // que vai para o `.bak`). A primeira cópia aberta fica com ela e é a dona da configuração; as
+    // outras abrem só de leitura, como no WinSSHTerm: sem as abas da primeira (que já estão
+    // abertas nela) e sem gravar arquivo nenhum da pasta de dados, do cofre e dos espaços. O que
+    // se muda nelas fica na memória e se perde ao fechar. A trava solta quando o processo acaba,
+    // mesmo se ele cair. Aberto pelo "Reiniciar agora", o app espera a trava do anterior soltar.
+    let tentativas = if portatil || reinicio::reiniciado() {
+        15
+    } else {
+        1
+    };
+    let (trava, dono_do_estado) = match travar_tentando(&pasta, tentativas) {
+        Ok(trava) => (trava, true),
+        Err(()) => {
+            armazenamento::somente_leitura_em(&pasta);
+            (None, false)
+        }
+    };
     // O idioma vale por processo: a troca em Configurações pede reiniciar.
     let (configuradas, _) = Configuracoes::carregar(&Armazenamento::new(pasta.clone()));
     i18n::iniciar(
         configuradas.geral.idioma,
         sys_locale::get_locale().as_deref(),
     );
-    // No modo portable, uma cópia do app por pasta: duas gravariam por cima uma da outra. A
-    // trava solta quando o processo acaba, mesmo se ele cair.
-    let trava = if portatil {
-        match travar(&pasta) {
-            Ok(trava) => Some(trava),
-            Err(()) => {
-                tomni_ui::platform::alert(
-                    &t!("portatil-ja-aberto-titulo"),
-                    &t!("portatil-ja-aberto", pasta = pasta.display().to_string()),
-                );
-                return Ok(());
-            }
-        }
-    } else {
-        None
-    };
-    // Fora do modo portable, várias cópias podem abrir, mas só a primeira é a dona do
-    // `estado.json`: as outras abrem sem as abas dela (que já estão abertas nela) e não gravam
-    // por cima. Aberto pelo "Reiniciar agora", o app espera a trava do anterior soltar.
-    let (trava, dono_do_estado) = if portatil {
-        (trava.flatten(), true)
-    } else {
-        let tentativas = if reinicio::reiniciado() { 15 } else { 1 };
-        match travar_tentando(&pasta, tentativas) {
-            Ok(trava) => (trava, true),
-            Err(()) => (None, false),
-        }
-    };
+    // No modo portable (num pendrive, por exemplo), uma cópia do app por pasta.
+    if portatil && !dono_do_estado {
+        tomni_ui::platform::alert(
+            &t!("portatil-ja-aberto-titulo"),
+            &t!("portatil-ja-aberto", pasta = pasta.display().to_string()),
+        );
+        return Ok(());
+    }
     // No Windows o app não tem console: o pânico e o erro que fecham a janela vão para o
     // `quedas.log` e para um aviso, em vez de sumirem.
     let quedas = pasta.join("quedas.log");
@@ -119,14 +119,9 @@ fn main() -> Result<(), tomni_ui::platform::Error> {
     resultado
 }
 
-/// Trava a pasta de dados. Ocupada, tenta de novo por alguns segundos: no "Reiniciar agora" do
+/// Trava a pasta de dados, com `tentativas` tentativas de 200 ms: no "Reiniciar agora" do
 /// Windows, o app novo sobe antes de o antigo acabar. `Err` se continuou ocupada. Um erro de disco
 /// (pasta só de leitura) não impede de abrir.
-fn travar(pasta: &std::path::Path) -> Result<Option<std::fs::File>, ()> {
-    travar_tentando(pasta, 15)
-}
-
-/// Como [`travar`], com `tentativas` tentativas de 200 ms.
 fn travar_tentando(pasta: &std::path::Path, tentativas: u32) -> Result<Option<std::fs::File>, ()> {
     for tentativa in 0..tentativas {
         match armazenamento::travar(pasta) {

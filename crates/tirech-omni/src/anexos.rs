@@ -276,6 +276,7 @@ pub fn gravar(
     if !id_valido(id) || bloco == 0 || bloco > BLOCO_MAXIMO {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, t!("anexo-invalido")).into());
     }
+    crate::armazenamento::conferir_gravacao(pasta)?;
     criar_pasta(pasta)?;
     let destino = caminho(pasta, id);
     if destino.exists() {
@@ -527,7 +528,8 @@ fn gravar_registro(caminho: &Path, registro: &Registro) {
 /// Apaga o que sobrou em `pasta` (`vault/`): os `.tmp` com mais de uma hora e os arquivos que
 /// nenhuma ficha cita há mais de `margem` segundos. O primeiro olhar numa sobra só a anota em
 /// `registro` (fora do cofre, nunca sincronizado). Devolve quantos arquivos apagou. Falhas de
-/// disco são ignoradas: a próxima coleta tenta de novo.
+/// disco são ignoradas: a próxima coleta tenta de novo. Numa pasta só de leitura
+/// ([`crate::armazenamento::so_leitura`]) não apaga nem anota nada.
 pub fn coletar(
     pasta: &Path,
     referenciados: &HashSet<String>,
@@ -535,6 +537,9 @@ pub fn coletar(
     agora: u64,
     margem: u64,
 ) -> usize {
+    if crate::armazenamento::so_leitura(pasta) || crate::armazenamento::so_leitura(registro) {
+        return 0;
+    }
     let Ok(lista) = fs::read_dir(pasta) else {
         return 0;
     };

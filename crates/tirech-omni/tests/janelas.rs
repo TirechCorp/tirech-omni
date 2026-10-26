@@ -33,6 +33,12 @@ fn encerrar(chaves: &[&str]) {
     }
 }
 
+/// O painel `id` da página Terminais está à mostra na janela atual? Um painel fechado sai da
+/// árvore de widgets.
+fn painel_aberto(app: &TestApp, id: &str) -> bool {
+    app.tree().find(id).is_some() && app.visible(id)
+}
+
 /// A tela com uma segunda janela aberta e a principal em foco.
 fn com_duas_janelas(pasta: &Pasta) -> (Montagem, WindowHandle, WindowHandle) {
     let mut m = montar(pasta, Theme::Light);
@@ -463,7 +469,7 @@ fn a_janela_secundaria_tem_os_cinco_menus_da_principal() {
 }
 
 #[test]
-fn os_paineis_do_exibir_ficam_desabilitados_na_secundaria() {
+fn o_exibir_da_secundaria_controla_as_conexoes_e_as_propriedades_dela() {
     let pasta = Pasta::nova("janelas-exibir-paineis");
     pasta.semear(&exemplo());
     let (mut m, principal, outra) = com_duas_janelas(&pasta);
@@ -476,13 +482,10 @@ fn os_paineis_do_exibir_ficam_desabilitados_na_secundaria() {
 
     m.app.switch_to(outra);
     m.app.click("menus-exibir");
-    for id in [
-        "painel-conexoes",
-        "painel-propriedades",
-        "painel-chat",
-        "painel-notas-lista",
-        "painel-fila",
-    ] {
+    for id in ["painel-conexoes", "painel-propriedades"] {
+        assert!(m.app.enabled(id), "{id} devia valer na secundária");
+    }
+    for id in ["painel-chat", "painel-notas-lista", "painel-fila"] {
         assert!(m.app.visible(id), "{id} sumiu");
         assert!(!m.app.enabled(id), "{id} devia estar desabilitado");
     }
@@ -490,6 +493,133 @@ fn os_paineis_do_exibir_ficam_desabilitados_na_secundaria() {
         m.app.enabled("layout-2x2"),
         "o layout vale em qualquer janela"
     );
+
+    // Esconder as Conexões da secundária não mexe nas da principal.
+    m.app.click("painel-conexoes");
+    assert!(!painel_aberto(&m.app, "terminais-paineis-conexoes"));
+    assert!(painel_aberto(&m.app, "terminais-paineis-propriedades"));
+    m.app.switch_to(principal);
+    assert!(painel_aberto(&m.app, "terminais-paineis-conexoes"));
+    m.app.switch_to(outra);
+    m.app.click("menus-exibir").click("painel-conexoes");
+    assert!(painel_aberto(&m.app, "terminais-paineis-conexoes"));
+}
+
+#[test]
+fn a_secundaria_tem_a_arvore_e_as_propriedades_com_a_mesma_selecao() {
+    let pasta = Pasta::nova("janelas-arvore");
+    pasta.semear(&exemplo());
+    let (mut m, principal, outra) = com_duas_janelas(&pasta);
+    m.app.set_active_window(outra);
+    m.app.switch_to(outra);
+    assert!(m.app.visible("terminais-paineis-conexoes"));
+    assert!(m.app.visible("terminais-paineis-propriedades"));
+    assert!(m.app.visible("arvore"));
+    m.app.click("arvore-5");
+    let escolhida = |app: &TestApp| {
+        app.tree_items("arvore")
+            .into_iter()
+            .find(|l| l.selected)
+            .map(|l| l.key)
+    };
+    assert_eq!(escolhida(&m.app).as_deref(), Some("5"));
+
+    // A escolha, as pastas abertas e o filtro são os mesmos nas duas janelas.
+    m.app.expand("arvore", "1");
+    m.app.switch_to(principal);
+    assert_eq!(escolhida(&m.app).as_deref(), Some("5"));
+    assert!(
+        m.app.tree_items("arvore").iter().any(|l| l.key == "2"),
+        "a pasta aberta na secundária aparece aberta na principal"
+    );
+
+    // O clique duplo na árvore da secundária abre a conexão nela.
+    m.app.switch_to(outra);
+    m.app.double_click("arvore-4");
+    m.app.frame();
+    assert_eq!(abas(&m.app), [["Roteador"]]);
+    m.app.assert_lint();
+    encerrar(&["4-1"]);
+}
+
+#[test]
+fn apagar_na_secundaria_pergunta_nela() {
+    let pasta = Pasta::nova("janelas-apagar");
+    pasta.semear(&exemplo());
+    let (mut m, principal, outra) = com_duas_janelas(&pasta);
+    m.app.set_active_window(outra);
+    m.app.switch_to(outra);
+    m.app.click("arvore-5").click("apagar");
+    assert!(
+        m.app.is_open("apagar-dialogo"),
+        "o diálogo abre na secundária"
+    );
+    m.app.switch_to(principal);
+    assert!(
+        !m.app.is_open("apagar-dialogo"),
+        "a principal não mostra o diálogo da secundária"
+    );
+    m.app.switch_to(outra);
+    m.app.click("apagar-dialogo-primary");
+    assert_eq!(pasta.conexoes().connection_count(), 3);
+    assert!(pasta.conexoes().nodes.iter().all(|n| n.name() != "Shell"));
+
+    // Na principal, de novo ativa, o diálogo volta a abrir lá.
+    m.app.set_active_window(principal);
+    m.app.switch_to(principal);
+    m.app.click("arvore-4").click("apagar");
+    assert!(m.app.is_open("apagar-dialogo"));
+    m.app.switch_to(outra);
+    assert!(!m.app.is_open("apagar-dialogo"));
+}
+
+#[test]
+fn a_lupa_da_secundaria_poe_o_cursor_no_filtro_dela() {
+    let pasta = Pasta::nova("janelas-lupa");
+    pasta.semear(&exemplo());
+    let (mut m, principal, outra) = com_duas_janelas(&pasta);
+    m.app.set_active_window(outra);
+    m.app.switch_to(outra);
+    m.app.click("filtrar");
+    m.app.wait(std::time::Duration::from_millis(100));
+    assert!(m.app.visible("filtro"));
+    assert_eq!(m.app.focused().as_deref(), Some("filtro"));
+    m.app.switch_to(principal);
+    assert_ne!(m.app.focused().as_deref(), Some("filtro"));
+}
+
+#[test]
+fn os_paineis_da_secundaria_voltam_na_proxima_execucao() {
+    let pasta = Pasta::nova("janelas-paineis-estado");
+    pasta.semear(&exemplo());
+    {
+        let (mut m, principal, outra) = com_duas_janelas(&pasta);
+        m.app.set_tray_available(false);
+        m.app.set_active_window(outra);
+        m.app.switch_to(outra);
+        m.app.click("menus-exibir").click("painel-propriedades");
+        assert!(!painel_aberto(&m.app, "terminais-paineis-propriedades"));
+        m.app.double_click("arvore-4");
+        m.app.frame();
+        m.app.switch_to(principal);
+        assert!(!m.app.close_window(WindowHandle::main()));
+        m.app.click("fechar-tudo-dialogo-primary");
+        assert!(m.app.exited());
+    }
+    encerrar(&["4-1"]);
+
+    let mut m = montar(&pasta, Theme::Light);
+    assert!(
+        m.app.visible("terminais-paineis-propriedades"),
+        "a principal guarda os dela"
+    );
+    let [_, outra] = m.app.windows()[..] else {
+        panic!("esperava duas janelas");
+    };
+    m.app.switch_to(outra);
+    assert!(painel_aberto(&m.app, "terminais-paineis-conexoes"));
+    assert!(!painel_aberto(&m.app, "terminais-paineis-propriedades"));
+    encerrar(&["4-1", "4-2"]);
 }
 
 #[test]

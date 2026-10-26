@@ -15,7 +15,7 @@ use tomni_ui::prelude::*;
 use tomni_ui::terminal::Session;
 
 use super::controlar::{Conversar, Encomenda};
-use super::{Lugar, Tela, geometria_de, icone_do_cartao};
+use super::{Lugar, Tela, geometria_de, icone_do_cartao, paineis_de};
 use crate::abrir_em::AlvoAbrir;
 use crate::cluster::{self, grade_do_cluster};
 use crate::espacos::{Aba, ClusterIaSalvo, JanelaSalva, Resolvida, id_da_chave};
@@ -171,7 +171,12 @@ impl Tela {
         let (colunas, linhas) = grade_do_cluster(ids.len());
         let paineis = colunas * linhas;
         let titulo = t!("cluster-titulo-da-janela", n = ids.len() as i64);
-        let janela = match self.abrir_janela_titulada(Some(titulo), (colunas, linhas), None) {
+        let janela = match self.abrir_janela_titulada(
+            Some(titulo),
+            (colunas, linhas),
+            None,
+            DockLayout::default(),
+        ) {
             Some(janela) => {
                 janela.envio.todos.set(true);
                 janela
@@ -227,7 +232,12 @@ impl Tela {
             n = ids.len() as i64,
             nome = ficha(f).nome
         );
-        let janela = match self.abrir_janela_titulada(Some(titulo), (colunas, linhas), None) {
+        let janela = match self.abrir_janela_titulada(
+            Some(titulo),
+            (colunas, linhas),
+            None,
+            DockLayout::default(),
+        ) {
             Some(janela) => janela,
             None => {
                 let principal = self.janelas.principal();
@@ -273,15 +283,19 @@ impl Tela {
             nome = ficha(f).nome
         );
         let (colunas, linhas) = salva.grade;
-        let janela =
-            match self.abrir_janela_titulada(Some(titulo), salva.grade, geometria_de(salva)) {
-                Some(janela) => janela,
-                None => {
-                    let principal = self.janelas.principal();
-                    self.aplicar_grade(principal, colunas, linhas);
-                    principal
-                }
-            };
+        let janela = match self.abrir_janela_titulada(
+            Some(titulo),
+            salva.grade,
+            geometria_de(salva),
+            paineis_de(salva),
+        ) {
+            Some(janela) => janela,
+            None => {
+                let principal = self.janelas.principal();
+                self.aplicar_grade(principal, colunas, linhas);
+                principal
+            }
+        };
         let ja_havia = self.abas_da_janela(janela);
         self.encher(janela, resolvida, false);
         let painel = ia.painel.min((colunas * linhas).max(1) - 1);

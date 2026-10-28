@@ -10,6 +10,7 @@ use tomni_ui::terminal::PaneDirection;
 
 use super::{Lugar, Tela};
 use crate::abrir_em::{AlvoAbrir, Destino, Onde, PAINEIS, identificacao};
+use crate::comandos::tem_terminal;
 use crate::janelas::{self, Janela};
 use crate::t;
 
@@ -71,19 +72,19 @@ impl Tela {
     }
 
     /// As conexões que `alvo` abre num terminal, na ordem da árvore. Uma conexão só de arquivos
-    /// (FTP, S3, rclone) não tem terminal: fica de fora.
+    /// (FTP, S3, rclone) e o link não têm terminal: ficam de fora.
     pub(super) fn conexoes_de_terminal(&self, alvo: AlvoAbrir) -> Vec<u64> {
         self.tree.with_untracked(|t| match alvo {
             AlvoAbrir::Conexao(id) => t
                 .connection(id)
-                .filter(|c| !c.kind.so_arquivos())
+                .filter(|c| tem_terminal(c.kind))
                 .map(|c| c.id)
                 .into_iter()
                 .collect(),
             AlvoAbrir::Pasta(id) => t
                 .connections_in(id)
                 .into_iter()
-                .filter(|c| !c.kind.so_arquivos())
+                .filter(|c| tem_terminal(c.kind))
                 .map(|c| c.id)
                 .collect(),
         })
@@ -93,8 +94,8 @@ impl Tela {
     /// árvore deixa de ter o que abrir.
     pub(super) fn tem_terminal(&self, alvo: AlvoAbrir) -> bool {
         self.tree.with(|t| match alvo {
-            AlvoAbrir::Conexao(id) => t.connection(id).is_some_and(|c| !c.kind.so_arquivos()),
-            AlvoAbrir::Pasta(id) => t.connections_in(id).iter().any(|c| !c.kind.so_arquivos()),
+            AlvoAbrir::Conexao(id) => t.connection(id).is_some_and(|c| tem_terminal(c.kind)),
+            AlvoAbrir::Pasta(id) => t.connections_in(id).iter().any(|c| tem_terminal(c.kind)),
         })
     }
 
@@ -191,7 +192,7 @@ fn submenu(tela: &Rc<Tela>, base: &str, alvo: AlvoAbrir) -> MenuFlyout {
         outras = outras
             .item(
                 id(&format!("-janela-{j}")),
-                t!("casca-janela-n", n = j + 1),
+                janelas::no_menu(j),
                 move || t.abrir_em(alvo, Destino::Janela(j)),
             )
             .item_visible(move || {

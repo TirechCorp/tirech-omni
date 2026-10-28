@@ -171,10 +171,76 @@ efeito_bool!(
 );
 
 efeito_bool!(
+    efeito_geral__medidor_cpu,
+    "geral.medidor_cpu",
+    geral.medidor_cpu
+);
+
+efeito_bool!(
     efeito_geral__confirmar_fechar,
     "geral.confirmar_fechar",
     geral.confirmar_fechar
 );
+/// Desliga em Geral o interruptor `chave` e confere que as seções `somem` saem da página, que
+/// as `ficam` continuam e que tudo volta ao ligar de novo. Devolve a pasta, para o que foi gravado.
+fn desligar_area(nome: &str, chave: &str, somem: &[&str], ficam: &[&str]) -> Pasta {
+    let (pasta, mut m) = abrir(nome);
+    let id = id_do_valor(chave);
+    alcancar(&mut m.app, &id);
+    for s in somem.iter().chain(ficam) {
+        assert!(aparece(&mut m.app, &format!("config-secao-{s}")), "{s}");
+    }
+    m.app.click(&id);
+    assert!(!m.app.checked(&id));
+    for s in somem {
+        assert!(
+            !aparece(&mut m.app, &format!("config-secao-{s}")),
+            "{s} some"
+        );
+    }
+    for s in ficam {
+        assert!(
+            aparece(&mut m.app, &format!("config-secao-{s}")),
+            "{s} fica"
+        );
+    }
+    m.app.click(&id);
+    for s in somem {
+        assert!(
+            aparece(&mut m.app, &format!("config-secao-{s}")),
+            "{s} volta"
+        );
+    }
+    m.app.click(&id);
+    pasta
+}
+
+#[test]
+fn efeito_geral__assistente_ia() {
+    let pasta = desligar_area(
+        "geral-assistente-ia",
+        "geral.assistente_ia",
+        &["ia", "ia_servidor"],
+        &["ia_local", "mcp"],
+    );
+    let c = gravada(&pasta);
+    assert!(!c.geral.assistente_ia, "{}", arquivo(&pasta));
+    assert!(c.geral.mcp);
+}
+
+#[test]
+fn efeito_geral__mcp() {
+    let pasta = desligar_area(
+        "geral-mcp",
+        "geral.mcp",
+        &["ia_local", "mcp"],
+        &["ia", "ia_servidor"],
+    );
+    let c = gravada(&pasta);
+    assert!(!c.geral.mcp, "{}", arquivo(&pasta));
+    assert!(c.geral.assistente_ia);
+}
+
 efeito_bool!(
     efeito_terminal__links_com_ctrl,
     "terminal.links_com_ctrl",
@@ -381,6 +447,12 @@ efeito_bool!(
     "redes.descer_ao_fechar",
     redes.descer_ao_fechar
 );
+efeito_texto!(
+    efeito_redes__navegador,
+    "redes.navegador",
+    "/usr/bin/firefox",
+    redes.navegador
+);
 efeito_escolha!(
     efeito_x11__padrao,
     "x11.padrao",
@@ -484,6 +556,12 @@ efeito_numero!(
     "conexoes.reconectar.espera_secs",
     10.0,
     conexoes.reconectar.espera_secs
+);
+efeito_numero!(
+    efeito_conexoes__reconectar__retentar_mins,
+    "conexoes.reconectar.retentar_mins",
+    15.0,
+    conexoes.reconectar.retentar_mins
 );
 efeito_numero!(
     efeito_cofre__limpar_area_transferencia_secs,

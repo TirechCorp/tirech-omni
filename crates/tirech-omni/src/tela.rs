@@ -88,6 +88,8 @@ mod colar;
 mod comandos;
 mod comandos_editor;
 mod controlar;
+mod credencial;
+mod desempenho;
 mod duplicar;
 mod envio;
 mod estado_conexoes;
@@ -99,6 +101,8 @@ mod ia_envio;
 mod ia_perfis;
 mod importacao;
 mod instalar;
+mod instancias;
+mod lancador_links;
 mod links;
 mod logs_cifrados;
 mod mcp;
@@ -113,6 +117,7 @@ mod mcp_sessoes;
 mod mcp_soltos;
 mod mcp_terminal;
 mod menus;
+mod mouse;
 mod notas_conexao;
 mod openvpn_perguntas;
 mod pagina_logs;
@@ -121,12 +126,24 @@ mod programas;
 mod rclone;
 mod rclone_form;
 mod redes;
+mod retentar;
 mod scripts;
 mod sessao_tmux;
 mod sessoes_servidor;
 mod tema;
 mod tuneis;
 mod wsl;
+
+/// Se os assistentes de IA estão ligados em Geral, lido a cada chamada (prop de `.visible()` e
+/// `.item_visible()` do que é deles).
+pub(crate) fn com_ia(config: Signal<Configuracoes>) -> impl Fn() -> bool + Copy + 'static {
+    move || config.with(|c| c.geral.assistente_ia)
+}
+
+/// Se o controle por assistentes (MCP) está ligado em Geral, como [`com_ia`].
+pub(crate) fn com_mcp(config: Signal<Configuracoes>) -> impl Fn() -> bool + Copy + 'static {
+    move || config.with(|c| c.geral.mcp)
+}
 
 /// Os tipos de terminal que o servidor SSH pode receber.
 const TERMINAIS: [&str; 4] = ["xterm-256color", "xterm", "vt100", "linux"];
@@ -428,14 +445,19 @@ fn opcoes_de_credencial(cofre: &CofreCompartilhado) -> Vec<String> {
 }
 
 /// As opções da linha "Credencial" da conexão: as de [`opcoes_de_credencial`] com os modos do
-/// agente logo depois de "Perguntar ao conectar", só nos tipos que usam SSH (`ssh`).
-fn opcoes_de_credencial_da_conexao(cofre: &CofreCompartilhado, ssh: bool) -> Vec<String> {
+/// agente logo depois de "Perguntar ao conectar" e, antes de tudo, o "Herdar" da pasta
+/// (`herdar`), só nos tipos que usam SSH.
+fn opcoes_de_credencial_da_conexao(
+    cofre: &CofreCompartilhado,
+    herdar: Option<String>,
+) -> Vec<String> {
     let mut opcoes = opcoes_de_credencial(cofre);
-    if ssh {
+    if let Some(herdar) = herdar {
         let modos = [ModoCredencial::Agente, ModoCredencial::AgenteOuSenha];
         for (n, modo) in modos.into_iter().enumerate() {
             opcoes.insert(1 + n, modo.nome());
         }
+        opcoes.insert(0, herdar);
     }
     opcoes
 }
@@ -532,6 +554,8 @@ struct Campos {
     s3_token: Signal<String>,
     rclone_remoto: Signal<String>,
     rclone_caminho: Signal<String>,
+    /// O endereço do link.
+    url: Signal<String>,
     /// O texto da linha "Rede" da conexão ou do grupo escolhido (`Herdar (…)`, `Direta` ou o
     /// nome de um perfil).
     rede: Signal<String>,
@@ -543,6 +567,14 @@ struct Campos {
     /// O texto da linha "Sessão persistente" da conexão ou do grupo escolhido (`Herdar (…)`,
     /// `Nenhuma`, `tmux` ou `screen`).
     persistente: Signal<String>,
+    /// O texto da linha "Mouse no terminal" da conexão ou do grupo escolhido (`Herdar (…)`,
+    /// `Copiar e colar` ou `Menu`).
+    mouse: Signal<String>,
+    /// O texto da linha "Tentar de novo após" da conexão ou do grupo escolhido (`Herdar (…)`,
+    /// `Desligado` ou um tempo).
+    retentar: Signal<String>,
+    /// O texto da linha "Credencial" da pasta escolhida (`Herdar (…)` ou um modo).
+    credencial_da_pasta: Signal<String>,
     /// O texto da linha "Encaminhar X11" (`Padrão (<modo>)`, `Desligado`, `Não confiável` ou
     /// `Confiável`).
     x11: Signal<String>,
@@ -612,10 +644,14 @@ impl Campos {
             s3_token: signal(String::new()),
             rclone_remoto: signal(String::new()),
             rclone_caminho: signal(String::new()),
+            url: signal(String::new()),
             rede: signal(herdar()),
             perfil_ia: signal(String::new()),
             mcp: signal(String::new()),
             persistente: signal(String::new()),
+            mouse: signal(String::new()),
+            retentar: signal(String::new()),
+            credencial_da_pasta: signal(String::new()),
             x11: signal(ModoX11::Padrao.nome().to_owned()),
             tuneis: signal(Vec::new()),
             so_tuneis: signal(false),
@@ -711,6 +747,7 @@ impl Campos {
         }
         self.rclone_remoto.set(c.rclone.remote.clone());
         self.rclone_caminho.set(c.rclone.path.clone());
+        self.url.set(c.url.clone());
         self.x11.set(c.x11.nome().to_owned());
         self.tuneis.set(c.tuneis.clone());
         self.so_tuneis.set(c.so_tuneis);
@@ -809,6 +846,7 @@ impl Campos {
             remote: self.rclone_remoto.get().trim().to_owned(),
             path: self.rclone_caminho.get().trim().to_owned(),
         };
+        c.url = self.url.get().trim().to_owned();
         c.x11 = modo_x11_do_rotulo(&self.x11.get());
         c.tuneis = self.tuneis.get();
         c.so_tuneis = self.so_tuneis.get();
@@ -838,8 +876,13 @@ impl Campos {
         let bloqueado = cofre.agora(|c| c.bloqueado());
         if !bloqueado {
             c.credencial = id_do_rotulo(&escolhida);
-            // Um item do cofre volta o modo ao padrão: o item vence.
-            c.credencial_modo = ModoCredencial::do_rotulo(&escolhida);
+            // Um item do cofre volta o modo ao padrão (o item vence), e fora do SSH e do SFTP o
+            // modo não vale: fica o "Herdar", que não vai para o arquivo.
+            c.credencial_modo = if c.kind.usa_ssh() {
+                ModoCredencial::do_rotulo(&escolhida)
+            } else {
+                ModoCredencial::Herdar
+            };
             c.chave_do_cofre = uid_da_chave_do_cofre(cofre, &self.chave_cofre.get());
         }
         c.jump = (!salto.is_empty()).then(|| Jump {
@@ -1001,6 +1044,8 @@ struct Tela {
     cluster: cluster::Estado,
     /// A página Scripts (M42).
     scripts: scripts::Estado,
+    /// O lançador "Links…".
+    links: lancador_links::Estado,
     /// As distribuições do WSL (M42).
     wsl: wsl::Estado,
     /// O diálogo "Instalar no computador" (M65).
@@ -1057,7 +1102,8 @@ struct Tela {
     encerrando: Cell<bool>,
     /// Outra cópia do app, aberta antes, é a dona da configuração (`Ambiente::dono_do_estado`):
     /// esta abre só de leitura ([`crate::armazenamento::somente_leitura_em`]), sem as abas da
-    /// outra, e o que se muda nela fica na memória e se perde ao fechar.
+    /// outra. As conexões, as configurações, os provedores de IA e o cofre que se mudam nela vão
+    /// para a outra gravar ([`crate::instancias`]); o resto fica na memória e se perde ao fechar.
     so_leitura: bool,
     /// Numa cópia só de leitura, se a dona ainda está aberta. Quando ela fecha, a barra de só
     /// leitura convida a reiniciar.
@@ -1135,6 +1181,8 @@ struct Tela {
     programas: programas::EstadoProgramas,
     /// Os provedores de IA (o `ia.json`) e o que a página deles escolheu.
     assistente: assistente::EstadoAssistente,
+    /// O canal entre as cópias do app na mesma pasta de dados.
+    instancias: instancias::Estado,
     /// O servidor MCP dos assistentes de código (M51).
     mcp: mcp::EstadoMcp,
     /// O painel de portas do servidor (M58).
@@ -1377,10 +1425,12 @@ impl Tela {
     /// Abre a conexão e troca para a página Terminais, onde a aba aparece.
     fn abrir_e_mostrar(self: &Rc<Self>, id: u64) {
         self.abrir(id, self.lugar_novo());
-        let arquivos = self
-            .tree
-            .with_untracked(|t| t.connection(id).is_some_and(|c| c.kind.so_arquivos()));
-        if !arquivos {
+        // Os arquivos vão à página Arquivos e o link ao navegador: a tela fica onde está.
+        let sem_aba = self.tree.with_untracked(|t| {
+            t.connection(id)
+                .is_some_and(|c| c.kind.so_arquivos() || c.kind == Kind::Link)
+        });
+        if !sem_aba {
             self.mostrar_terminais();
         }
     }
@@ -1604,6 +1654,9 @@ impl Tela {
             self.guardar_rede_do_grupo();
             self.guardar_mcp_do_grupo();
             self.guardar_persistente_do_grupo();
+            self.guardar_mouse_do_grupo();
+            self.guardar_retentar_do_grupo();
+            self.guardar_credencial_do_grupo();
             self.guardar_comandos_do_grupo();
             return;
         };
@@ -1615,6 +1668,8 @@ impl Tela {
         nova.perfil_ia = self.perfil_ia_do_texto(atual.perfil_ia, &self.campos.perfil_ia.get());
         nova.mcp = self.mcp_do_texto(atual.id, atual.mcp, &self.campos.mcp.get());
         nova.persistente = tmux::do_rotulo(&self.campos.persistente.get());
+        nova.mouse = crate::mouse::do_rotulo(&self.campos.mouse.get());
+        nova.retentar = crate::retentar::do_rotulo(&self.campos.retentar.get(), atual.retentar);
         // Trocar o tipo (ou a segurança do FTP) troca a porta, se ela estava no padrão de antes.
         if (nova.kind != atual.kind || nova.ftp_security != atual.ftp_security)
             && atual.port == atual.porta_padrao()
@@ -1795,6 +1850,7 @@ impl Tela {
             && let Some(c) = self.tree.with_untracked(|t| t.connection(id).cloned())
         {
             self.campos.sincronizar(&c, &self.cofre);
+            self.sincronizar_credencial_herdada(&c);
         }
     }
 
@@ -1869,7 +1925,11 @@ impl Tela {
             openvpn_erro: None,
             motor: None,
             motor_erro: None,
+            emprestimo: None,
         };
+        if self.emprestar_da_principal(&mut rede) {
+            return rede;
+        }
         if rede.perfil.nebula.is_some() {
             self.ligar_nebula(&mut rede);
         } else if rede.perfil.openvpn.is_some() {
@@ -2215,10 +2275,14 @@ impl Tela {
             .conexao_selecionada()
             .unwrap_or_else(|| Connection::new("", Kind::Ssh));
         self.campos.carregar(&c, &self.cofre);
+        self.sincronizar_credencial_herdada(&c);
+        self.sincronizar_credencial_do_grupo();
         self.sincronizar_rede();
         self.sincronizar_perfil_ia();
         self.sincronizar_mcp();
         self.sincronizar_persistente();
+        self.sincronizar_mouse();
+        self.sincronizar_retentar();
         self.sincronizar_comandos_do_grupo();
         self.sincronizar_x11();
         self.sincronizar_colar();
@@ -2300,9 +2364,16 @@ impl Tela {
 
     /// Como [`Tela::abrir`]; `registrar` diz se a abertura entra nos recentes.
     fn abrir_com(&self, id: u64, lugar: Lugar, registrar: bool) {
-        let Some(c) = self.tree.with_untracked(|t| t.connection(id).cloned()) else {
+        let Some(c) = self.tree.with_untracked(|t| t.conexao_para_abrir(id)) else {
             return;
         };
+        if c.kind == Kind::Link {
+            self.abrir_link_da_arvore(&c);
+            if registrar {
+                self.registrar_recente(&c);
+            }
+            return;
+        }
         if c.kind.so_arquivos() {
             self.abrir_arquivos_em(id, None, None, true);
             if registrar {
@@ -2410,7 +2481,7 @@ impl Tela {
     fn concluir_senha(&self, pedido: Pedido, senha: String, salvar: bool) {
         let Some(c) = self
             .tree
-            .with_untracked(|t| t.connection(pedido.id).cloned())
+            .with_untracked(|t| t.conexao_para_abrir(pedido.id))
         else {
             return;
         };
@@ -2427,7 +2498,7 @@ impl Tela {
         // Relê a conexão: guardar a senha pode ter ligado a credencial.
         let c = self
             .tree
-            .with_untracked(|t| t.connection(pedido.id).cloned())
+            .with_untracked(|t| t.conexao_para_abrir(pedido.id))
             .unwrap_or(c);
         let mut senhas = self.senhas_do_cofre(&c);
         let outra = match alvo {
@@ -2980,8 +3051,10 @@ impl Tela {
             if resolvida.paineis.iter().all(Vec::is_empty) {
                 continue;
             }
-            // Um cluster com IA volta sempre como cluster, numa janela dele, com o assistente.
+            // Um cluster com IA volta sempre como cluster, numa janela dele, com o assistente; com
+            // o controle por assistentes desligado em Geral, volta como um cluster comum.
             if let Some(ia) = &salva.cluster_ia
+                && self.config.with_untracked(|c| c.geral.mcp)
                 && Ferramenta::da_chave(&ia.ferramenta).is_some()
             {
                 self.reabrir_cluster_ia(salva, &resolvida, ia);
@@ -3390,6 +3463,7 @@ fn icone_do_tipo(kind: Kind) -> Symbol {
         Kind::S3 | Kind::Rclone => Symbol::Cloud,
         Kind::Local => Symbol::WindowConsole,
         Kind::Telnet => Symbol::Desktop,
+        Kind::Link => Symbol::Globe,
     }
 }
 
@@ -3400,7 +3474,7 @@ fn icone_do_cartao(kind: Kind) -> Symbol {
         Kind::Sftp | Kind::Ftp => Symbol::Folder,
         Kind::S3 | Kind::Rclone => Symbol::Cloud,
         Kind::Local => Symbol::Desktop,
-        Kind::Telnet => Symbol::Globe,
+        Kind::Telnet | Kind::Link => Symbol::Globe,
     }
 }
 
@@ -3638,6 +3712,7 @@ fn acao(tela: &Rc<Tela>, f: impl Fn(&Rc<Tela>) + 'static) -> impl FnMut() + 'sta
 /// existir e só aparecem os das que existem na hora de abrir (e o clique procura a janela no
 /// momento).
 fn extra_da_aba(tela: &Rc<Tela>, janela: Janela, sessao: Session, menu: MenuFlyout) -> MenuFlyout {
+    let (ligada_ia, ligada_mcp) = (com_ia(tela.config), com_mcp(tela.config));
     let mut mover = MenuFlyout::new().id("mover-janela-menu");
     for n in 0..janelas::NO_MENU {
         let t = Rc::clone(tela);
@@ -3645,7 +3720,7 @@ fn extra_da_aba(tela: &Rc<Tela>, janela: Janela, sessao: Session, menu: MenuFlyo
         mover = mover
             .item(
                 format!("mover-janela-{}", n + 1),
-                t!("casca-janela-n", n = n + 1),
+                janelas::no_menu(n),
                 move || {
                     if let Some(outra) = t.janelas.todas_agora().get(n).copied() {
                         t.mover_sessao(sessao, outra);
@@ -3685,7 +3760,7 @@ fn extra_da_aba(tela: &Rc<Tela>, janela: Janela, sessao: Session, menu: MenuFlyo
         .icon(Symbol::Sparkle)
         .item_visible({
             let t = Rc::clone(tela);
-            move || t.aba_ssh(ia::AlvoIa::Sessao(sessao))
+            move || ligada_ia() && t.aba_ssh(ia::AlvoIa::Sessao(sessao))
         })
         .item("tuneis-ativos-da-sessao", t!("casca-tuneis-ativos"), {
             let t = Rc::clone(tela);
@@ -3709,7 +3784,7 @@ fn extra_da_aba(tela: &Rc<Tela>, janela: Janela, sessao: Session, menu: MenuFlyo
         .icon(Symbol::Dismiss)
         .item_visible({
             let t = Rc::clone(tela);
-            move || t.aba_marcada(&sessao.key_str())
+            move || ligada_mcp() && t.aba_marcada(&sessao.key_str())
         })
         .item(
             "mcp-tirar-da-ia",
@@ -3728,7 +3803,7 @@ fn extra_da_aba(tela: &Rc<Tela>, janela: Janela, sessao: Session, menu: MenuFlyo
         .icon(Symbol::Sparkle)
         .item_visible({
             let t = Rc::clone(tela);
-            move || t.dono_da_aba(&sessao.key_str()).is_some()
+            move || ligada_mcp() && t.dono_da_aba(&sessao.key_str()).is_some()
         })
         .submenu(
             "aba-controlar",
@@ -3758,7 +3833,7 @@ fn extra_da_aba(tela: &Rc<Tela>, janela: Janela, sessao: Session, menu: MenuFlyo
         .icon(Symbol::Sparkle)
         .item_visible({
             let t = Rc::clone(tela);
-            move || t.mcp.sessoes.with(|todas| todas.len() > 1)
+            move || ligada_mcp() && t.mcp.sessoes.with(|todas| todas.len() > 1)
         })
         .item("abrir-log-da-sessao", t!("logs-abrir-da-aba"), {
             let t = Rc::clone(tela);
@@ -4074,19 +4149,34 @@ fn terminal_configurado(
         .scheme(move || config.with(|c| esquemas::esquema(c.terminal.esquema)))
         .cursor_shape(move || config.with(|c| esquemas::cursor(c.terminal.cursor)))
         .cursor_blink(move || config.with(|c| c.terminal.cursor_piscando))
-        .copy_on_select(move || config.with(|c| c.terminal.copiar_ao_selecionar))
+        .copy_on_select({
+            let tela = tela.clone();
+            move || match &tela {
+                Some((tela, _)) => tela.copiar_ao_selecionar(sessao),
+                None => config.with(|c| c.terminal.copiar_ao_selecionar),
+            }
+        })
         .paste_warning(move || config.with(|c| c.terminal.avisar_colar))
-        .right_click(move || config.with(|c| esquemas::botao_direito(c.terminal.botao_direito)))
+        .right_click({
+            let tela = tela.clone();
+            move || {
+                esquemas::botao_direito(match &tela {
+                    Some((tela, _)) => tela.botao_direito(sessao),
+                    None => config.with(|c| c.terminal.botao_direito),
+                })
+            }
+        })
         .bell(move || config.with(|c| esquemas::campainha(c.terminal.campainha)))
         .scrollback(historico)
     }
 }
 
 /// Os itens de IA do menu do clique direito do terminal da `sessao` (M52): explicar a seleção ou
-/// o erro, gerar um comando, perguntar e abrir o chat. Somem com `ia.mostrar_no_menu` desligado.
+/// o erro, gerar um comando, perguntar e abrir o chat. Somem com `ia.mostrar_no_menu` ou os
+/// assistentes de IA desligados em Geral.
 fn menu_ia_do_terminal(tela: &Rc<Tela>, janela: Janela, sessao: Session) -> MenuFlyout {
     let config = tela.config;
-    let mostrar = move || config.with(|c| c.ia.mostrar_no_menu);
+    let mostrar = move || config.with(|c| c.geral.assistente_ia && c.ia.mostrar_no_menu);
     let com_selecao = move || mostrar() && sessao.has_selection();
     let sem_selecao = move || mostrar() && !sessao.has_selection();
     let acao = |f: fn(&Rc<Tela>, Janela, Session)| {
@@ -4489,7 +4579,7 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
                 for (v, motivo) in recusadas {
                     let recusa = t.recusa_de(v.id, &motivo);
                     let so_o_agente = t.tree.with_untracked(|tree| {
-                        tree.connection(v.id)
+                        tree.conexao_para_abrir(v.id)
                             .is_some_and(|c| c.modo_da_credencial() == ModoCredencial::Agente)
                     });
                     if recusa == Recusa::Conexao && so_o_agente {
@@ -4800,7 +4890,7 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
     // O pedido que o diálogo de senha mostra: o primeiro da fila.
     let pedido_atual = move || pendentes.with(|p| p.first().copied());
     let conexao_do_pedido =
-        move || pedido_atual().and_then(|p| tree.with(|t| t.connection(p.id).cloned()));
+        move || pedido_atual().and_then(|p| tree.with(|t| t.conexao_para_abrir(p.id)));
     let dialogo_senha = ContentDialog::new(
         move || match (pedido_atual(), conexao_do_pedido()) {
             (Some(p), Some(c)) if p.recusa == Recusa::Salto => t!(
@@ -4980,6 +5070,7 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
         .child(openvpn_perguntas::dialogo(&tela))
         .child(cluster::dialogo(&tela))
         .child(scripts::dialogo_novo(&tela))
+        .child(lancador_links::dialogo(&tela))
         .child(dialogo_salvar_espaco)
         .child(dialogo_substituir_espaco)
         .child(dialogo_senha)
@@ -5262,7 +5353,8 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                                 eh_grupo
                                     && t.tem_terminal(alvo)
                                     && t.config.with(|c| {
-                                        Ferramenta::TODAS.into_iter().any(|f| c.ia.mostra(f))
+                                        c.geral.mcp
+                                            && Ferramenta::TODAS.into_iter().any(|f| c.ia.mostra(f))
                                     })
                             }
                         })
@@ -5322,7 +5414,7 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                         .icon(Symbol::Sparkle)
                         .item_visible({
                             let t = Rc::clone(&t);
-                            move || t.tem_terminal(alvo)
+                            move || t.config.with(|c| c.geral.mcp) && t.tem_terminal(alvo)
                         })
                         .item(format!("menu-{chave}-script"), t!("casca-rodar-script"), {
                             let t = Rc::clone(&t);
@@ -5361,7 +5453,10 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                             ),
                         )
                         .icon(Symbol::Sparkle)
-                        .item_visible(eh_ssh)
+                        .item_visible({
+                            let ligada = com_ia(t.config);
+                            move || eh_ssh && ligada()
+                        })
                         .item(
                             format!("menu-{chave}-virt-manager"),
                             t!("casca-abrir-virt-manager"),
@@ -5416,7 +5511,14 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                         .icon(Symbol::Sparkle)
                         .item_visible({
                             let t = Rc::clone(&t);
-                            move || t.config.with(|c| c.ia.mcp_ligado)
+                            // O link não tem a linha "Assistentes (MCP)".
+                            move || {
+                                t.config.with(Configuracoes::mcp_no_ar)
+                                    && t.tree.with(|tr| {
+                                        tr.connection(id)
+                                            .is_none_or(|c| CampoDaGrade::Mcp.vale(c.kind))
+                                    })
+                            }
                         })
                         .item(
                             format!("menu-{chave}-renomear"),
@@ -5494,6 +5596,8 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
             .find(|k| campos.tipo.get() == k.nome())
     };
     let esconde = move |campo: CampoDaGrade| move || !tipo().is_some_and(|k| campo.vale(k));
+    // As linhas da IA e dos assistentes (MCP) somem também com a área desligada em Geral.
+    let (ligada_ia, ligada_mcp) = (com_ia(config), com_mcp(config));
     let usa_ssh = move || tipo().is_some_and(Kind::usa_ssh);
     // A porta padrão do tipo (a da segurança, no FTP): a Porta só fica em negrito se difere.
     let porta_padrao = move || {
@@ -5557,6 +5661,9 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         )
         .default(Kind::Ssh.nome())
         .description(t!("casca-ssh-sftp-ftp-s3-ou-rclone"))
+        .text(t!("casca-endereco-do-link"), move || campos.url)
+        .hidden(esconde(CampoDaGrade::Url))
+        .description(t!("casca-o-endereco-do-link"))
         .text(t!("comum-host"), move || campos.host)
         .hidden(esconde(CampoDaGrade::Host))
         .description(t!("casca-nome-ou-endereco-do-servidor-no"))
@@ -5569,13 +5676,22 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         .description(t!("casca-o-usuario-no-servidor-no-s3"))
         .choice_from(t!("comum-credencial"), move || campos.credencial, {
             let cofre = cofre.clone();
-            move || opcoes_de_credencial_da_conexao(&cofre, usa_ssh())
+            move || {
+                let herdar = usa_ssh().then(|| credencial::herdar_da_selecao(tree, selecionado));
+                opcoes_de_credencial_da_conexao(&cofre, herdar)
+            }
         })
         .disabled({
             let cofre = cofre.clone();
             move || cofre.ler(|c| c.bloqueado())
         })
-        .default(perguntar())
+        .default_with(move || {
+            if usa_ssh() {
+                credencial::herdar_da_selecao(tree, selecionado)
+            } else {
+                perguntar()
+            }
+        })
         .hidden(esconde(CampoDaGrade::Login))
         .description(t!("casca-credencial-da-conexao-descricao"))
         .password(t!("comum-senha"), move || campos.senha)
@@ -5613,7 +5729,7 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
             move || campos.perfil_ia,
             move || assistente::opcoes_de_perfil_ia(perfis_de_ia),
         )
-        .hidden(esconde(CampoDaGrade::Ia))
+        .hidden(move || !ligada_ia() || esconde(CampoDaGrade::Ia)())
         .description(t!("ia-conexao-descricao"))
         .category(t!("mcp-categoria"))
         .choice_from(
@@ -5621,7 +5737,7 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
             move || campos.mcp,
             move || mcp_propriedades::opcoes_da_selecao(tree, selecionado),
         )
-        .hidden(esconde(CampoDaGrade::Mcp))
+        .hidden(move || !ligada_mcp() || esconde(CampoDaGrade::Mcp)())
         .description(t!("mcp-linha-descricao"))
         .category("S3")
         .hidden(esconde(CampoDaGrade::S3))
@@ -5745,6 +5861,20 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         )
         .hidden(esconde(CampoDaGrade::Persistente))
         .description(t!("tmux-linha-descricao"))
+        .choice_from(
+            t!("mouse-linha"),
+            move || campos.mouse,
+            move || mouse::opcoes_da_selecao(tree, selecionado),
+        )
+        .hidden(esconde(CampoDaGrade::Mouse))
+        .description(t!("mouse-linha-descricao"))
+        .choice_from(
+            t!("retentar-linha"),
+            move || campos.retentar,
+            move || retentar::opcoes_da_selecao(tree, selecionado),
+        )
+        .hidden(esconde(CampoDaGrade::Reconectar))
+        .description(t!("retentar-linha-descricao"))
         .text(t!("casca-programa"), move || campos.local_programa)
         .hidden(esconde(CampoDaGrade::Programa))
         .description(t!("casca-o-programa-que-o-terminal-desta"))
@@ -5774,7 +5904,7 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         .default(ShellRemoto::Automatico.nome())
         .description(t!("casca-o-shell-que-recebe-o-caminho"))
         .category(t!("ia-remoto-categoria"))
-        .hidden(esconde(CampoDaGrade::IaNoServidor))
+        .hidden(move || !ligada_ia() || esconde(CampoDaGrade::IaNoServidor)())
         .collapsed()
         .text(t!("ia-remoto-pasta"), move || campos.ia_pasta)
         .default("")
@@ -5883,7 +6013,8 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         .description(t!("casca-a-senha-do-servidor-de-salto"))
         .visible(move || !sem_conexao());
 
-    // Um grupo só tem a rede, os comandos e a permissão dos assistentes: valem para tudo o
+    // Um grupo só tem a rede, os comandos, a permissão dos assistentes, a sessão persistente, o
+    // mouse no terminal, a rodada nova de reconexão e o modo da credencial: valem para tudo o
     // que está dentro dele.
     let propriedades_do_grupo = PropertyGrid::new()
         .id("props-grupo")
@@ -5896,6 +6027,7 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         )
         .description(t!("casca-por-onde-saem-as-conexoes-do"))
         .category(t!("mcp-categoria"))
+        .hidden(move || !ligada_mcp())
         .choice_from(
             t!("mcp-linha"),
             move || campos.mcp,
@@ -5909,6 +6041,24 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
             move || sessao_tmux::opcoes_da_selecao(tree, selecionado),
         )
         .description(t!("tmux-linha-descricao-pasta"))
+        .choice_from(
+            t!("mouse-linha"),
+            move || campos.mouse,
+            move || mouse::opcoes_da_selecao(tree, selecionado),
+        )
+        .description(t!("mouse-linha-descricao-pasta"))
+        .choice_from(
+            t!("retentar-linha"),
+            move || campos.retentar,
+            move || retentar::opcoes_da_selecao(tree, selecionado),
+        )
+        .description(t!("retentar-linha-descricao-pasta"))
+        .choice_from(
+            t!("comum-credencial"),
+            move || campos.credencial_da_pasta,
+            move || credencial::opcoes_da_selecao(tree, selecionado),
+        )
+        .description(t!("comum-credencial-descricao-pasta"))
         .category(t!("comandos-categoria"))
         .button(t!("comandos-linha"), move || resumo_comandos, {
             let t = Rc::clone(&tela);
@@ -6016,6 +6166,8 @@ fn nova_tela(
     let so_leitura = !ambiente.dono_do_estado;
     if so_leitura {
         crate::armazenamento::somente_leitura_em(armazenamento.pasta());
+        // O que ela muda vai para a principal: a leitura anota a base da junção.
+        crate::instancias::seguir_a_principal(armazenamento.pasta());
     }
     controlar::limpar_arquivos_antigos(armazenamento.pasta());
     tomni_ui::dialogs::set_folder_memory(Rc::new(crate::pastas::Pastas::carregar(&armazenamento)));
@@ -6138,6 +6290,7 @@ fn nova_tela(
         zoom_fonte: ZoomFonte::novo(),
         cluster: cluster::Estado::novo(),
         scripts: scripts::Estado::novo(),
+        links: lancador_links::Estado::novo(),
         wsl: wsl::Estado::novo(),
         instalar: instalar::Estado::novo(),
         ia: ia::Estado::novo(),
@@ -6216,6 +6369,7 @@ fn nova_tela(
         editor_comandos: comandos_editor::EstadoEditorComandos::novo(),
         programas: programas::EstadoProgramas::novo(),
         assistente: assistente::EstadoAssistente::novo(ia_lido),
+        instancias: instancias::Estado::novo(),
         mcp: mcp::EstadoMcp::novo(),
         portas: portas::EstadoPortas::novo(),
     });
@@ -6227,6 +6381,7 @@ fn nova_tela(
     tela.ligar_comandos();
     tela.ligar_assistente();
     tela.ligar_mcp();
+    tela.ligar_instancias();
     tela.ligar_portas();
     tela.podar_recentes();
     tela.ferramentas.iniciar();
@@ -6513,6 +6668,7 @@ pub fn tela_com_ferramentas(
     duplicar::ligar(&tela);
     sessao_tmux::ligar(&tela);
     sessoes_servidor::ligar(&tela);
+    let medidas = desempenho::ligar(&tela);
 
     let navegacao = NavigationView::bind(pagina)
         .id("navegacao")
@@ -6572,6 +6728,12 @@ pub fn tela_com_ferramentas(
         .item("ia", Symbol::Sparkle, t!("casca-ia"), ia_pagina)
         .item("logs", Symbol::DocumentText, t!("casca-logs"), logs_pagina)
         .item("scripts", Symbol::Code, t!("casca-scripts"), scripts_pagina)
+        .item(
+            desempenho::PAGINA,
+            Symbol::DataArea,
+            t!("casca-desempenho"),
+            desempenho::pagina(&tela, medidas),
+        )
         .footer_item(
             "sobre",
             Symbol::Info,
@@ -6582,14 +6744,43 @@ pub fn tela_com_ferramentas(
 
     let busca = campo_de_busca(&tela, pagina, escolher_item);
 
-    Form::new(NOME_DO_APP)
+    // Com outras janelas abertas, a principal se diz principal, no título do sistema (o que a
+    // lista de janelas e o Alt+Tab mostram) e na barra. A plataforma lê o título a cada quadro,
+    // fora de um efeito: essa leitura não rastreia. O subtítulo rastreia, para a barra refazer o
+    // layout quando ele aparece ou some.
+    let titulo = {
+        let janelas = tela.janelas.clone();
+        move || {
+            if janelas.quantas_agora() > 1 {
+                t!("casca-titulo-da-principal")
+            } else {
+                NOME_DO_APP.to_owned()
+            }
+        }
+    };
+    let janelas = tela.janelas.clone();
+    let subtitulo = move || {
+        if janelas.quantas() > 1 {
+            t!("casca-subtitulo-da-principal")
+        } else {
+            String::new()
+        }
+    };
+    Form::new(titulo)
         .density(Density::Compact)
         .title_bar(
             TitleBar::new(NOME_DO_APP)
                 .icon_image(icone::PEQUENO)
                 .title_badge(marca::selo())
+                .subtitle(subtitulo)
                 .content(busca)
-                .right_header(tema::botao_de_tema(tela.config)),
+                .right_header(
+                    Row::new()
+                        .gap(4)
+                        .align(Align::Center)
+                        .child(desempenho::medidor(&tela, medidas))
+                        .child(tema::botao_de_tema(tela.config)),
+                ),
         )
         .child(
             Column::new()
@@ -6672,7 +6863,10 @@ fn campo_de_busca(
                         });
                         busca::sugerir(procurado, &conexoes, itens.as_deref())
                     });
-                    lista.extend(busca::sugerir_configuracoes(procurado));
+                    lista.extend(
+                        tela.config
+                            .with_untracked(|c| busca::sugerir_configuracoes(procurado, c)),
+                    );
                     lista
                 })
             })

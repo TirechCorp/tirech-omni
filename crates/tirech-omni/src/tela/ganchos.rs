@@ -167,7 +167,9 @@ impl Tela {
     /// `conexoes.reconectar`: o que fazer quando uma conexão cai (o `close_reason` da sessão;
     /// um shell que acabou com `exit` não tem motivo e fica de fora). A aba que um assistente
     /// está usando reconecta sozinha em qualquer modo: o assistente não tem como responder ao
-    /// aviso, e sem a aba o trabalho dele para.
+    /// aviso, e sem a aba o trabalho dele para. Acabadas as tentativas, a aba espera o tempo da
+    /// linha "Tentar de novo após" da conexão (ou da pasta, ou `retentar_mins`) e começa outra
+    /// rodada, até voltar; desligado, para.
     fn aplicar_reconexao(&self) {
         let (config, janelas, aviso, alarmes, reconectando, eu) = (
             self.config,
@@ -180,6 +182,9 @@ impl Tela {
         // As sessões que já foram tratadas nesta queda, e as tentativas seguidas de cada uma.
         let tratadas: Rc<RefCell<HashSet<Session>>> = Rc::default();
         let tentativas: Rc<RefCell<HashMap<Session, (u32, Instant)>>> = Rc::default();
+        // As sessões que esperam a rodada nova. Reabrir a aba nesse meio-tempo (à mão) tira
+        // daqui, e o alarme da pausa não faz nada.
+        let em_pausa: Rc<RefCell<HashSet<Session>>> = Rc::default();
         effect(move || {
             let cfg = config.with(|c| c.conexoes.reconectar.clone());
             let sessoes: Vec<Session> = janelas
@@ -193,6 +198,7 @@ impl Tela {
                     if !reconectando.borrow().contains_key(&sessao) {
                         tratadas.borrow_mut().remove(&sessao);
                     }
+                    em_pausa.borrow_mut().remove(&sessao);
                     continue;
                 };
                 if !tratadas.borrow_mut().insert(sessao) {
@@ -228,13 +234,47 @@ impl Tela {
                             };
                             if n > cfg.tentativas {
                                 tentativas.borrow_mut().remove(&sessao);
+                                let pausa = eu.upgrade().and_then(|tela| {
+                                    tela.pausa_da_reconexao(sessao, cfg.retentar_mins)
+                                });
+                                let Some(pausa) = pausa else {
+                                    sessao.feed(
+                                        format!(
+                                            "\r\n[{}]\r\n",
+                                            t!("gancho-reconexao-falhou", motivo = motivo.as_str())
+                                        )
+                                        .as_bytes(),
+                                    );
+                                    return;
+                                };
+                                let minutos = u32::try_from(pausa.as_secs() / 60).unwrap_or(0);
                                 sessao.feed(
                                     format!(
                                         "\r\n[{}]\r\n",
-                                        t!("gancho-reconexao-falhou", motivo = motivo.as_str())
+                                        t!(
+                                            "gancho-reconexao-pausa",
+                                            motivo = motivo.as_str(),
+                                            tempo = crate::retentar::tempo(minutos)
+                                        )
                                     )
                                     .as_bytes(),
                                 );
+                                em_pausa.borrow_mut().insert(sessao);
+                                let (tratadas, em_pausa, janelas) =
+                                    (Rc::clone(&tratadas), Rc::clone(&em_pausa), janelas.clone());
+                                alarmes.depois(pausa, move || {
+                                    // Reaberta à mão, ou a aba fechou: nada a fazer.
+                                    let aberta = janelas.todas().iter().any(|j| {
+                                        j.layout.with_untracked(|l| l.sessions().contains(&sessao))
+                                    });
+                                    if !em_pausa.borrow_mut().remove(&sessao) || !aberta {
+                                        return;
+                                    }
+                                    tratadas.borrow_mut().remove(&sessao);
+                                    if sessao.closed() {
+                                        sessao.restart();
+                                    }
+                                });
                                 return;
                             }
                             sessao.feed(

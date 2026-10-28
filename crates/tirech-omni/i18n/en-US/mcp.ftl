@@ -28,11 +28,11 @@ mcp-ponte-falta-valor = The argument { $argumento } needs a value.
 mcp-ponte-ferramenta-desconhecida = The tool { $nome } does not exist.
 mcp-ponte-argumentos-tortos = The arguments must be a JSON object.
 mcp-ponte-uso =
-    Usage: tirech-omni mcp [--espaco <name>] [--nome <text>] [--aba <key>] [--lancamento <code>] [--canal <address>] [--cluster]
+    Usage: tirech-omni mcp [--espaco <name>] [--nome <text>] [--aba <key>] [--lancamento <code>] [--canal <address>] [--instrucoes <text>] [--cluster]
            tirech-omni mcp --avisos <code>
            tirech-omni mcp --conversa <file> [-- <command>…] <json>
 
-    MCP server for coding assistants (Claude Code, Codex). Forwards the requests to the
+    MCP server for coding assistants (Claude Code, Codex, OpenCode). Forwards the requests to the
     open Tirech Omni; it does not open the app by itself.
 
       --espaco <name>   ties this bridge to a workspace created in Settings
@@ -41,6 +41,7 @@ mcp-ponte-uso =
       --cluster         the assistant controls a cluster: the app gives it the tabs of the chosen machines
       --lancamento <code>  the code of the "Control with" that opened the assistant
       --canal <address>  the app socket (or pipe), when the assistant does not pass the environment to the bridge
+      --instrucoes <text>  the text that opens the initialize instructions (the "Control with" of Codex and OpenCode)
       --avisos <code>   writes the pending notices of that code's session (the Claude Code hook) and exits
       --conversa <file>  writes the conversation id to the file (the Codex notify), runs the command after -- and exits
       --help            shows this text
@@ -318,6 +319,9 @@ mcp-como-assim-ele-nao-mexe = This way it neither reads nor edits files on your 
 mcp-como-codex-toml = Or, in the ~/.codex/config.toml file:
 mcp-como-codex-so-servidor = To make it work only on the server (in ~/.codex/config.toml):
 mcp-como-codex-aviso = Codex may still edit local files on its own.
+mcp-como-opencode = OpenCode
+mcp-como-opencode-json = In the project's opencode.json file, or in ~/.config/opencode/opencode.json for all your folders:
+mcp-como-opencode-prazo = The timeout, in milliseconds, lets executar wait for long commands: without it, OpenCode gives up on the tool after a short wait.
 mcp-como-pasta-do-servidor = In a server folder
 mcp-como-pasta-do-servidor-texto = Pick a workspace so the commands carry its name. Without one, the assistant uses the open connections.
 mcp-como-app-aberto = Tirech Omni must be open with control turned on. The bridge does not open the app by itself.

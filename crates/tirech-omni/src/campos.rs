@@ -52,6 +52,10 @@ pub enum Campo {
     SessaoSsh,
     /// Sessão › Sessão persistente (tmux ou screen).
     Persistente,
+    /// Sessão › Mouse no terminal (copiar e colar, ou o menu).
+    Mouse,
+    /// Sessão › Tentar de novo após (a rodada nova de reconexão).
+    Reconectar,
     /// Sessão › Programa, Argumentos e Pasta inicial do shell local.
     Programa,
     /// A categoria Colar no terminal.
@@ -64,11 +68,14 @@ pub enum Campo {
     Encaminhamento,
     /// A categoria Jump server.
     Salto,
+    /// O endereço do link.
+    Url,
 }
 
 impl Campo {
     /// Todos os campos, na ordem da grade.
-    pub const TODOS: [Campo; 22] = [
+    pub const TODOS: [Campo; 25] = [
+        Campo::Url,
         Campo::Host,
         Campo::Porta,
         Campo::Usuario,
@@ -85,6 +92,8 @@ impl Campo {
         Campo::Log,
         Campo::SessaoSsh,
         Campo::Persistente,
+        Campo::Mouse,
+        Campo::Reconectar,
         Campo::Programa,
         Campo::Colar,
         Campo::Arquivos,
@@ -108,7 +117,13 @@ impl Campo {
             }
             Campo::Rede => matches!(
                 tipo,
-                Kind::Ssh | Kind::Sftp | Kind::Ftp | Kind::S3 | Kind::Rclone | Kind::Telnet
+                Kind::Ssh
+                    | Kind::Sftp
+                    | Kind::Ftp
+                    | Kind::S3
+                    | Kind::Rclone
+                    | Kind::Telnet
+                    | Kind::Link
             ),
             Campo::Ia => matches!(tipo, Kind::Ssh | Kind::Local | Kind::Telnet),
             Campo::IaNoServidor => matches!(tipo, Kind::Ssh),
@@ -128,14 +143,16 @@ impl Campo {
             Campo::TipoDeTerminal | Campo::Persistente | Campo::Colar | Campo::Encaminhamento => {
                 matches!(tipo, Kind::Ssh)
             }
-            Campo::Log | Campo::Comandos => {
+            Campo::Log | Campo::Comandos | Campo::Mouse => {
                 matches!(tipo, Kind::Ssh | Kind::Local | Kind::Telnet)
             }
+            Campo::Reconectar => matches!(tipo, Kind::Ssh | Kind::Telnet),
             Campo::Programa => matches!(tipo, Kind::Local),
             Campo::Arquivos => matches!(
                 tipo,
                 Kind::Ssh | Kind::Sftp | Kind::Ftp | Kind::S3 | Kind::Rclone
             ),
+            Campo::Url => matches!(tipo, Kind::Link),
         }
     }
 }
@@ -145,66 +162,108 @@ mod testes {
     use super::*;
     use crate::comandos::tem_terminal;
 
-    /// A tabela por extenso, na ordem de `Kind::TODOS`: Ssh, Sftp, Ftp, S3, Rclone, Local, Telnet.
-    /// Mudar a tabela exige mudar este teste.
-    const TABELA: [(Campo, [bool; 7]); 22] = [
-        (Campo::Host, [true, true, true, false, false, false, true]),
-        (Campo::Porta, [true, true, true, false, false, false, true]),
-        (Campo::Usuario, [true, true, true, true, false, false, true]),
-        (Campo::Login, [true, true, true, true, false, false, true]),
+    /// A tabela por extenso, na ordem de `Kind::TODOS`: Ssh, Sftp, Ftp, S3, Rclone, Local, Telnet,
+    /// Link. Mudar a tabela exige mudar este teste.
+    const TABELA: [(Campo, [bool; 8]); 25] = [
+        (
+            Campo::Url,
+            [false, false, false, false, false, false, false, true],
+        ),
+        (
+            Campo::Host,
+            [true, true, true, false, false, false, true, false],
+        ),
+        (
+            Campo::Porta,
+            [true, true, true, false, false, false, true, false],
+        ),
+        (
+            Campo::Usuario,
+            [true, true, true, true, false, false, true, false],
+        ),
+        (
+            Campo::Login,
+            [true, true, true, true, false, false, true, false],
+        ),
         (
             Campo::ChaveSsh,
-            [true, true, false, false, false, false, false],
+            [true, true, false, false, false, false, false, false],
         ),
-        (Campo::Rede, [true, true, true, true, true, false, true]),
-        (Campo::Ia, [true, false, false, false, false, true, true]),
+        (
+            Campo::Rede,
+            [true, true, true, true, true, false, true, true],
+        ),
+        (
+            Campo::Ia,
+            [true, false, false, false, false, true, true, false],
+        ),
         (
             Campo::IaNoServidor,
-            [true, false, false, false, false, false, false],
+            [true, false, false, false, false, false, false, false],
         ),
-        (Campo::Mcp, [true, true, true, true, true, true, true]),
-        (Campo::S3, [false, false, false, true, false, false, false]),
+        (
+            Campo::Mcp,
+            [true, true, true, true, true, true, true, false],
+        ),
+        (
+            Campo::S3,
+            [false, false, false, true, false, false, false, false],
+        ),
         (
             Campo::Rclone,
-            [false, false, false, false, true, false, false],
+            [false, false, false, false, true, false, false, false],
         ),
-        (Campo::Ftp, [false, false, true, false, false, false, false]),
+        (
+            Campo::Ftp,
+            [false, false, true, false, false, false, false, false],
+        ),
         (
             Campo::TipoDeTerminal,
-            [true, false, false, false, false, false, false],
+            [true, false, false, false, false, false, false, false],
         ),
-        (Campo::Log, [true, false, false, false, false, true, true]),
+        (
+            Campo::Log,
+            [true, false, false, false, false, true, true, false],
+        ),
         (
             Campo::SessaoSsh,
-            [true, true, false, false, false, false, false],
+            [true, true, false, false, false, false, false, false],
         ),
         (
             Campo::Persistente,
-            [true, false, false, false, false, false, false],
+            [true, false, false, false, false, false, false, false],
+        ),
+        (
+            Campo::Mouse,
+            [true, false, false, false, false, true, true, false],
+        ),
+        (
+            Campo::Reconectar,
+            [true, false, false, false, false, false, true, false],
         ),
         (
             Campo::Programa,
-            [false, false, false, false, false, true, false],
+            [false, false, false, false, false, true, false, false],
         ),
         (
             Campo::Colar,
-            [true, false, false, false, false, false, false],
+            [true, false, false, false, false, false, false, false],
         ),
         (
             Campo::Arquivos,
-            [true, true, true, true, true, false, false],
+            [true, true, true, true, true, false, false, false],
         ),
         (
             Campo::Comandos,
-            [true, false, false, false, false, true, true],
+            [true, false, false, false, false, true, true, false],
         ),
         (
             Campo::Encaminhamento,
-            [true, false, false, false, false, false, false],
+            [true, false, false, false, false, false, false, false],
         ),
         (
             Campo::Salto,
-            [true, true, false, false, false, false, false],
+            [true, true, false, false, false, false, false, false],
         ),
     ];
 
@@ -234,7 +293,8 @@ mod testes {
                 Kind::S3,
                 Kind::Rclone,
                 Kind::Local,
-                Kind::Telnet
+                Kind::Telnet,
+                Kind::Link
             ]
         );
     }
@@ -247,15 +307,17 @@ mod testes {
             assert_eq!(Campo::SessaoSsh.vale(tipo), tipo.usa_ssh(), "{tipo:?}");
             assert_eq!(Campo::Arquivos.vale(tipo), tipo.tem_arquivos(), "{tipo:?}");
             assert_eq!(Campo::Comandos.vale(tipo), tem_terminal(tipo), "{tipo:?}");
+            assert_eq!(Campo::Mouse.vale(tipo), tem_terminal(tipo), "{tipo:?}");
             assert_eq!(Campo::Log.vale(tipo), tem_terminal(tipo), "{tipo:?}");
             assert_eq!(Campo::Programa.vale(tipo), tipo == Kind::Local, "{tipo:?}");
         }
     }
 
     #[test]
-    fn todo_tipo_tem_coluna_e_o_mcp_vale_para_todos() {
+    fn todo_tipo_tem_coluna_e_o_mcp_vale_para_todos_menos_o_link() {
         for tipo in Kind::TODOS {
-            assert!(Campo::Mcp.vale(tipo), "{tipo:?} sem o Mcp");
+            // O link abre no navegador, fora do alcance dos assistentes.
+            assert_eq!(Campo::Mcp.vale(tipo), tipo != Kind::Link, "{tipo:?}");
             assert!(
                 Campo::TODOS.iter().any(|c| c.vale(tipo)),
                 "{tipo:?} sem nenhum campo"

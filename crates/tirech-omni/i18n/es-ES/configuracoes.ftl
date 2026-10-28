@@ -103,6 +103,10 @@ config-geral-atalho_no_menu = Acceso directo en el menú de aplicaciones
     .descricao = Muestra { -app } en el menú y en el dock del sistema, con su propio icono.
     .palavras = desktop dock lanzador icono launcher menu aplicaciones
 
+config-geral-medidor_cpu = Medidor de CPU en la barra de título
+    .descricao = Muestra cuánto del procesador usa { -app }. Al hacer clic en él se abre la página Rendimiento, con el peso de cada terminal.
+    .palavras = cpu procesador rendimiento uso consumo medidor grafico administrador de tareas
+
 config-geral-recentes_max = Recientes guardados
     .descricao = Cuántas conexiones guarda la lista de recientes, sin contar las ancladas.
     .palavras = historial ultimas
@@ -110,6 +114,12 @@ config-geral-recentes_max = Recientes guardados
 config-acao-limpar_recentes = Borrar recientes
     .descricao = Borra la lista de recientes y mantiene las ancladas.
     .palavras = borrar historial
+config-geral-assistente_ia = Asistentes de IA
+    .descricao = El chat con los perfiles de IA y Claude Code, Codex y OpenCode en los servidores. Desactivado, sus menús, líneas, secciones y atajos desaparecen; lo guardado se conserva.
+    .palavras = ia ai inteligencia artificial chat claude codex opencode desactivar ocultar
+config-geral-mcp = Control por asistentes (MCP)
+    .descricao = Los asistentes que controlan la app, el "Controlar con" y el clúster con IA. Desactivado, desaparecen como los de la IA y el servidor MCP no arranca.
+    .palavras = mcp ia ai controlar asistentes cluster clúster desactivar ocultar
 
 config-acao-instalacao = Instalar en el equipo
     .descricao = Copia la aplicación a una carpeta fija y crea los accesos directos, el inicio con el sistema y la entrada en Aplicaciones instaladas.
@@ -186,7 +196,7 @@ config-terminal-links_com_ctrl = Abrir vínculos con Ctrl+clic
     .palavras = link vinculo enlace url direccion hipervinculo navegador ctrl clic
 
 config-terminal-botao_direito = Botón derecho
-    .descricao = Copia (con selección) y pega (sin ella), como en PuTTY, y Ctrl+clic derecho abre el menú; o siempre abre el menú.
+    .descricao = Copia (con selección) y pega (sin ella), y Ctrl+clic derecho abre el menú; o siempre abre el menú.
     .palavras = mouse raton menu pegar
 
 config-terminal-campainha = Campana
@@ -274,6 +284,10 @@ config-conexoes-reconectar-tentativas = Intentos
 config-conexoes-reconectar-espera_secs = Espera entre los intentos
     .descricao = Segundos antes de cada intento (de 1 a 300).
     .palavras = reconectar intervalo tiempo
+
+config-conexoes-reconectar-retentar_mins = Reintentar tras (minutos)
+    .descricao = Cuando se acaban los intentos, espera estos minutos y empieza otra ronda, hasta que la conexión vuelva; 0 lo desactiva (de 0 a 1440). Cada conexión o carpeta puede elegir otro tiempo en sus propiedades.
+    .palavras = reconectar otra vez ronda pausa minutos insistir
 
 config-conexoes-abrir_em = Abrir conexión en
     .descricao = Dónde abre el doble clic en el árbol, en el Inicio y en la búsqueda.
@@ -600,6 +614,9 @@ config-redes-espera_padrao_secs = Espera predeterminada del proxy
 config-redes-descer_ao_fechar = Desconectar las redes al cerrar
     .descricao = Desactivado, cerrar la aplicación no ejecuta el comando de desconexión de los perfiles en uso.
     .palavras = vpn desconectar apagar cerrar
+config-redes-navegador = Navegador de los enlaces
+    .descricao = Los enlaces con perfil de red se abren en él, en una ventana separada por perfil, que sale por la red del cliente. Los enlaces sin perfil se abren en el navegador predeterminado.
+    .palavras = enlaces links chrome chromium edge brave firefox browser web url
 
 # X11 y túneles
 
@@ -1103,6 +1120,7 @@ config-dica-regiao = us-east-1
 config-dica-classe = la del bucket
 config-dica-rclone = el rclone del PATH
 config-dica-rclone-config = el predeterminado de rclone
+config-dica-navegador = Chrome, Edge, Brave, Chromium o Firefox
 config-dica-display = la variable DISPLAY
 config-dica-virt-manager = virt-manager --no-fork
 config-dica-espacos = espacos en la carpeta de datos
@@ -1130,6 +1148,7 @@ atalho-multi-entrada = Envío a varios
 atalho-cluster = Modo clúster
 atalho-cluster-ia = Clúster con IA
 atalho-scripts = Ejecutar script
+atalho-links = Abrir un enlace
 atalho-reconectar-caidas = Reconectar las pestañas caídas
 atalho-fechar-caidas = Cerrar las pestañas caídas
 atalho-fechar-todas = Cerrar todas las pestañas

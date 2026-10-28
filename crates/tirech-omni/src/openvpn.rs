@@ -9,7 +9,6 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,7 +27,7 @@ use tomni_ui_openvpn::{OpenVpn, OpenVpnBuilder, Prompt, PromptKind, State};
 use zeroize::Zeroizing;
 
 use crate::cofre::IdentidadeOpenVpn;
-use crate::redes::{PerfilRede, TravasDeRede};
+use crate::redes::{MotorDeRede, Orfao, Orfaos, PerfilRede, TravaDoMotor, TravasDeRede};
 use crate::t;
 
 /// Os modos de proteção do canal de controle que a identidade guarda em `modo_tls`.
@@ -520,7 +519,17 @@ struct Ligado {
     /// Falso depois do [`MotoresVpn::parar`]: os últimos estados do motor velho não valem mais.
     vivo: Arc<AtomicBool>,
     /// A trava do perfil entre as cópias do app ([`TravasDeRede`]): solta quando o motor para.
-    _trava: Option<File>,
+    trava: Arc<TravaDoMotor>,
+}
+
+impl MotorDeRede for OpenVpn {
+    fn fechar(&self) {
+        self.close();
+    }
+
+    fn acabou(&self) -> bool {
+        matches!(self.state(), State::Stopped | State::Failed(_))
+    }
 }
 
 /// Os motores OpenVPN ligados, um por perfil. Cada motor tem a thread própria da lib. Ligam sob
@@ -534,6 +543,8 @@ pub struct MotoresVpn {
     acordar: Arc<Mutex<Option<Signal<u64>>>>,
     /// Uma cópia do app por vez liga cada perfil.
     travas: TravasDeRede,
+    /// Os motores parados que conexões ainda seguram: um motor por perfil, nunca dois.
+    orfaos: Orfaos<OpenVpn>,
 }
 
 impl MotoresVpn {
@@ -581,18 +592,38 @@ impl MotoresVpn {
             self.guardar_estado(perfil.id, State::Failed(motivo.clone()));
             motivo
         };
+        if let Some(orfao) = self.orfaos.retomar(perfil.id, assinatura) {
+            // O motor parado ainda roda (uma conexão o segura) e com a mesma identidade: volta
+            // a ser o do perfil. Ligar outro derrubaria este no servidor.
+            let vpn = Arc::clone(&orfao.motor);
+            sem_veneno(&self.ligados).insert(
+                perfil.id,
+                Ligado {
+                    vpn: orfao.motor,
+                    assinatura,
+                    vivo: orfao.vivo,
+                    trava: orfao.trava,
+                },
+            );
+            self.guardar_estado(perfil.id, vpn.state());
+            return Ok(MotorOpenVpn { vpn });
+        }
         let config = config.map_err(&falhou)?;
-        let trava = self.travas.travar(perfil).map_err(&falhou)?;
+        let trava = TravaDoMotor::new(self.travas.travar(perfil).map_err(&falhou)?);
         let vivo = Arc::new(AtomicBool::new(true));
-        let (estados, acordar, id, vivo_do_motor) = (
+        let (estados, acordar, id, vivo_do_motor, trava_do_motor) = (
             Arc::clone(&self.estados),
             Arc::clone(&self.acordar),
             perfil.id,
             Arc::clone(&vivo),
+            Arc::clone(&trava),
         );
         let ligado = OpenVpnBuilder::new(config)
             .name(&perfil.name)
             .on_state(move |estado| {
+                if matches!(estado, State::Stopped | State::Failed(_)) {
+                    trava_do_motor.soltar();
+                }
                 if vivo_do_motor.load(Ordering::Relaxed) {
                     sem_veneno(&estados).insert(id, estado.clone());
                     acordar_a_tela(&acordar);
@@ -607,7 +638,7 @@ impl MotoresVpn {
                 vpn: Arc::clone(&ligado),
                 assinatura,
                 vivo,
-                _trava: trava,
+                trava,
             },
         );
         self.guardar_estado(perfil.id, ligado.state());
@@ -620,7 +651,8 @@ impl MotoresVpn {
     }
 
     /// Para o motor do perfil (se está ligado), sem esperar: o aviso de saída ao servidor sai em
-    /// segundo plano.
+    /// segundo plano. Se uma conexão ainda segura o motor, ele segue até ela largar, e fica nos
+    /// [`Orfaos`] para o próximo [`MotoresVpn::garantir`] reaproveitar ou fechar.
     pub fn parar(&self, perfil: u64) {
         let Some(ligado) = sem_veneno(&self.ligados).remove(&perfil) else {
             return;
@@ -628,12 +660,27 @@ impl MotoresVpn {
         ligado.vivo.store(false, Ordering::Relaxed);
         sem_veneno(&self.estados).remove(&perfil);
         acordar_a_tela(&self.acordar);
-        parar_em_segundo_plano(ligado.vpn);
+        match Arc::try_unwrap(ligado.vpn) {
+            Ok(vpn) => {
+                ligado.trava.soltar();
+                std::thread::spawn(move || vpn.stop(Duration::from_secs(2)));
+            }
+            Err(vpn) => self.orfaos.guardar(
+                perfil,
+                Orfao {
+                    motor: vpn,
+                    assinatura: ligado.assinatura,
+                    vivo: ligado.vivo,
+                    trava: ligado.trava,
+                },
+            ),
+        }
     }
 
     /// Para todos, esperando no máximo 200 ms: é o tempo de o aviso de saída chegar ao servidor
     /// antes de o app fechar.
     pub fn parar_todos(&self) {
+        self.orfaos.fechar_todos();
         let todos: Vec<Ligado> = sem_veneno(&self.ligados).drain().map(|(_, l)| l).collect();
         for l in &todos {
             l.vivo.store(false, Ordering::Relaxed);
@@ -644,15 +691,18 @@ impl MotoresVpn {
         let (fim, espera) = mpsc::channel();
         let mut esperados = 0;
         for l in todos {
-            // Se alguém ainda segura o motor (uma conexão em andamento), o `Drop` dele avisa
-            // quando o último largar.
-            if let Ok(vpn) = Arc::try_unwrap(l.vpn) {
-                let fim = fim.clone();
-                esperados += 1;
-                std::thread::spawn(move || {
-                    vpn.stop(Duration::from_millis(200));
-                    let _ = fim.send(());
-                });
+            // Se alguém ainda segura o motor (uma conexão em andamento), ele para do mesmo jeito,
+            // só sem esperar o aviso de saída.
+            match Arc::try_unwrap(l.vpn) {
+                Err(vpn) => vpn.close(),
+                Ok(vpn) => {
+                    let fim = fim.clone();
+                    esperados += 1;
+                    std::thread::spawn(move || {
+                        vpn.stop(Duration::from_millis(200));
+                        let _ = fim.send(());
+                    });
+                }
             }
         }
         let limite = std::time::Instant::now() + Duration::from_millis(200);
@@ -697,14 +747,6 @@ impl MotoresVpn {
         if let Some(l) = sem_veneno(&self.ligados).get(&perfil) {
             l.vpn.answer(pergunta, resposta.map(Zeroizing::new));
         }
-    }
-}
-
-/// Para um motor: com a única referência, o `stop` avisa o servidor; se ainda há quem segure o
-/// `Arc`, o `Drop` do motor avisa quando o último largar.
-fn parar_em_segundo_plano(vpn: Arc<OpenVpn>) {
-    if let Ok(vpn) = Arc::try_unwrap(vpn) {
-        std::thread::spawn(move || vpn.stop(Duration::from_secs(2)));
     }
 }
 

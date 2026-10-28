@@ -208,7 +208,7 @@ fn comparar_acompanha_a_navegacao() {
     assert_eq!(tons(&m.app, "a1-local"), ["..:-", "sub:-"]);
 
     // Num lado só: `dado.bin` ainda não existe no outro.
-    m.app.double_click("a1-local-sub");
+    duplo(&mut m.app, "a1-local-sub");
     esperar(&mut m.app, "a pasta sub local", |a| {
         a.grid("a1-local").keys().contains(&"dado.bin")
     });
@@ -216,7 +216,7 @@ fn comparar_acompanha_a_navegacao() {
     assert_eq!(tons(&m.app, "a1-remoto"), ["..:-", "sub:caution"]);
 
     // Nos dois lados, com tamanhos diferentes.
-    m.app.double_click("a1-remoto-sub");
+    duplo(&mut m.app, "a1-remoto-sub");
     esperar(&mut m.app, "a pasta sub remota", |a| {
         a.grid("a1-remoto").keys().contains(&"dado.bin")
     });
@@ -238,8 +238,8 @@ fn o_dois_pontos_nao_e_pintado_nem_escondido() {
         },
     );
     abrir(&mut m);
-    m.app.double_click("a1-local-sub");
-    m.app.double_click("a1-remoto-sub");
+    duplo(&mut m.app, "a1-local-sub");
+    duplo(&mut m.app, "a1-remoto-sub");
     esperar(&mut m.app, "as duas pastas sub", |a| {
         a.grid("a1-local").keys().contains(&"x") && a.grid("a1-remoto").keys().contains(&"x")
     });
@@ -313,6 +313,13 @@ fn escrever(app: &mut TestApp, id: &str, texto: &str) {
     app.type_text(texto).key(Key::Enter);
 }
 
+/// O clique duplo na linha `id` de um painel, depois de ela aparecer: o campo do caminho muda
+/// antes de a listagem nova chegar.
+fn duplo(app: &mut TestApp, id: &str) {
+    esperar(app, id, |a| a.tree().find(id).is_some());
+    app.double_click(id);
+}
+
 /// Espera os campos de caminho dos dois painéis terem `local` e `remoto`.
 fn esperar_caminhos(app: &mut TestApp, local: &str, remoto: &str) {
     esperar(app, &format!("{local} e {remoto}"), |a| {
@@ -353,7 +360,7 @@ fn sincronizar_espelha_entrar_e_acima() {
     assert!(m.app.checked("a1-sincronizar"));
 
     // Entrar no remoto leva o local junto.
-    m.app.double_click("a1-remoto-css");
+    duplo(&mut m.app, "a1-remoto-css");
     esperar_caminhos(&mut m.app, "/home/ana/site/css", "/srv/www/css");
     assert!(m.app.checked("a1-sincronizar"));
 
@@ -362,9 +369,12 @@ fn sincronizar_espelha_entrar_e_acima() {
     esperar_caminhos(&mut m.app, "/home/ana/site", "/srv/www");
 
     // Entrar no local, e o `..` do remoto.
-    m.app.double_click("a1-local-js");
+    duplo(&mut m.app, "a1-local-js");
     esperar_caminhos(&mut m.app, "/home/ana/site/js", "/srv/www/js");
-    m.app.double_click("a1-remoto-..");
+    esperar(&mut m.app, "a listagem de js", |a| {
+        a.tree().find("a1-remoto-app.js").is_some()
+    });
+    duplo(&mut m.app, "a1-remoto-..");
     esperar_caminhos(&mut m.app, "/home/ana/site", "/srv/www");
 
     // O caminho digitado também espelha.
@@ -379,7 +389,7 @@ fn sincronizar_espelha_entrar_e_acima() {
 #[test]
 fn sem_sincronizar_cada_painel_anda_sozinho() {
     let (_pasta, mut m) = abrir_o_site("sincronizar-desligada");
-    m.app.double_click("a1-remoto-css");
+    duplo(&mut m.app, "a1-remoto-css");
     esperar(&mut m.app, "o remoto em css", |a| {
         a.text("a1-remoto-caminho") == "/srv/www/css"
     });
@@ -391,7 +401,7 @@ fn sem_sincronizar_cada_painel_anda_sozinho() {
 fn sincronizar_desliga_se_a_pasta_falta() {
     let (_pasta, mut m) = abrir_o_site("sincronizar-pasta-falta");
     m.app.click("a1-sincronizar");
-    m.app.double_click("a1-remoto-apenas-remota");
+    duplo(&mut m.app, "a1-remoto-apenas-remota");
     esperar(&mut m.app, "o aviso", |a| a.visible("a1-aviso"));
 
     assert!(!m.app.checked("a1-sincronizar"));
@@ -414,7 +424,7 @@ fn sincronizar_desliga_se_a_pasta_falta() {
 fn sincronizar_desliga_se_a_pasta_falta_no_servidor() {
     let (_pasta, mut m) = abrir_o_site("sincronizar-pasta-falta-servidor");
     m.app.click("a1-sincronizar");
-    m.app.double_click("a1-local-leia.txt");
+    duplo(&mut m.app, "a1-local-leia.txt");
     m.app.wait(Duration::from_millis(100));
     // Um arquivo não é pasta: nada acontece, a sincronização continua.
     assert!(m.app.checked("a1-sincronizar"));
@@ -423,9 +433,9 @@ fn sincronizar_desliga_se_a_pasta_falta_no_servidor() {
     m.opener.disco.dir("/home/ana/site/so-no-disco");
     m.app.click("a1-local-atualizar");
     esperar(&mut m.app, "a pasta nova", |a| {
-        a.grid("a1-local").keys().contains(&"so-no-disco")
+        a.tree().find("a1-local-so-no-disco").is_some()
     });
-    m.app.double_click("a1-local-so-no-disco");
+    duplo(&mut m.app, "a1-local-so-no-disco");
     esperar(&mut m.app, "o aviso", |a| a.visible("a1-aviso"));
     assert!(!m.app.checked("a1-sincronizar"));
     assert_eq!(
@@ -483,7 +493,7 @@ fn o_inicio_dentro_da_base_espelha_como_outra_navegacao() {
     abrir(&mut m);
     esperar_caminhos(&mut m.app, "/home/ana", "/home/ana");
     m.app.click("a1-sincronizar");
-    m.app.double_click("a1-local-sub");
+    duplo(&mut m.app, "a1-local-sub");
     esperar_caminhos(&mut m.app, "/home/ana/sub", "/home/ana/sub");
 
     // O início é a base: cabe nela, então os dois voltam e a sincronização segue ligada.
@@ -500,7 +510,7 @@ fn sincronizar_nao_ecoa() {
     let servidor = m.opener.servidor(1);
     let (disco_antes, servidor_antes) = (m.opener.disco.lists(), servidor.lists());
 
-    m.app.double_click("a1-remoto-css");
+    duplo(&mut m.app, "a1-remoto-css");
     esperar_caminhos(&mut m.app, "/home/ana/site/css", "/srv/www/css");
     // Deixa passar o que viesse depois: um eco listaria de novo.
     m.app.wait(Duration::from_millis(300));
@@ -547,7 +557,7 @@ fn conexao_com_comparar_e_sincronizar_liga_ao_abrir() {
 
         // A base é o par das pastas padrão: entrar em `css` no servidor leva o disco junto
         // (ligada), ou o deixa onde está (desligada).
-        m.app.double_click("a1-remoto-css");
+        duplo(&mut m.app, "a1-remoto-css");
         esperar(&mut m.app, "o servidor em css", |a| {
             a.text("a1-remoto-caminho") == "/srv/www/css"
         });

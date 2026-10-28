@@ -229,6 +229,29 @@ fn sem_aba_ssh_o_atalho_avisa_e_o_botao_some() {
 }
 
 #[test]
+fn com_os_assistentes_desligados_em_geral_o_botao_o_menu_e_o_atalho_somem() {
+    let (_pasta, mut m) = tela(
+        "ia-desligada",
+        &[
+            ("geral", "pagina_inicial", serde_json::json!("terminais")),
+            ("geral", "assistente_ia", serde_json::json!(false)),
+        ],
+    );
+    responder(&m, 1, &so_com_claude());
+    abrir(&mut m, 1);
+    m.app.frame();
+    assert!(!aparece(&m.app, "ia-botao"));
+    m.app.click("menus-ferramentas");
+    assert!(aparece(&m.app, "scripts-menu"), "o menu abriu");
+    assert!(!aparece(&m.app, "ia"), "o submenu sai do Ferramentas");
+    m.app.key(Key::Escape);
+    m.app.key_with(Key::Char('a'), ATALHO);
+    m.app.frame();
+    assert!(!aparece(&m.app, "ia-claude"), "o atalho não abre nada");
+    assert_eq!(pedidos(&m), 0);
+}
+
+#[test]
 fn a_sondagem_roda_uma_vez_e_os_rotulos_seguem_o_que_o_servidor_tem() {
     let (_pasta, mut m) = tela("ia-rotulos", &[]);
     responder(&m, 1, &so_com_claude());

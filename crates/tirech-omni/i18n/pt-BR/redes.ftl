@@ -168,3 +168,12 @@ redes-estado-da-tailnet = Estado da tailnet
 redes-chave-vale-ate = Chave vale até
 redes-enderecos-na-tailnet = Endereços na tailnet
 redes-servidor-de-controle = Servidor de controle
+
+## Links com perfil de rede (navegador.rs)
+
+navegador-nao-achou = O navegador "{ $programa }" não foi encontrado. Escolha outro em Configurações › Redes › Navegador dos links.
+navegador-nenhum = Nenhum Chrome, Edge, Brave, Chromium ou Firefox foi encontrado. Escolha o navegador em Configurações › Redes › Navegador dos links.
+navegador-perfil-sem-proxy = O perfil de rede "{ $perfil }" só tem salto SSH, e os links ainda não passam por salto. Use um perfil com proxy ou com VPN embutida.
+navegador-proxy-falhou = Não deu para ligar o proxy local do link: { $erro }
+navegador-pasta-falhou = Não deu para preparar a pasta do navegador do perfil: { $erro }
+navegador-nao-abriu = Não deu para abrir o navegador { $programa }: { $erro }

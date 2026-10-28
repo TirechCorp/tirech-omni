@@ -13,7 +13,8 @@ use crate::cofre::{ChaveSsh, Cofre, Item, Tipo};
 use crate::importar::{Entrada, Formato, Importacao, Trazida};
 use crate::modelo::{
     Ativar, ComandosAoConectar, Connection, Jump, Kind, ModoComandos, ModoCredencial, ModoX11,
-    Node, OrigemDaSenha, Passo, SessaoPersistente, TipoTunel, Tree, Tunel,
+    MouseDoTerminal, Node, OrigemDaSenha, Passo, Retentar, SessaoPersistente, TipoTunel, Tree,
+    Tunel,
 };
 use crate::redes::{PerfilRede, ProxyRede, Rede, TipoProxy};
 
@@ -630,6 +631,9 @@ fn com_comandos(a: &mut Amostra) -> (u64, u64) {
     cada_pasta(&mut a.arvore.nodes, &mut |g| {
         if g.name == "ACME" {
             g.persistente = SessaoPersistente::Tmux;
+            g.mouse = MouseDoTerminal::CopiarColar;
+            g.retentar = Retentar::Minutos(15);
+            g.credencial_modo = ModoCredencial::Agente;
             g.comandos = proprios(vec![
                 Passo::comando("sudo su -", 20),
                 Passo::senha(OrigemDaSenha::Cofre { id: item }, 20),
@@ -645,6 +649,8 @@ fn com_comandos(a: &mut Amostra) -> (u64, u64) {
         .id;
     let acme = a.arvore.connection_mut(id).unwrap();
     acme.persistente = SessaoPersistente::Nenhuma;
+    acme.mouse = MouseDoTerminal::Menu;
+    acme.retentar = Retentar::Desligado;
     acme.comandos = proprios(vec![
         Passo::comando("cd /srv", 5),
         Passo::senha(OrigemDaSenha::Conexao, 5),
@@ -680,8 +686,13 @@ fn nativo_leva_os_comandos_e_religa_a_senha_do_cofre() {
         Passo::senha(OrigemDaSenha::Cofre { id: novo }, 20)
     );
     assert_eq!(pasta.persistente, SessaoPersistente::Tmux);
+    assert_eq!(pasta.mouse, MouseDoTerminal::CopiarColar);
+    assert_eq!(pasta.retentar, Retentar::Minutos(15));
+    assert_eq!(pasta.credencial_modo, ModoCredencial::Agente);
     let acme = achar(&i, "ACME prod");
     assert_eq!(acme.conexao.persistente, SessaoPersistente::Nenhuma);
+    assert_eq!(acme.conexao.mouse, MouseDoTerminal::Menu);
+    assert_eq!(acme.conexao.retentar, Retentar::Desligado);
     assert!(!acme.conexao.comandos.reconectar);
     assert_eq!(
         acme.conexao.comandos.passos[0],

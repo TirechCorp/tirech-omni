@@ -28,7 +28,8 @@ operado por assistentes de IA como o Claude Code, o Codex e o OpenCode.
   `rclone`, com fila de transferências e edição de arquivos remotos.
 - **Redes de clientes**: OpenVPN, WireGuard, Tailscale, Nebula e ZeroTier embutidos, por pasta
   ou por conexão. Só o tráfego do app passa pela VPN, sem placa virtual e sem administrador, e
-  dois clientes com o mesmo IP convivem.
+  dois clientes com o mesmo IP convivem. Os links da árvore abrem num navegador só do cliente,
+  que sai pela rede dele.
 - **Assistentes de IA**: um assistente do seu computador opera o app pelo MCP (abre conexões,
   lê a tela, digita, roda comandos), com permissões por conexão, aprovação e auditoria. O
   "Controlar com" abre o Claude Code, o Codex ou o OpenCode numa aba ligada a uma sessão. O app
@@ -37,6 +38,8 @@ operado por assistentes de IA como o Claude Code, o Codex e o OpenCode.
   do mRemoteNG e do MobaXterm, com pré-visualização.
 - **Portas do servidor**: o que escuta no servidor, com um clique para encaminhar a porta ou
   abrir a página no navegador pelo canal SSH.
+- **Desempenho**: um medidor de CPU na barra de título e uma página como a do Gerenciador de
+  Tarefas, com o peso de cada terminal.
 - Interface em **português, inglês e espanhol**.
 - Versão **portable** para o Windows, pacotes para **ARM**, bandeja do sistema e instalação no
   computador sem administrador.

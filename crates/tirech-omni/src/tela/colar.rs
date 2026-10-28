@@ -957,7 +957,7 @@ impl Tela {
     pub(super) fn conexao_do_colar(&self, sessao: Session) -> Option<Connection> {
         let id = self.conexao_da_sessao(sessao)?;
         self.tree
-            .with_untracked(|arvore| arvore.connection(id).cloned())
+            .with_untracked(|arvore| arvore.conexao_para_abrir(id))
     }
 
     /// Trata o que o terminal colou além de texto: imagem ou arquivos. Cada sessão recebe a sua

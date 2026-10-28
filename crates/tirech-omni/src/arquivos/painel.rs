@@ -1175,6 +1175,7 @@ fn menu_da_linha(
             .icon(Symbol::WindowConsole);
     }
     if lado == Lado::Remoto
+        && ctx.config.with_untracked(|c| c.geral.mcp)
         && (ctx.aba_ssh)(aba)
         && p.entrada(chave).is_some_and(|e| e.kind == EntryKind::Dir)
     {

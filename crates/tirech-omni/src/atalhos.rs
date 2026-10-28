@@ -53,6 +53,16 @@ impl Acao {
         t!(self.nome)
     }
 
+    /// Se a ação existe com o que `config` liga em Geral: as dos assistentes de IA somem com o
+    /// `geral.assistente_ia` desligado, e o cluster com IA com o `geral.mcp`.
+    pub fn ligada(&self, config: &Configuracoes) -> bool {
+        match self.id {
+            "ia_comando" | "ia_chat" | "ia_abrir" => config.geral.assistente_ia,
+            "cluster_ia" => config.geral.mcp,
+            _ => true,
+        }
+    }
+
     /// O nome em `idioma` (a busca de Configurações olha os dois).
     pub fn nome_em(&self, idioma: crate::configuracoes::Idioma) -> String {
         i18n::texto_em(idioma, self.nome, None)
@@ -118,6 +128,7 @@ pub const CATALOGO: &[Acao] = &[
     app("cluster", tk!("atalho-cluster"), ""),
     app("cluster_ia", tk!("atalho-cluster-ia"), ""),
     app("scripts", tk!("atalho-scripts"), ""),
+    app("links", tk!("atalho-links"), ""),
     app(
         "reconectar_caidas",
         tk!("atalho-reconectar-caidas"),
@@ -180,9 +191,9 @@ pub fn acao(id: &str) -> Option<&'static Acao> {
 }
 
 /// Os atalhos de `id` nas `config`: os escolhidos que o `FromStr` lê ou, sem eles, os de
-/// fábrica.
+/// fábrica. A ação desligada em Geral ([`Acao::ligada`]) fica sem atalho.
 pub fn atalhos_de(config: &Configuracoes, id: &str) -> Vec<Shortcut> {
-    let Some(acao) = acao(id) else {
+    let Some(acao) = acao(id).filter(|a| a.ligada(config)) else {
         return Vec::new();
     };
     let escolhidos: Vec<Shortcut> = config
@@ -363,6 +374,28 @@ mod testes {
         assert_eq!(principal(&c, "fechar_todas"), Shortcut::ctrl_shift('q'));
         definir(&mut c, "fechar_todas", &[]);
         assert!(principal(&c, "fechar_todas").is_none());
+    }
+
+    #[test]
+    fn as_acoes_desligadas_em_geral_ficam_sem_atalho() {
+        let mut c = Configuracoes::default();
+        definir(&mut c, "cluster_ia", &[Shortcut::ctrl_shift('y')]);
+        assert_eq!(principal(&c, "ia_chat"), Shortcut::ctrl_shift('a'));
+        assert_eq!(principal(&c, "cluster_ia"), Shortcut::ctrl_shift('y'));
+
+        c.geral.assistente_ia = false;
+        for id in ["ia_comando", "ia_chat", "ia_abrir"] {
+            assert!(atalhos_de(&c, id).is_empty(), "{id}");
+        }
+        assert_eq!(principal(&c, "cluster_ia"), Shortcut::ctrl_shift('y'));
+
+        c.geral.mcp = false;
+        assert!(principal(&c, "cluster_ia").is_none());
+        assert_eq!(principal(&c, "multi_entrada"), Shortcut::ctrl_shift('i'));
+        assert!(
+            c.atalhos.contains_key("cluster_ia"),
+            "o atalho escolhido continua gravado"
+        );
     }
 
     #[test]

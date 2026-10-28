@@ -126,7 +126,8 @@ fn endereco(usuario: &str, host: &str, porta: u16) -> String {
     }
 }
 
-/// A linha do destino, conforme o tipo. Os tipos de arquivos não abrem aba de terminal.
+/// A linha do destino, conforme o tipo. Os tipos de arquivos e o link não abrem aba de
+/// terminal.
 fn destino(c: &Connection) -> Option<String> {
     match c.kind {
         Kind::Ssh => Some(format!("SSH · {}", endereco(&c.user, &c.host, c.port))),
@@ -136,7 +137,7 @@ fn destino(c: &Connection) -> Option<String> {
             let comando = format!("{} {}", c.local_programa.trim(), c.local_argumentos.trim());
             Some(t!("dica-local", programa = comando.trim_end()))
         }
-        Kind::Sftp | Kind::Ftp | Kind::S3 | Kind::Rclone => None,
+        Kind::Sftp | Kind::Ftp | Kind::S3 | Kind::Rclone | Kind::Link => None,
     }
 }
 

@@ -271,7 +271,8 @@ impl Tela {
             t.connections().into_iter().any(|c| {
                 escolhidos.contains(&c.id.to_string())
                     && c.kind == Kind::Ssh
-                    && precisa_de_senha(c)
+                    && t.conexao_para_abrir(c.id)
+                        .is_some_and(|c| precisa_de_senha(&c))
                     && senha_da_credencial(&self.cofre, c.credencial).is_empty()
             })
         })
@@ -324,7 +325,7 @@ impl Tela {
         let mut alvos = Vec::new();
         let mut sem_senha = Vec::new();
         for id in ids {
-            let Some(c) = self.tree.with_untracked(|t| t.connection(id).cloned()) else {
+            let Some(c) = self.tree.with_untracked(|t| t.conexao_para_abrir(id)) else {
                 continue;
             };
             let mut senhas = self.senhas_do_cofre(&c);

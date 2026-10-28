@@ -253,7 +253,7 @@ fn a_linha_credencial_lista_os_itens_compativeis_e_liga_a_escolhida() {
     pasta.semear(&so_com_senha());
     let mut m = montar(&pasta, Theme::Light);
     m.app.click("arvore-1");
-    assert_eq!(valor(&m.app, "Credencial"), "Perguntar ao conectar");
+    assert_eq!(valor(&m.app, "Credencial"), "Herdar");
 
     escolher_propriedade(&mut m.app, "Credencial");
     m.app.key(Key::F(4));
@@ -524,14 +524,14 @@ fn a_linha_credencial_escolhe_o_modo_e_perguntar_volta_a_pedir_antes() {
     assert!(!m.app.is_open("senha-dialogo"), "o agente não pergunta");
     assert_eq!(abas(&m.app), 1);
 
-    // Um item do cofre vence: o modo volta ao padrão.
+    // Um item do cofre vence: o modo volta ao padrão (herdar, que o item ignora).
     escolher_propriedade(&mut m.app, "Credencial");
     m.app.key(Key::F(4));
     m.app
         .click(&format!("props-Credencial-valor-alfa--{}-", ids[0]));
     let c = pasta.conexoes().connection(1).cloned().unwrap();
     assert_eq!(c.credencial, Some(ids[0]));
-    assert_eq!(c.credencial_modo, ModoCredencial::Perguntar);
+    assert_eq!(c.credencial_modo, ModoCredencial::Herdar);
 
     // De volta a "Perguntar ao conectar": sem item, a senha é pedida antes.
     escolher_propriedade(&mut m.app, "Credencial");
@@ -541,6 +541,70 @@ fn a_linha_credencial_escolhe_o_modo_e_perguntar_volta_a_pedir_antes() {
     assert_eq!(c.credencial, None);
     assert_eq!(c.credencial_modo, ModoCredencial::Perguntar);
     m.app.double_click("arvore-1");
+    assert!(m.app.is_open("senha-dialogo"));
+}
+
+/// O valor da linha `nome` da grade da pasta.
+fn valor_da_pasta(app: &TestApp, nome: &str) -> String {
+    app.properties("props-grupo")
+        .into_iter()
+        .find(|p| p.name == nome)
+        .unwrap_or_else(|| panic!("sem a propriedade {nome}"))
+        .value
+}
+
+#[test]
+fn a_pasta_com_agente_abre_as_conexoes_de_dentro_sem_perguntar() {
+    let pasta = Pasta::nova("pasta-agente");
+    let mut tree = Tree::default();
+    let cliente = tree.add_group(None, "Cliente");
+    let mut c = Connection::new("web", Kind::Ssh);
+    c.host = "web.exemplo".into();
+    c.user = "ana".into();
+    let web = tree.add_connection(Some(cliente), c);
+    let mut c = Connection::new("db", Kind::Ssh);
+    c.host = "db.exemplo".into();
+    c.user = "ana".into();
+    c.credencial_modo = ModoCredencial::Perguntar;
+    let db = tree.add_connection(Some(cliente), c);
+    pasta.semear(&tree);
+    let mut m = montar(&pasta, Theme::Light);
+
+    // Sem nada na pasta, a conexão que herda pergunta, como sempre.
+    m.app.click(&format!("arvore-{cliente}"));
+    assert_eq!(valor_da_pasta(&m.app, "Credencial"), "Herdar");
+    // A grade da pasta não tem a linha "Nome": o foco entra pela primeira.
+    m.app.click("props-grupo-Rede");
+    comum::escolher_propriedade_em(&mut m.app, "props-grupo", "Credencial");
+    m.app.key(Key::F(4));
+    assert!(m.app.is_open("props-grupo-Credencial-valor-lista"));
+    assert!(m.app.visible("props-grupo-Credencial-valor-herdar"));
+    m.app.click("props-grupo-Credencial-valor-agente-ssh");
+    m.app.assert_lint();
+    let salva = pasta.conexoes();
+    let Some(tirech_omni::modelo::Node::Group(g)) = salva.find(cliente) else {
+        panic!("a pasta sumiu");
+    };
+    assert_eq!(g.credencial_modo, ModoCredencial::Agente);
+
+    m.app.expand("arvore", &cliente.to_string());
+    m.app.click(&format!("arvore-{web}"));
+    assert_eq!(valor(&m.app, "Credencial"), "Herdar (Cliente)");
+    m.app.assert_lint();
+    m.app.double_click(&format!("arvore-{web}"));
+    assert!(
+        !m.app.is_open("senha-dialogo"),
+        "a pasta mandou usar o agente"
+    );
+    assert_eq!(abas(&m.app), 1);
+    assert_eq!(
+        pasta.conexoes().connection(web).unwrap().credencial_modo,
+        ModoCredencial::Herdar,
+        "a conexão continua herdando"
+    );
+
+    // A conexão que escolheu "Perguntar ao conectar" vence a pasta.
+    m.app.double_click(&format!("arvore-{db}"));
     assert!(m.app.is_open("senha-dialogo"));
 }
 

@@ -222,7 +222,7 @@ fn nome_do_programa(comando: &str) -> String {
 impl Tela {
     /// Pede o programa da conexão `id`; sem a senha dela, o diálogo de senha vem antes.
     pub(super) fn iniciar_programa(&self, id: u64, qual: QualPrograma) {
-        let Some(c) = self.tree.with_untracked(|t| t.connection(id).cloned()) else {
+        let Some(c) = self.tree.with_untracked(|t| t.conexao_para_abrir(id)) else {
             return;
         };
         let senhas = self.senhas_do_cofre(&c);

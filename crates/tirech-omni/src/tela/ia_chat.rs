@@ -25,6 +25,9 @@ use crate::paineis;
 use crate::t;
 use crate::texto_limpo;
 
+/// O id do painel do chat nos painéis dos terminais.
+const PAINEL_DO_CHAT: &str = "chat";
+
 /// O que se pergunta ao modelo.
 #[derive(Clone, Debug)]
 pub(super) enum Pedido {
@@ -266,10 +269,17 @@ impl Tela {
             });
         });
         // Abriu o painel (pelo atalho ou pelo menu Exibir): o foco vai para a caixa de pergunta.
-        let aberto = self.paineis_terminais.controle.shown("chat");
+        let aberto = self.paineis_terminais.controle.shown(PAINEL_DO_CHAT);
         effect(move || {
             if aberto.get() {
                 untrack(|| request_focus("ia-chat-entrada"));
+            }
+        });
+        // Os assistentes de IA desligados em Geral: o painel do chat fecha (o menu já some).
+        let (t, ligada) = (Rc::clone(self), super::com_ia(self.config));
+        effect(move || {
+            if !ligada() {
+                untrack(|| t.paineis_terminais.controle.close(PAINEL_DO_CHAT));
             }
         });
         let (t, perfil) = (Rc::clone(self), self.assistente.chat.perfil);
@@ -367,8 +377,8 @@ impl Tela {
         self.mostrar_conversa(sessao);
         self.pagina.set(paineis::TERMINAIS.to_owned());
         // `show` leva o foco para o painel; com ele já aberto, o foco fica onde está.
-        if !self.paineis_terminais.controle.is_open("chat") {
-            self.paineis_terminais.controle.show("chat");
+        if !self.paineis_terminais.controle.is_open(PAINEL_DO_CHAT) {
+            self.paineis_terminais.controle.show(PAINEL_DO_CHAT);
         }
         request_focus("ia-chat-entrada");
     }

@@ -16,6 +16,7 @@ const LINHAS: &[(&str, Option<Campo>)] = &[
     ("Nome", None),
     ("Descrição", None),
     ("Tipo", None),
+    ("Endereço do link", Some(Campo::Url)),
     ("Host", Some(Campo::Host)),
     ("Porta", Some(Campo::Porta)),
     ("Usuário", Some(Campo::Usuario)),
@@ -48,6 +49,8 @@ const LINHAS: &[(&str, Option<Campo>)] = &[
     ("Keepalive", Some(Campo::SessaoSsh)),
     ("Comprimir a conexão", Some(Campo::SessaoSsh)),
     ("Sessão persistente", Some(Campo::Persistente)),
+    ("Mouse no terminal", Some(Campo::Mouse)),
+    ("Tentar de novo após", Some(Campo::Reconectar)),
     ("Programa", Some(Campo::Programa)),
     ("Argumentos", Some(Campo::Programa)),
     ("Pasta inicial", Some(Campo::Programa)),
@@ -145,6 +148,7 @@ fn o_shell_local_mostra_so_o_que_vale() {
             "Provedor de IA",
             "Assistentes (MCP)",
             "Log",
+            "Mouse no terminal",
             "Programa",
             "Argumentos",
             "Pasta inicial",
@@ -348,6 +352,9 @@ fn a_grade_da_pasta_nao_muda() {
             "Rede",
             "Assistentes (MCP)",
             "Sessão persistente",
+            "Mouse no terminal",
+            "Tentar de novo após",
+            "Credencial",
             "Comandos"
         ]
     );

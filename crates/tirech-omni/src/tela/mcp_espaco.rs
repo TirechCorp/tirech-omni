@@ -103,7 +103,7 @@ impl Tela {
         let conexao = self.tree.with_untracked(|tr| {
             let liberada = permissao_efetiva(tr, espaco.conexao) != PermissaoIa::Desligada;
             liberada
-                .then(|| tr.connection(espaco.conexao).cloned())
+                .then(|| tr.conexao_para_abrir(espaco.conexao))
                 .flatten()
         });
         let Some(conexao) = conexao else {

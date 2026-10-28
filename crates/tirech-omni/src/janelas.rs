@@ -14,9 +14,20 @@ use tomni_ui::prelude::*;
 use tomni_ui::terminal::PaneLayout;
 
 use crate::envio::Envio;
+use crate::t;
 
 /// O grupo de arrasto das abas: todos os `TerminalPanes` do app trocam abas entre si.
 pub const GRUPO: &str = "tirech-omni";
+
+/// O nome da janela de índice `n` (0 é a principal) nos menus que listam as janelas: "Janela 1
+/// (principal)", "Janela 2"…
+pub fn no_menu(n: usize) -> String {
+    if n == 0 {
+        t!("casca-janela-1-principal")
+    } else {
+        t!("casca-janela-n", n = n + 1)
+    }
+}
 
 /// Quantas janelas a lista do menu Janela mostra. As que passam disso existem, mas só se chega
 /// nelas pelo sistema.

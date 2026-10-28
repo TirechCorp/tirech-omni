@@ -168,3 +168,12 @@ redes-estado-da-tailnet = Tailnet state
 redes-chave-vale-ate = Key valid until
 redes-enderecos-na-tailnet = Tailnet addresses
 redes-servidor-de-controle = Control server
+
+## Links with a network profile (navegador.rs)
+
+navegador-nao-achou = The browser "{ $programa }" was not found. Choose another one in Settings › Networks › Browser for links.
+navegador-nenhum = No Chrome, Edge, Brave, Chromium or Firefox was found. Choose the browser in Settings › Networks › Browser for links.
+navegador-perfil-sem-proxy = The network profile "{ $perfil }" only has an SSH jump, and links don't go through a jump yet. Use a profile with a proxy or a built-in VPN.
+navegador-proxy-falhou = Could not start the local proxy for the link: { $erro }
+navegador-pasta-falhou = Could not prepare the profile's browser folder: { $erro }
+navegador-nao-abriu = Could not open the browser { $programa }: { $erro }

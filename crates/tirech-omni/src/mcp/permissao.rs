@@ -104,12 +104,16 @@ pub fn ferramentas_conhecidas() -> impl Iterator<Item = &'static str> {
 }
 
 /// A permissão que vale para a conexão `conexao`: a dela, se não for `Herdar`; senão a da pasta
-/// mais próxima que escolheu uma; na raiz, `Desligada`. Nunca devolve `Herdar`.
+/// mais próxima que escolheu uma; na raiz, `Desligada`. Nunca devolve `Herdar`. O tipo sem a
+/// linha "Assistentes (MCP)" (`campos::Campo::Mcp`, o link) fica sempre `Desligada`.
 pub fn permissao_efetiva(tree: &Tree, conexao: u64) -> PermissaoIa {
-    if let Some(c) = tree.connection(conexao)
-        && !c.mcp.is_herdar()
-    {
-        return c.mcp;
+    if let Some(c) = tree.connection(conexao) {
+        if !crate::campos::Campo::Mcp.vale(c.kind) {
+            return PermissaoIa::Desligada;
+        }
+        if !c.mcp.is_herdar() {
+            return c.mcp;
+        }
     }
     for pasta in tree.ancestors(conexao).into_iter().rev() {
         if let Some(Node::Group(g)) = tree.find(pasta)

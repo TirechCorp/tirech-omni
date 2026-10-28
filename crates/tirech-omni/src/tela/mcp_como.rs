@@ -1,6 +1,6 @@
 //! "Como ligar um assistente" (M51, seção 9.3) e o aviso de ligar o controle (seção 9.1).
 //!
-//! O diálogo mostra, para o Claude Code e para o Codex, o comando e o trecho de configuração que
+//! O diálogo mostra, para o Claude Code, o Codex e o OpenCode, o comando e o trecho de configuração que
 //! abrem a ponte `tirech-omni mcp` (os textos vêm de [`crate::mcp::clientes`]), com o caminho do
 //! executável que está rodando. Quem quer o assistente numa pasta do servidor escolhe o espaço
 //! de trabalho embaixo das abas: os comandos ganham `--espaco <nome>` e aparece o bloco que
@@ -14,7 +14,7 @@ use tomni_ui::prelude::*;
 use super::Tela;
 use crate::mcp::clientes::{
     Escopo, comando_claude, comando_codex, config_codex_so_servidor, deny_claude, json_claude,
-    toml_codex,
+    json_opencode, toml_codex,
 };
 use crate::t;
 
@@ -22,7 +22,7 @@ use crate::t;
 pub(super) struct SinaisComo {
     /// Se o "Como ligar" está aberto.
     pub aberto: Signal<bool>,
-    /// A aba escolhida: `claude` ou `codex`.
+    /// A aba escolhida: `claude`, `codex` ou `opencode`.
     pub aba: Signal<String>,
     /// O espaço de trabalho escolhido (o rótulo de "Nenhum" quando não há).
     pub espaco: Signal<String>,
@@ -30,8 +30,8 @@ pub(super) struct SinaisComo {
     pub permissoes: Signal<bool>,
     /// Se o aviso de ligar o controle pela primeira vez está aberto.
     pub aviso: Signal<bool>,
-    /// Os textos dos blocos, na ordem de `mcp-copiar-{n}` (de 1 a 7).
-    pub blocos: [Signal<String>; 7],
+    /// Os textos dos blocos, na ordem de `mcp-copiar-{n}` (de 1 a 8).
+    pub blocos: [Signal<String>; 8],
 }
 
 impl SinaisComo {
@@ -54,8 +54,8 @@ fn executavel(tela: &Tela) -> String {
         .map_or_else(|| "tirech-omni".to_owned(), |c| c.display().to_string())
 }
 
-/// O texto dos sete blocos para o executável `exe` e o espaço `espaco`.
-pub(super) fn textos(exe: &str, espaco: Option<&str>) -> [String; 7] {
+/// O texto dos oito blocos para o executável `exe` e o espaço `espaco`.
+pub(super) fn textos(exe: &str, espaco: Option<&str>) -> [String; 8] {
     [
         comando_claude(exe, Escopo::Local, espaco),
         comando_claude(exe, Escopo::Usuario, espaco),
@@ -64,6 +64,7 @@ pub(super) fn textos(exe: &str, espaco: Option<&str>) -> [String; 7] {
         comando_codex(exe, espaco),
         toml_codex(exe, espaco),
         config_codex_so_servidor(),
+        json_opencode(exe, espaco),
     ]
 }
 
@@ -218,6 +219,12 @@ pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View + use<> {
                 .child(bloco(7, blocos[6]))
                 .child(rotulo(t!("mcp-como-codex-aviso"))),
         );
+    let opencode = Column::new()
+        .gap(8)
+        .padding(Insets::new(8.0, 0.0, 0.0, 0.0))
+        .child(rotulo(t!("mcp-como-opencode-json")))
+        .child(bloco(8, blocos[7]))
+        .child(rotulo(t!("mcp-como-opencode-prazo")));
     let escolher_espaco = {
         let tela = Rc::clone(tela);
         // As opções nascem com a caixa: os espaços podem ter mudado desde a última vez.
@@ -239,7 +246,8 @@ pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View + use<> {
                     TabView::bind(aba)
                         .id("mcp-como-abas")
                         .tab("claude", t!("mcp-como-claude"), claude)
-                        .tab("codex", t!("mcp-como-codex"), codex),
+                        .tab("codex", t!("mcp-como-codex"), codex)
+                        .tab("opencode", t!("mcp-como-opencode"), opencode),
                 )
                 .child(Text::new(t!("mcp-como-pasta-do-servidor")).body_strong())
                 .child(rotulo(t!("mcp-como-pasta-do-servidor-texto")))

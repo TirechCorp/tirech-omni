@@ -303,7 +303,7 @@ impl Tela {
         let suposto = self.config.with_untracked(|c| c.ia.comando_shell.clone());
         let chave = sessao.key_str();
         let conexao = id_da_chave(&chave)
-            .and_then(|id| self.tree.with_untracked(|t| t.connection(id).cloned()));
+            .and_then(|id| self.tree.with_untracked(|t| t.conexao_para_abrir(id)));
         let Some(conexao) = conexao else {
             return contexto::sistema_local(&suposto);
         };
@@ -339,7 +339,7 @@ impl Tela {
             return;
         }
         let Some(conexao) = id_da_chave(&chave)
-            .and_then(|id| self.tree.with_untracked(|t| t.connection(id).cloned()))
+            .and_then(|id| self.tree.with_untracked(|t| t.conexao_para_abrir(id)))
         else {
             return;
         };

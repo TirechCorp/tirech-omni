@@ -195,7 +195,7 @@ escolha! {
     BotaoDireito {
         /// Abre o menu.
         Menu => tk!("opcao-botao-direito-menu"),
-        /// Copia com seleção e cola sem, como no PuTTY; o Ctrl+clique direito abre o menu.
+        /// Copia com seleção e cola sem; o Ctrl+clique direito abre o menu.
         #[default]
         CopiarColar => tk!("opcao-botao-direito-copiar-colar"),
     }
@@ -520,10 +520,18 @@ categoria! {
         iniciar_na_bandeja: bool = false,
         /// Mostrar o app no menu e no dock do Linux, com o ícone próprio (grava o `.desktop`).
         atalho_no_menu: bool = true,
+        /// O medidor de CPU na barra de título, que abre a página Desempenho.
+        medidor_cpu: bool = true,
         /// O aviso "este sistema não mostra ícones na bandeja" já foi visto.
         aviso_sem_bandeja: bool = false,
         /// Quantos recentes guardar, sem contar os fixados (de 5 a 100).
         recentes_max: u32 = 30,
+        /// Os assistentes de IA: o chat e os perfis, e os assistentes no servidor. Desligado,
+        /// os menus, as linhas, as seções e os atalhos deles somem; o que está gravado fica.
+        assistente_ia: bool = true,
+        /// O controle do app por assistentes (MCP), o "Controlar com" e o cluster com IA.
+        /// Desligado, somem como os da IA, e o servidor MCP não sobe.
+        mcp: bool = true,
     }
 }
 
@@ -568,7 +576,7 @@ categoria! {
         cursor_piscando: bool = true,
         /// As linhas de histórico, de 0 a 100 000.
         historico: u32 = 9001,
-        /// Copiar ao selecionar (ligado, como no PuTTY).
+        /// Copiar ao selecionar (ligado por padrão).
         copiar_ao_selecionar: bool = true,
         /// Avisar ao colar várias linhas.
         avisar_colar: bool = true,
@@ -609,6 +617,9 @@ categoria! {
         tentativas: u32 = 3,
         /// Quantos segundos esperar entre as tentativas, de 1 a 300.
         espera_secs: u32 = 5,
+        /// Depois das tentativas, quantos minutos esperar para começar outra rodada, até a
+        /// conexão voltar; 0 desliga. De 0 a 1440. Cada conexão ou pasta pode escolher outro.
+        retentar_mins: u32 = 5,
     }
 }
 
@@ -873,6 +884,9 @@ categoria! {
         espera_padrao_secs: u32 = 30,
         /// Rodar o `descer` dos perfis em uso ao fechar o app.
         descer_ao_fechar: bool = true,
+        /// O navegador dos links com perfil de rede (`crate::navegador`); vazio procura um
+        /// Chrome, Edge, Brave, Chromium ou Firefox.
+        navegador: String = String::new(),
     }
 }
 
@@ -1211,6 +1225,12 @@ pub const CATEGORIAS: [&str; 17] = [
 ];
 
 impl Configuracoes {
+    /// Se o servidor MCP fica no ar: ligado na seção dele e com o controle por assistentes
+    /// ligado em Geral.
+    pub fn mcp_no_ar(&self) -> bool {
+        self.geral.mcp && self.ia.mcp_ligado
+    }
+
     /// A pasta do cofre: `cofre.local`, ou a pasta de dados quando está vazio. Um `~` no começo
     /// é a pasta pessoal.
     pub fn pasta_do_cofre(&self, dados: &Path) -> PathBuf {
@@ -1242,6 +1262,7 @@ impl Configuracoes {
                 return (Self::default(), avisos);
             }
         };
+        crate::instancias::anotar_base(&arquivo, texto.as_deref().map(str::as_bytes));
         let mut migrou = false;
         let mut raiz = match texto {
             None => Map::new(),
@@ -1340,6 +1361,12 @@ impl Configuracoes {
             &mut self.conexoes.reconectar.espera_secs,
             1,
             300,
+        );
+        prender(
+            "conexoes.reconectar.retentar_mins",
+            &mut self.conexoes.reconectar.retentar_mins,
+            0,
+            1440,
         );
         prender(
             "conexoes.comandos_quieto_ms",

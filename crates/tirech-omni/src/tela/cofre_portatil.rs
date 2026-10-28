@@ -655,7 +655,7 @@ impl Tela {
 
     /// Junta o que outra máquina gravou no `vault.json` e atualiza a lista das cópias em
     /// conflito.
-    fn conferir_cofre(&self) {
+    pub(super) fn conferir_cofre(&self) {
         let (bloqueado, mudou) = self.cofre.agora(|c| (c.bloqueado(), c.mudou_no_disco()));
         if mudou && !bloqueado {
             match self.cofre.mudar(|c| c.atualizar_do_disco()) {

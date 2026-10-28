@@ -14,7 +14,6 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::path::Path;
@@ -34,7 +33,9 @@ use tomni_ui_zerotier::{
 };
 
 use crate::cofre::IdentidadeZeroTier;
-use crate::redes::{PerfilRede, TravasDeRede, ZeroTierRede};
+use crate::redes::{
+    MotorDeRede, Orfao, Orfaos, PerfilRede, TravaDoMotor, TravasDeRede, ZeroTierRede,
+};
 use crate::t;
 
 /// A espera padrão de um perfil ZeroTier novo, em segundos: é o tempo de alguém autorizar o
@@ -607,7 +608,17 @@ struct Ligado {
     /// mais.
     vivo: Arc<AtomicBool>,
     /// A trava do perfil entre as cópias do app ([`TravasDeRede`]): solta quando o motor para.
-    _trava: Option<File>,
+    trava: Arc<TravaDoMotor>,
+}
+
+impl MotorDeRede for ZeroTier {
+    fn fechar(&self) {
+        self.close();
+    }
+
+    fn acabou(&self) -> bool {
+        matches!(self.state(), State::Stopped | State::Failed(_))
+    }
 }
 
 /// Os nós ZeroTier ligados, um por perfil, sobre um runtime próprio do `tokio` (o app não tem
@@ -625,6 +636,8 @@ pub struct MotoresZeroTier {
     acordar: Arc<Mutex<Option<Signal<u64>>>>,
     /// Uma cópia do app por vez liga cada perfil.
     travas: TravasDeRede,
+    /// Os motores parados que conexões ainda seguram: um motor por perfil, nunca dois.
+    orfaos: Orfaos<ZeroTier>,
 }
 
 impl MotoresZeroTier {
@@ -702,7 +715,29 @@ impl MotoresZeroTier {
             return Err(falhou(t!("zerotier-identidade-em-uso", nome = outro)));
         }
         let assinatura = assinatura.unwrap_or_default();
-        let trava = self.travas.travar(perfil).map_err(&falhou)?;
+        if let Some(orfao) = self.orfaos.retomar(perfil.id, assinatura) {
+            // O motor parado ainda roda (uma conexão o segura) e com a mesma identidade: volta
+            // a ser o do perfil. Ligar outro derrubaria este no servidor.
+            let zt = Arc::clone(&orfao.motor);
+            sem_veneno(&self.ligados).insert(
+                perfil.id,
+                Ligado {
+                    zt: orfao.motor,
+                    assinatura,
+                    item: parametros.item,
+                    nome: perfil.name.clone(),
+                    vivo: orfao.vivo,
+                    trava: orfao.trava,
+                },
+            );
+            self.guardar_estado(perfil.id, zt.state());
+            return Ok(MotorZeroTier {
+                zt,
+                tempo: tempo.handle().clone(),
+            });
+        }
+        let trava = TravaDoMotor::new(self.travas.travar(perfil).map_err(&falhou)?);
+        let trava_do_motor = Arc::clone(&trava);
         let vivo = Arc::new(AtomicBool::new(true));
         let (estados, pendentes, acordar, id) = (
             Arc::clone(&self.estados),
@@ -717,6 +752,9 @@ impl MotoresZeroTier {
             .allow_default(parametros.permitir_padrao)
             .allow_dns(parametros.permitir_dns)
             .on_state(move |estado| {
+                if matches!(estado, State::Stopped | State::Failed(_)) {
+                    trava_do_motor.soltar();
+                }
                 if vivo_do_estado.load(Ordering::Relaxed) {
                     sem_veneno(&estados).insert(id, estado.clone());
                     acordar_a_tela(&acordar);
@@ -746,7 +784,7 @@ impl MotoresZeroTier {
                 item: parametros.item,
                 nome: perfil.name.clone(),
                 vivo,
-                _trava: trava,
+                trava,
             },
         );
         self.guardar_estado(perfil.id, ligado.state());
@@ -769,14 +807,31 @@ impl MotoresZeroTier {
         ligado.vivo.store(false, Ordering::Relaxed);
         sem_veneno(&self.estados).remove(&perfil);
         acordar_a_tela(&self.acordar);
-        if let Ok(tempo) = self.runtime() {
-            tempo.spawn(parar_um(ligado.zt));
+        match Arc::try_unwrap(ligado.zt) {
+            Ok(zt) => {
+                ligado.trava.soltar();
+                if let Ok(tempo) = self.runtime() {
+                    tempo.spawn(async move { zt.stop(Duration::from_millis(200)).await });
+                }
+            }
+            // Uma conexão ainda segura o motor: ele segue até ela largar, e o próximo `garantir`
+            // o reaproveita ou fecha.
+            Err(zt) => self.orfaos.guardar(
+                perfil,
+                Orfao {
+                    motor: zt,
+                    assinatura: ligado.assinatura,
+                    vivo: ligado.vivo,
+                    trava: ligado.trava,
+                },
+            ),
         }
     }
 
     /// Para todos, esperando no máximo 200 ms: é o tempo de o nó largar a ponte e o UDP antes de o
     /// app fechar.
     pub fn parar_todos(&self) {
+        self.orfaos.fechar_todos();
         let todos: Vec<Ligado> = sem_veneno(&self.ligados).drain().map(|(_, l)| l).collect();
         for l in &todos {
             l.vivo.store(false, Ordering::Relaxed);
@@ -865,12 +920,12 @@ impl MotoresZeroTier {
     }
 }
 
-/// Para um nó: com a única referência, o `stop` solta a ponte e o UDP; se ainda há quem segure o
-/// `Arc` (uma conexão em andamento), o `Drop` do nó para quando o último largar.
+/// Para um nó: com a única referência, o `stop` solta a ponte e o UDP; se ainda há quem
+/// segure o `Arc` (uma conexão em andamento), o `close` para do mesmo jeito: o app vai fechar.
 async fn parar_um(zt: Arc<ZeroTier>) {
     match Arc::try_unwrap(zt) {
         Ok(zt) => zt.stop(Duration::from_millis(200)).await,
-        Err(restante) => drop(restante),
+        Err(restante) => restante.close(),
     }
 }
 

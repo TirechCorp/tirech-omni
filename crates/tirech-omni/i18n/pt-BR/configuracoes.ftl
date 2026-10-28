@@ -103,6 +103,10 @@ config-geral-atalho_no_menu = Atalho no menu de aplicativos
     .descricao = Mostra o { -app } no menu e no dock do sistema, com o ícone próprio.
     .palavras = desktop dock lanchador icone launcher menu aplicativos
 
+config-geral-medidor_cpu = Medidor de CPU na barra de título
+    .descricao = Mostra quanto do processador o { -app } usa. Clicar nele abre a página Desempenho, com o peso de cada terminal.
+    .palavras = cpu processador desempenho uso consumo medidor grafico gerenciador de tarefas
+
 config-geral-recentes_max = Recentes guardados
     .descricao = Quantas conexões a lista de recentes guarda, sem contar as fixadas.
     .palavras = historico ultimas
@@ -110,6 +114,14 @@ config-geral-recentes_max = Recentes guardados
 config-acao-limpar_recentes = Limpar recentes
     .descricao = Apaga a lista de recentes e mantém as fixadas.
     .palavras = apagar historico
+
+config-geral-assistente_ia = Assistentes de IA
+    .descricao = O chat com os perfis de IA e o Claude Code, o Codex e o OpenCode nos servidores. Desligado, os menus, as linhas, as seções e os atalhos deles somem; o que está gravado fica.
+    .palavras = ia ai inteligencia artificial chat claude codex opencode desligar esconder
+
+config-geral-mcp = Controle por assistentes (MCP)
+    .descricao = Os assistentes controlando o app, o "Controlar com" e o cluster com IA. Desligado, somem como os da IA e o servidor MCP não sobe.
+    .palavras = mcp ia ai controlar assistentes cluster desligar esconder
 
 config-acao-instalacao = Instalar no computador
     .descricao = Copia o app para uma pasta fixa e cria os atalhos, o início com o sistema e a entrada em Aplicativos instalados.
@@ -186,7 +198,7 @@ config-terminal-links_com_ctrl = Abrir links com Ctrl+clique
     .palavras = link url endereço hiperlink navegador ctrl clique
 
 config-terminal-botao_direito = Botão direito
-    .descricao = Copia (com seleção) e cola (sem), como no PuTTY, e o Ctrl+clique direito abre o menu; ou sempre abre o menu.
+    .descricao = Copia (com seleção) e cola (sem), e o Ctrl+clique direito abre o menu; ou sempre abre o menu.
     .palavras = mouse menu colar
 
 config-terminal-campainha = Campainha
@@ -274,6 +286,10 @@ config-conexoes-reconectar-tentativas = Tentativas
 config-conexoes-reconectar-espera_secs = Espera entre as tentativas
     .descricao = Segundos antes de cada tentativa (de 1 a 300).
     .palavras = reconectar intervalo tempo
+
+config-conexoes-reconectar-retentar_mins = Tentar de novo após (minutos)
+    .descricao = Quando as tentativas acabam, espera estes minutos e começa outra rodada, até a conexão voltar; 0 desliga (de 0 a 1440). Cada conexão ou pasta pode escolher outro tempo nas propriedades.
+    .palavras = reconectar de novo rodada pausa minutos insistir
 
 config-conexoes-abrir_em = Abrir conexão em
     .descricao = Onde abre o clique duplo na árvore, no Início e na busca.
@@ -600,6 +616,10 @@ config-redes-espera_padrao_secs = Espera padrão do proxy
 config-redes-descer_ao_fechar = Descer as redes ao fechar
     .descricao = Desligado, fechar o app não roda o comando de descer dos perfis em uso.
     .palavras = vpn desligar fechar
+
+config-redes-navegador = Navegador dos links
+    .descricao = Os links com perfil de rede abrem nele, numa janela separada por perfil, que sai pela rede do cliente. Os links sem perfil abrem no navegador padrão.
+    .palavras = links chrome chromium edge brave firefox browser web url
 
 # X11 e túneis
 
@@ -1103,6 +1123,7 @@ config-dica-regiao = us-east-1
 config-dica-classe = a do bucket
 config-dica-rclone = o rclone do PATH
 config-dica-rclone-config = o padrão do rclone
+config-dica-navegador = Chrome, Edge, Brave, Chromium ou Firefox
 config-dica-display = a variável DISPLAY
 config-dica-virt-manager = virt-manager --no-fork
 config-dica-espacos = espacos na pasta de dados
@@ -1130,6 +1151,7 @@ atalho-multi-entrada = Envio para vários
 atalho-cluster = Modo cluster
 atalho-cluster-ia = Cluster com IA
 atalho-scripts = Rodar script
+atalho-links = Abrir um link
 atalho-reconectar-caidas = Reconectar as abas caídas
 atalho-fechar-caidas = Fechar as abas caídas
 atalho-fechar-todas = Fechar todas as abas

@@ -263,6 +263,16 @@ fn o_como_ligar_do_claude_code_com_um_espaco(nome: &str, tema: Theme) {
     conferir(&mut m.app, "como-ligar", nome);
 }
 
+fn o_como_ligar_do_opencode(nome: &str, tema: Theme) {
+    let pasta = Pasta::nova(&format!("visual-mcp-como-opencode-{nome}"));
+    pasta.semear(&arvore(1, PermissaoIa::Herdar));
+    let mut m = montar(&pasta, tema);
+    m.app.click("menus-ferramentas").click("mcp-assistentes");
+    m.app.click("mcp-como");
+    m.app.click("mcp-como-abas-opencode");
+    conferir(&mut m.app, "como-ligar-opencode", nome);
+}
+
 fn a_categoria_do_controle_nas_propriedades_em_livre(nome: &str, tema: Theme) {
     let pasta = Pasta::nova(&format!("visual-mcp-props-{nome}"));
     pasta.semear(&arvore(1, PermissaoIa::Livre));
@@ -379,6 +389,7 @@ nos_dois_temas!(
     a_aprovacao_de_uma_edicao_mostra_o_antes_e_o_depois,
     as_configuracoes_com_o_controle_ligado_e_um_espaco,
     o_como_ligar_do_claude_code_com_um_espaco,
+    o_como_ligar_do_opencode,
     a_categoria_do_controle_nas_propriedades_em_livre,
     a_aba_marcada_e_a_faixa_com_parar_a_ia,
     a_grade_com_quatro_sessoes_e_o_parar_aberto,

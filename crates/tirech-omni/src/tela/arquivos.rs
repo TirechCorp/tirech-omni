@@ -37,7 +37,7 @@ impl Tela {
         local: Option<String>,
         mostrar: bool,
     ) {
-        let Some(c) = self.tree.with_untracked(|t| t.connection(id).cloned()) else {
+        let Some(c) = self.tree.with_untracked(|t| t.conexao_para_abrir(id)) else {
             return;
         };
         let senhas = self.senhas_do_cofre(&c);
@@ -304,7 +304,7 @@ impl Tela {
         if recusada
             && aba.sessao.is_none()
             && let Some(id) = aba.conexao
-            && let Some(c) = self.tree.with_untracked(|t| t.connection(id).cloned())
+            && let Some(c) = self.tree.with_untracked(|t| t.conexao_para_abrir(id))
             && pede_senha_na_recusa(&c)
         {
             let remoto = aba.remoto.caminho.get_untracked();

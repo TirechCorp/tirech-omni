@@ -74,6 +74,29 @@ fn nova_janela_pelo_menu_e_pelo_atalho() {
 }
 
 #[test]
+fn com_varias_janelas_a_principal_vem_marcada() {
+    let pasta = Pasta::nova("janelas-principal");
+    pasta.semear(&exemplo());
+    let mut m = montar(&pasta, Theme::Light);
+    m.app.frame();
+    let principal = m.app.windows()[0];
+    assert_eq!(principal.title(), NOME_DO_APP);
+
+    m.app.click("menus-janela").click("nova-janela");
+    m.app.frame();
+    assert_eq!(
+        principal.title(),
+        format!("{NOME_DO_APP} — Janela principal")
+    );
+    // O subtítulo "Janela principal" ganha espaço na barra (o lint pega texto com 0×0).
+    m.app.switch_to(principal);
+    m.app.assert_lint();
+    m.app.click("menus-janela");
+    assert_eq!(m.app.label("janela-foco-1"), "Janela 1 (principal)");
+    assert_eq!(m.app.label("janela-foco-2"), "Janela 2");
+}
+
+#[test]
 fn a_janela_secundaria_so_tem_titulo_menus_e_paineis() {
     let pasta = Pasta::nova("janelas-casca");
     pasta.semear(&exemplo());

@@ -100,7 +100,7 @@ impl Tela {
     pub(super) fn conexao_da_aba(&self, chave: &str, sessao: Session) -> Connection {
         let id = crate::espacos::id_da_chave(chave).unwrap_or(0);
         self.tree
-            .with_untracked(|t| t.connection(id).cloned())
+            .with_untracked(|t| t.conexao_para_abrir(id))
             .unwrap_or_else(|| {
                 let mut conexao = Connection::new(sessao.title(), Kind::Local);
                 conexao.id = id;

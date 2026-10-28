@@ -103,6 +103,10 @@ config-geral-atalho_no_menu = Shortcut in the applications menu
     .descricao = Shows { -app } in the system menu and dock, with its own icon.
     .palavras = desktop dock launcher icon menu applications
 
+config-geral-medidor_cpu = CPU meter in the title bar
+    .descricao = Shows how much of the processor { -app } uses. Clicking it opens the Performance page, with the weight of each terminal.
+    .palavras = cpu processor performance usage load meter chart task manager
+
 config-geral-recentes_max = Recents kept
     .descricao = How many connections the recents list keeps, not counting pinned ones.
     .palavras = history latest
@@ -110,6 +114,14 @@ config-geral-recentes_max = Recents kept
 config-acao-limpar_recentes = Clear recents
     .descricao = Clears the recents list and keeps the pinned ones.
     .palavras = delete history
+
+config-geral-assistente_ia = AI assistants
+    .descricao = The chat with the AI profiles, and Claude Code, Codex and OpenCode on the servers. When off, their menus, rows, sections and shortcuts disappear; what is saved stays.
+    .palavras = ai artificial intelligence chat claude codex opencode disable hide
+
+config-geral-mcp = Control by assistants (MCP)
+    .descricao = Assistants controlling the app, "Control with" and the cluster with AI. When off, they disappear like the AI ones and the MCP server does not start.
+    .palavras = mcp ai control assistants cluster disable hide
 
 config-acao-instalacao = Install on this computer
     .descricao = Copies the app to a fixed folder and creates the shortcuts, the start with the system, and the Installed apps entry.
@@ -186,7 +198,7 @@ config-terminal-links_com_ctrl = Open links with Ctrl+click
     .palavras = link url hyperlink browser ctrl click
 
 config-terminal-botao_direito = Right button
-    .descricao = Copies (with a selection) and pastes (without), as in PuTTY, and Ctrl+right-click opens the menu; or always opens the menu.
+    .descricao = Copies (with a selection) and pastes (without), and Ctrl+right-click opens the menu; or always opens the menu.
     .palavras = mouse menu paste
 
 config-terminal-campainha = Bell
@@ -274,6 +286,10 @@ config-conexoes-reconectar-tentativas = Attempts
 config-conexoes-reconectar-espera_secs = Wait between attempts
     .descricao = Seconds before each attempt (1 to 300).
     .palavras = reconnect interval time delay
+
+config-conexoes-reconectar-retentar_mins = Retry after (minutes)
+    .descricao = When the attempts run out, waits this many minutes and starts another round, until the connection is back; 0 turns it off (0 to 1440). Each connection or folder can choose another time in its properties.
+    .palavras = reconnect again round pause minutes keep trying
 
 config-conexoes-abrir_em = Open connection in
     .descricao = Where a double-click opens in the tree, on Home, and in search.
@@ -600,6 +616,10 @@ config-redes-espera_padrao_secs = Default proxy wait
 config-redes-descer_ao_fechar = Bring networks down on close
     .descricao = Off, closing the app doesn't run the profiles' down command for those in use.
     .palavras = vpn disconnect close
+
+config-redes-navegador = Browser for links
+    .descricao = Links with a network profile open in it, in a separate window per profile that goes out through the client's network. Links without a profile open in the default browser.
+    .palavras = links chrome chromium edge brave firefox browser web url
 
 # X11 and tunnels
 
@@ -1103,6 +1123,7 @@ config-dica-regiao = us-east-1
 config-dica-classe = the bucket's own
 config-dica-rclone = rclone from PATH
 config-dica-rclone-config = rclone's default
+config-dica-navegador = Chrome, Edge, Brave, Chromium or Firefox
 config-dica-display = the DISPLAY variable
 config-dica-virt-manager = virt-manager --no-fork
 config-dica-espacos = spaces in the data folder
@@ -1130,6 +1151,7 @@ atalho-multi-entrada = Send to many
 atalho-cluster = Cluster mode
 atalho-cluster-ia = AI cluster
 atalho-scripts = Run script
+atalho-links = Open a link
 atalho-reconectar-caidas = Reconnect the dropped tabs
 atalho-fechar-caidas = Close the dropped tabs
 atalho-fechar-todas = Close all tabs

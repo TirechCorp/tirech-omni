@@ -9,7 +9,6 @@
 
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
-use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,7 +23,7 @@ use tomni_ui_wireguard::{
 };
 
 use crate::cofre::IdentidadeWireGuard;
-use crate::redes::{PerfilRede, TravasDeRede};
+use crate::redes::{MotorDeRede, Orfao, Orfaos, PerfilRede, TravaDoMotor, TravasDeRede};
 use crate::t;
 
 /// O que sobra de uma importação: o `.conf` sem os segredos, a identidade que vai para o cofre e o
@@ -306,7 +305,17 @@ struct Ligado {
     /// mais.
     vivo: Arc<AtomicBool>,
     /// A trava do perfil entre as cópias do app ([`TravasDeRede`]): solta quando o motor para.
-    _trava: Option<File>,
+    trava: Arc<TravaDoMotor>,
+}
+
+impl MotorDeRede for WireGuard {
+    fn fechar(&self) {
+        self.close();
+    }
+
+    fn acabou(&self) -> bool {
+        matches!(self.state(), State::Stopped | State::Failed(_))
+    }
 }
 
 /// Os motores WireGuard ligados, um por perfil, sobre um runtime próprio do `tokio` (o app não tem
@@ -322,6 +331,8 @@ pub struct MotoresWireGuard {
     acordar: Arc<Mutex<Option<Signal<u64>>>>,
     /// Uma cópia do app por vez liga cada perfil.
     travas: TravasDeRede,
+    /// Os motores parados que conexões ainda seguram: um motor por perfil, nunca dois.
+    orfaos: Orfaos<WireGuard>,
 }
 
 impl MotoresWireGuard {
@@ -387,7 +398,27 @@ impl MotoresWireGuard {
             )
         };
         let config = config.map_err(&falhou)?;
-        let trava = self.travas.travar(perfil).map_err(&falhou)?;
+        if let Some(orfao) = self.orfaos.retomar(perfil.id, assinatura) {
+            // O motor parado ainda roda (uma conexão o segura) e com a mesma identidade: volta
+            // a ser o do perfil. Ligar outro derrubaria este no servidor.
+            let wg = Arc::clone(&orfao.motor);
+            sem_veneno(&self.ligados).insert(
+                perfil.id,
+                Ligado {
+                    wg: orfao.motor,
+                    assinatura,
+                    vivo: orfao.vivo,
+                    trava: orfao.trava,
+                },
+            );
+            self.guardar_estado(perfil.id, wg.state());
+            return Ok(MotorWireGuard {
+                wg,
+                tempo: tempo.handle().clone(),
+            });
+        }
+        let trava = TravaDoMotor::new(self.travas.travar(perfil).map_err(&falhou)?);
+        let trava_do_motor = Arc::clone(&trava);
         let vivo = Arc::new(AtomicBool::new(true));
         let (estados, acordar, id, vivo_do_motor) = (
             Arc::clone(&self.estados),
@@ -399,6 +430,9 @@ impl MotoresWireGuard {
             .block_on(
                 WireGuardBuilder::new(config)
                     .on_state(move |estado| {
+                        if matches!(estado, State::Stopped | State::Failed(_)) {
+                            trava_do_motor.soltar();
+                        }
                         if vivo_do_motor.load(Ordering::Relaxed) {
                             sem_veneno(&estados).insert(id, estado);
                             acordar_a_tela(&acordar);
@@ -414,7 +448,7 @@ impl MotoresWireGuard {
                 wg: Arc::clone(&ligado),
                 assinatura,
                 vivo,
-                _trava: trava,
+                trava,
             },
         );
         self.guardar_estado(perfil.id, ligado.state());
@@ -437,14 +471,31 @@ impl MotoresWireGuard {
         ligado.vivo.store(false, Ordering::Relaxed);
         sem_veneno(&self.estados).remove(&perfil);
         acordar_a_tela(&self.acordar);
-        if let Ok(tempo) = self.runtime() {
-            tempo.spawn(parar_um(ligado.wg));
+        match Arc::try_unwrap(ligado.wg) {
+            Ok(wg) => {
+                ligado.trava.soltar();
+                if let Ok(tempo) = self.runtime() {
+                    tempo.spawn(async move { wg.stop(Duration::from_millis(200)).await });
+                }
+            }
+            // Uma conexão ainda segura o motor: ele segue até ela largar, e o próximo `garantir`
+            // o reaproveita ou fecha.
+            Err(wg) => self.orfaos.guardar(
+                perfil,
+                Orfao {
+                    motor: wg,
+                    assinatura: ligado.assinatura,
+                    vivo: ligado.vivo,
+                    trava: ligado.trava,
+                },
+            ),
         }
     }
 
     /// Para todos, esperando no máximo 200 ms. O WireGuard não tem "fechar": não há nada a avisar
     /// aos pares, só soltar a porta UDP e a ponte.
     pub fn parar_todos(&self) {
+        self.orfaos.fechar_todos();
         let todos: Vec<Ligado> = sem_veneno(&self.ligados).drain().map(|(_, l)| l).collect();
         for l in &todos {
             l.vivo.store(false, Ordering::Relaxed);
@@ -498,11 +549,11 @@ impl MotoresWireGuard {
 }
 
 /// Para um motor: com a única referência, o `stop` fecha a ponte e a pilha; se ainda há quem
-/// segure o `Arc` (uma conexão em andamento), o `Drop` do motor para quando o último largar.
+/// segure o `Arc` (uma conexão em andamento), o `close` para do mesmo jeito: o app vai fechar.
 async fn parar_um(wg: Arc<WireGuard>) {
     match Arc::try_unwrap(wg) {
         Ok(wg) => wg.stop(Duration::from_millis(200)).await,
-        Err(restante) => drop(restante),
+        Err(restante) => restante.close(),
     }
 }
 

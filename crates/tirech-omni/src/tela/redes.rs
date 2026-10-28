@@ -167,6 +167,10 @@ impl Tela {
                 .iter()
                 .filter_map(|a| mapa.get(&a.chave).cloned()),
         );
+        // As redes que a principal empresta às secundárias.
+        self.instancias
+            .emprestadas
+            .with(|m| perfis.extend(m.values().cloned()));
         perfis
     }
 
@@ -198,6 +202,7 @@ impl Tela {
             let perfis = t.perfis_em_uso();
             for perfil in t.usos.atualizar(&perfis) {
                 redes::descer(&perfil);
+                t.soltar_rede_emprestada(perfil.id);
                 if perfil.nebula.is_some() {
                     t.motores.parar(perfil.id);
                 }

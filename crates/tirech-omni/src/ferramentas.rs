@@ -180,6 +180,10 @@ pub struct Ambiente {
     /// A hora local de agora (a data dos nomes que o colar manda ao servidor, M45). Os testes
     /// fixam uma.
     pub agora: fn() -> jiff::civil::DateTime,
+    /// De onde o medidor de CPU e a página Desempenho leem, e quem bate o ritmo. Com a pasta
+    /// trocada por variável (os testes, o `lint`, as capturas), nada bate e o medidor fica em
+    /// zero, para as imagens não variarem.
+    pub medicao: crate::desempenho::Medicao,
 }
 
 impl Ambiente {
@@ -253,6 +257,11 @@ impl Ambiente {
             }),
             espera_da_nota: crate::tela_notas::ESPERA_DA_NOTA,
             agora: crate::colar::agora,
+            medicao: if crate::armazenamento::variavel_da_pasta().is_some() {
+                crate::desempenho::Medicao::parada()
+            } else {
+                crate::desempenho::Medicao::do_sistema()
+            },
         }
     }
 
@@ -296,6 +305,10 @@ impl Ambiente {
             abridor_de_login: Arc::new(|_| {}),
             espera_da_nota: std::time::Duration::from_millis(150),
             agora: crate::colar::agora,
+            medicao: crate::desempenho::Medicao::de_teste(
+                Rc::new(crate::desempenho::FonteFixa::nova()),
+                tomni_ui::files::Live::detached(0),
+            ),
         }
     }
 

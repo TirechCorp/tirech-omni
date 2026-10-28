@@ -253,7 +253,8 @@ fn editar_as_propriedades_grava_no_arquivo_na_hora() {
     let db = pasta.conexoes().connection(3).cloned().unwrap();
     assert_eq!(db, exemplo().connection(3).cloned().unwrap());
 
-    // Um grupo só tem as linhas Rede, Assistentes (MCP), Sessão persistente e Comandos.
+    // Um grupo só tem as linhas Rede, Assistentes (MCP), Sessão persistente, Mouse no terminal,
+    // Tentar de novo após, Credencial e Comandos.
     m.app.click("arvore-1");
     assert!(!m.app.visible("props"));
     assert!(m.app.visible("props-grupo"));
@@ -266,6 +267,9 @@ fn editar_as_propriedades_grava_no_arquivo_na_hora() {
             "Rede",
             "Assistentes (MCP)",
             "Sessão persistente",
+            "Mouse no terminal",
+            "Tentar de novo após",
+            "Credencial",
             "Comandos"
         ]
     );

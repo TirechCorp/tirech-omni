@@ -108,11 +108,14 @@ const MAXIMO_CONFIGURACOES: usize = 3;
 
 /// As configurações que casam com `texto` (`"{titulo} — configuração"`), para ir no fim da lista
 /// de [`sugerir`]. Texto vazio não sugere nada.
-pub fn sugerir_configuracoes(texto: &str) -> Vec<(String, Destino)> {
+pub fn sugerir_configuracoes(
+    texto: &str,
+    config: &crate::configuracoes::Configuracoes,
+) -> Vec<(String, Destino)> {
     if texto.trim().is_empty() {
         return Vec::new();
     }
-    crate::configuracoes::catalogo::buscar(texto)
+    crate::configuracoes::catalogo::buscar(texto, config)
         .into_iter()
         .take(MAXIMO_CONFIGURACOES)
         .map(|d| {

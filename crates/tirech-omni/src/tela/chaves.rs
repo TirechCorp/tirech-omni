@@ -512,7 +512,7 @@ fn dialogo_copiar(tela: &Rc<Tela>) -> impl View {
                     .find(|(r, _)| *r == escolhida)
                     .map(|(_, id)| *id);
                 let conexao =
-                    id.and_then(|id| t.tree.with_untracked(|tr| tr.connection(id).cloned()));
+                    id.and_then(|id| t.tree.with_untracked(|tr| tr.conexao_para_abrir(id)));
                 senha.set(
                     conexao
                         .and_then(|c| t.senhas_do_cofre(&c).conexao)
@@ -611,7 +611,7 @@ fn dialogo_copiar(tela: &Rc<Tela>) -> impl View {
                 .map(|(_, id)| *id);
             let (Some(chave), Some(conexao)) = (
                 chave,
-                id.and_then(|id| t.tree.with_untracked(|tr| tr.connection(id).cloned())),
+                id.and_then(|id| t.tree.with_untracked(|tr| tr.conexao_para_abrir(id))),
             ) else {
                 return;
             };

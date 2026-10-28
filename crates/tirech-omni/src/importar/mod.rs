@@ -21,7 +21,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::cofre::{Lote, Mapa};
-use crate::modelo::{ComandosAoConectar, Connection, S3Opcoes, S3Provedor, SessaoPersistente};
+use crate::modelo::{
+    ComandosAoConectar, Connection, ModoCredencial, MouseDoTerminal, Retentar, S3Opcoes,
+    S3Provedor, SessaoPersistente,
+};
 use crate::redes::{PerfilRede, ProxyRede, Rede, TipoProxy};
 use crate::t;
 
@@ -49,6 +52,12 @@ pub struct PastaTrazida {
     pub comandos: ComandosAoConectar,
     /// A sessão persistente (tmux) da pasta, só no JSON nativo.
     pub persistente: SessaoPersistente,
+    /// O mouse no terminal da pasta, só no JSON nativo.
+    pub mouse: MouseDoTerminal,
+    /// A rodada nova de reconexão da pasta, só no JSON nativo.
+    pub retentar: Retentar,
+    /// O modo da credencial da pasta (o agente SSH), só no JSON nativo.
+    pub credencial_modo: ModoCredencial,
 }
 
 /// Uma conexão trazida de fora, com as senhas recuperadas (quando deu) à parte.

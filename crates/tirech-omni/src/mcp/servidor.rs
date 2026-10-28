@@ -227,14 +227,14 @@ fn soltar(entrada: &Entrada) {
 }
 
 #[cfg(unix)]
-type Escuta = std::os::unix::net::UnixListener;
+pub(crate) type Escuta = std::os::unix::net::UnixListener;
 
 #[cfg(windows)]
-type Escuta = super::pipe::Escuta;
+pub(crate) type Escuta = super::pipe::Escuta;
 
 /// Prepara a pasta e abre o socket.
 #[cfg(unix)]
-fn escutar(endereco: &Path) -> Result<Escuta, ErroDoServidor> {
+pub(crate) fn escutar(endereco: &Path) -> Result<Escuta, ErroDoServidor> {
     use std::os::unix::fs::{DirBuilderExt, FileTypeExt, PermissionsExt};
     let falha = |e: io::Error| ErroDoServidor::Falha(e.to_string());
     if !endereco.is_absolute() {
@@ -290,7 +290,7 @@ fn escutar(endereco: &Path) -> Result<Escuta, ErroDoServidor> {
 
 /// Abre o pipe com dono.
 #[cfg(windows)]
-fn escutar(endereco: &Path) -> Result<Escuta, ErroDoServidor> {
+pub(crate) fn escutar(endereco: &Path) -> Result<Escuta, ErroDoServidor> {
     Escuta::abrir(endereco)
 }
 

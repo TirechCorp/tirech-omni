@@ -47,6 +47,8 @@ tabs from the previous state does not count. Deleting a connection removes its r
   Double-clicking a connection opens the tab in the last window you interacted with. Dragging a tab to another window (or outside all of them, which
   opens a new window) and the tab menu's "Move to window" carry the **same session**: nothing
   reconnects and the history is kept. The Window menu lists the open windows and focuses them.
+  With more than one window, the main one is marked: the title becomes "Tirech Omni — Main
+  window", the title bar shows "Main window" and the menus call it "Window 1 (main)".
 - **Connection status in the tree**: a badge on the corner of the icon shows the status of each connection
   with an open session: solid green (connected), amber ring (connecting), red with "!" (dropped) and
   gray ring (closed, with the tab still open); no session, no badge. With several sessions the
@@ -160,6 +162,34 @@ tabs from the previous state does not count. Deleting a connection removes its r
   without asking, and the tab here that was in it no longer asks when closing. The list runs over the
   connection of an open tab of that connection, if there is one, and otherwise over a new connection with the
   vault password.
+- **Mouse in the terminal (copy and paste or menu)**: the **Mouse in the terminal** row in the
+  properties of an SSH, local shell or Telnet connection (and of a folder, which passes the choice
+  on to those inside it; "Inherit" says which folder it comes from) chooses **Copy and paste**:
+  selecting copies and the right button copies (with a selection) or pastes (without), and
+  Ctrl+right-click opens the menu; or **Menu**: the right button opens the menu and selecting
+  doesn't copy. With no choice on the connection or the folders above it, the Copy on select and
+  Right button rows in Settings › Terminal apply. An open tab changes along when the connection or
+  the folder changes.
+- **Performance (CPU, memory and the weight of each terminal)**: in the title bar, next to the
+  theme button, a meter of small squares, from light yellow to dark red, shows how much of the
+  computer's CPU the whole app is using right now (the tooltip gives the number). The **CPU meter
+  in the title bar** switch, in Settings › General, hides it. Clicking it, or View ▸
+  **Performance**, opens the Performance page, like the Task Manager's: CPU, Memory and Network on
+  the left with a small graph of each; on the right the chart of the last minute for the chosen
+  one, with the utilization, the memory, the open tabs and the up time below; and the **Per
+  terminal** table, one row per tab in every window, with the connection, the CPU the app spends
+  on it (drawing the terminal plus the connection's threads), the data per second, the CPU of the
+  program running in a local shell and the history, with the cells colored by weight. The
+  **Interface** row is the rest of the app. The table sorts by any column, and double-clicking a
+  row goes to the tab. With the meter off and the page closed, nothing is measured.
+- **Retry after (reconnection that doesn't give up)**: when the tab reconnects automatically
+  (Settings › Connections › When the connection drops set to **Reconnect automatically**, and
+  always in an assistant's tab) and the attempts run out, it waits and starts another round,
+  until the connection is back; the tab says "Trying again in 5 min". The time comes from
+  **Retry after (minutes)**, in Settings › Connections (5 by default; 0 turns it off), and the
+  **Retry after** row in the properties of an SSH or Telnet connection, or of a folder, chooses
+  another one: Inherit, **Off**, 1, 2, 5, 10, 15 or 30 min, or 1 h. "Inherit" says which folder
+  it comes from.
 - **Import and export**: File ▸ **Import ▸** brings in connections from WinSSHTerm, FileZilla,
   WinSCP, PuTTY/KiTTY, mRemoteNG, MobaXterm and the app's own JSON; **Export ▸** sends them
   to those same programs and to `~/.ssh/config` ("Import and export" section, below). The
@@ -387,12 +417,20 @@ when the connection type has a Credential (on a folder, always).
 With no vault item, the "Credential" row of an SSH or SFTP connection chooses when the password is
 asked for (the vault item, when there is one, wins):
 
-- **Ask when connecting** (the default): the password dialog comes before connecting.
+- **Inherit** (the default): the mode of the nearest folder that chose one applies ("Inherit
+  (Client)" says which); with none, it is "Ask when connecting".
+- **Ask when connecting:** the password dialog comes before connecting.
 - **SSH agent:** never asks. Logs in through the agent and the keys; if the server
   rejects them, the error stays on the tab, with no dialog.
 - **SSH agent, then password:** connects directly through the agent and the keys; if the server
   rejects them, the password dialog opens ("The server accepted neither the SSH agent nor the keys.") and the
   connection is retried with the typed password.
+
+A folder has the same "Credential" row in its properties, next to Network, Assistants (MCP),
+Persistent session and Commands: choosing **SSH agent** on a folder makes every SSH and SFTP
+connection inside it (and in its subfolders) that left "Inherit" log in through the agent,
+without asking for the password. A connection that chose another mode, or that points to a vault
+item, follows its own.
 
 The jump server does not have these modes: its password is never asked for before connecting. It
 tries the agent and the keys (and the vault item, if any), and a rejection only opens the jump's
@@ -640,7 +678,8 @@ Pageant and the sessions keep running), **Close** or Cancel, with "Don't ask aga
 lives in Settings ▸ General ▸ "When the window is closed". The tray icon has "Open Tirech
 Omni", "Lock the vault", "Agent" (turn on and off, with the number of keys) and "Exit" (which doesn't
 ask). An agent confirmation request brings the window back and hides it afterwards. On
-GNOME you need the AppIndicator extension; with no system tray there is no icon, closing quits the
+GNOME you need the AppIndicator extension (on Cinnamon and MATE the icon goes as a PNG in
+`$XDG_RUNTIME_DIR/tomni-ui/`, which is what their panel reads); with no system tray there is no icon, closing quits the
 app, and it tells you once. "Start with the system, minimized to the tray" opens the app hidden at
 login (`~/.config/autostart/tirech-omni.desktop` on Linux, a LaunchAgent on macOS, the `Run` key
 on Windows; the argument is `--bandeja`).
@@ -1110,12 +1149,29 @@ In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in t
 - `trava.lock`: the lock of the first copy opened with the folder, the owner of the settings. In
   portable mode, it prevents the second copy. Outside it, the second one opens **read-only**, as
   in WinSSHTerm: a bar at the top says so, and it writes nothing in the data folder or the vault
-  (connections, state, vault, settings, workspaces, attachments, recents, the daily copy, the
-  cleanup of the "Control with" files); whatever you change in it stays in memory and is lost
-  when you close it. What the owner saves shows up in the second copy on its own (connections and
-  the vault are reread). When the owner closes, the bar says you can save after restarting, and
+  (state, workspaces, attachments, recents, the daily copy, the cleanup of the "Control with"
+  files). What you change in it in the connections, the settings, the AI providers and the vault
+  goes to the owner through the channel between copies (`instancias.sock`, below), which saves
+  it; the rest stays in memory and is lost when you close it. What the owner saves shows up in
+  the second copy on its own. When the owner closes, the bar says you can save after restarting, and
   the bar's Restart button opens this copy again, now as the owner. The `tirech-omni mcp` bridge
   doesn't write anything in the folder either.
+- `instancias.sock` (Unix): the channel between copies of the app on the same folder, always up
+  in the owner (independent of MCP). On Linux it lives in `$XDG_RUNTIME_DIR/tirech-omni/instancias-<folder
+  hash>.sock`; on macOS, without that variable, with `TIRECH_OMNI_CONFIG`, in portable mode or
+  with the data folder changed, in the folder itself. On Windows it is the pipe
+  `\\.\pipe\tirech-omni-instancias-<user>-<hash>`. The read-only copy sends through it the whole
+  `connections.json`, `configuracoes.json`, `ia.json` and `vault.json` (already encrypted), plus
+  the SHA-256 hash of what it read; the owner checks it (the file type, the same folder, the
+  JSON; for the vault, the same master password or key), saves only if the file is still the one
+  that was read, and rereads it. If it changed, the second copy merges its change with the one on
+  disk (against the base, what it last read; the same field changed on both sides is a conflict,
+  with a warning, and the one on disk stays) and sends again, up to five times. Two new items
+  with the same id: the second copy's gets another one. Through the same channel, the second
+  copy asks for a profile's built-in VPN: the owner brings the engine up (or uses the running one)
+  and answers with its SOCKS5 bridge (`127.0.0.1`, its port and credential), the startup notices
+  and "ready"; the connection stays open while the second copy uses the network, and the owner
+  counts that use.
 - `agente.json`: whether the built-in agent starts with the app, the default lifetime and the file
   keys it loads on startup (only the file path, the confirmation and the lifetime; never the
   passphrase). Vault keys aren't stored here: they live in `vault.json` itself. The agent's
@@ -1123,11 +1179,21 @@ In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in t
   `~/.ssh`) when the app uses the default configuration folder; with `TIRECH_OMNI_CONFIG`, it lives in that
   folder.
 - `redes/<id>/trava.lock`: the lock of a built-in network profile (OpenVPN, WireGuard, Tailscale,
-  Nebula and ZeroTier) while its engine is running. Two open copies of the app don't bring up the
-  same network together (with the same identity, one would knock the other off the server): the second one says
-  it's already up in the other.
+  Nebula and ZeroTier) while its engine is running, until it actually stops (an engine the tabs
+  still hold keeps the lock). Two open copies of the app don't bring up the same network together
+  (with the same identity, one would knock the other off the server): the read-only copy asks the
+  owner for the network through `instancias.sock` and goes out through its engine's bridge, which
+  stays up while the second copy uses it. With no owner running, the second copy brings the engine
+  up itself; if an owner opened later finds the lock held by it, it says the network is already up
+  in the other copy.
 - `redes/<id>/known_hosts`: the server keys for each network profile (the same IP has a
   different key in each network). The profiles themselves live in `connections.json`.
+- `navegador/<id>/`: the separate browser profile of each network profile (the folder Chromium
+  gets in `--user-data-dir` or Firefox in `--profile`, with the proxy's `user.js`): the history,
+  cookies and logins of the client's pages stay here, away from your usual browser. Deleting it
+  only makes the next link start in a clean browser.
+- `navegador/portas.json`: the local proxy port of each network profile, so the browser finds
+  the proxy on the same port after the app restarts.
 - `ia.json`: the AI providers (name, URL, dialect, model, network, TLS and headers) and the
   default provider. **The API key isn't stored here**: it lives in a vault item ("API key — …")
   and the profile stores only its id. If corrupted, it is moved to `ia.json.bak` and the app warns you.
@@ -1174,6 +1240,13 @@ In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in t
 - `desenho.txt`: the startup guard (`<degrau> ok` or `<degrau> abrindo`). If the app crashed before
   showing the window, the next startup renders in a simpler way (the frame on the CPU; on
   Windows, also DirectX 12 and OpenGL). Deleting the file goes back to normal rendering.
+- `travamentos.log`: when the interface is stuck for more than 2 s, which stage it was in (an
+  event, the frame, the layout, the terminals, the window texture or presentation), the state of
+  the interface thread, the load, memory and swap, and the app threads that used the most CPU;
+  it repeats every 10 s and says how long it lasted. For each minute in which the interface used
+  more than 30% of a CPU, or a stage took over half a second, the time per stage. Also the
+  warning about a window that keeps repainting. It starts over above 1 MiB. The system state
+  only shows on Linux.
 - `vault-orphans.json`: in the data folder, the files in `vault/` without a record and the time the
   collector first saw them (the 24-hour margin gives sync time to bring the
   record from another machine).
@@ -1216,6 +1289,10 @@ machines" on new tunnels), Windows and workspaces and Shortcuts. Each change tak
   start **off**. Protecting passwords is a choice of whoever uses the app, and the app keeps
   saving passwords. Automatic locking only works with a master password and counts
   from the last use of a password.
+- **Turning off AI or MCP**: in General, "AI assistants" and "Control by assistants (MCP)"
+  start on. Turned off, everything in that area disappears: sections, menus, Properties rows, the
+  button, the chat panel and the shortcuts (and, for MCP, the server). What was configured is
+  kept and comes back when you turn it on again.
 
 What the page doesn't do yet: sync between machines, watch the file for
 changes made outside the app (restart after editing the JSON by hand), choose the font family,
@@ -1382,6 +1459,32 @@ command runs when the profile's last tab closes and when the app closes. Each pr
 The app does **not** bring up the VPN by itself, nor does it manage containers: the recipes (WireGuard,
 OpenVPN, OpenConnect, openfortivpn, `ip netns`, VM) and a local demo without a VPN are in
 [`redes/LEIAME.md`](../../crates/tirech-omni/redes/LEIAME.md) (in Portuguese).
+
+### Links through the client's network
+
+A connection of type **Link** holds an address (`https://intranet.client/`; without `http://`,
+the app adds it) and sits in the tree with a globe, like the others. Double-clicking it (or the
+search, Home and recents) opens the link without creating a tab:
+
+- **Without a network profile** (Direct, or no folder with a network): in the system's default
+  browser.
+- **With a network profile** (inherited from the folder, as for the other connections): in a
+  separate browser for that profile, which goes out through the client's network. The app starts
+  an HTTP proxy on `127.0.0.1` only, one per profile, which carries each request through the
+  profile's proxy or the embedded VPN (OpenVPN, WireGuard, Tailscale, Nebula, ZeroTier), bringing
+  it up if needed. The browser opens with its own profile (`navegador/<id>/`), so one client's
+  cookies and logins don't mix with another's or with your usual browser's, and the rest of the
+  machine doesn't go through the client's network.
+
+The browser comes from Settings › Networks › **Browser for links**: empty looks for Chrome,
+Chromium, Brave, Edge, Vivaldi and Firefox, in that order; a name on the `PATH` or a path picks
+one. Chromium-family browsers get the proxy through `--proxy-server`; Firefox (and LibreWolf,
+Waterfox, Floorp, Zen) through a `user.js` in the profile, with DNS also going through the proxy.
+**Links…** in the Tools menu lists every link in the tree, with a filter, the address and the
+network, to open one without searching.
+
+It doesn't work yet for a profile with only an SSH jump (no proxy and no embedded VPN): the link
+warns that the profile has no proxy.
 
 ### Embedded Nebula network
 

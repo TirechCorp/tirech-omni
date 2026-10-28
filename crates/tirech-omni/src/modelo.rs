@@ -37,6 +37,9 @@ pub enum Kind {
     /// Um remoto do rclone (M33): Google Drive, OneDrive, Dropbox, WebDAV… O remoto e a pasta
     /// ficam em [`RcloneOpcoes`]; as senhas dele moram no `rclone.conf`, não aqui.
     Rclone,
+    /// Um endereço web (`Connection::url`) que abre no navegador. Com um perfil de rede, abre
+    /// num navegador só do perfil, que sai pela rede dele (`crate::navegador`).
+    Link,
 }
 
 /// Como a conexão FTP é protegida.
@@ -413,7 +416,7 @@ impl RcloneOpcoes {
 
 impl Kind {
     /// Todos os tipos, na ordem em que a lista de escolha os mostra.
-    pub const TODOS: [Kind; 7] = [
+    pub const TODOS: [Kind; 8] = [
         Kind::Ssh,
         Kind::Sftp,
         Kind::Ftp,
@@ -421,6 +424,7 @@ impl Kind {
         Kind::Rclone,
         Kind::Local,
         Kind::Telnet,
+        Kind::Link,
     ];
 
     /// Se a página Arquivos abre o tipo (SSH, SFTP, FTP, S3 e rclone).
@@ -443,6 +447,7 @@ impl Kind {
             Kind::Ftp => "FTP".to_owned(),
             Kind::S3 => "S3".to_owned(),
             Kind::Rclone => "Rclone".to_owned(),
+            Kind::Link => t!("comum-tipo-link"),
         }
     }
 
@@ -458,8 +463,8 @@ impl Kind {
             Kind::Local => 0,
             Kind::Telnet => 23,
             Kind::Ftp => 21,
-            // O S3 usa a porta do endereço.
-            Kind::S3 | Kind::Rclone => 0,
+            // O S3 e o link usam a porta do endereço.
+            Kind::S3 | Kind::Rclone | Kind::Link => 0,
         }
     }
 }
@@ -514,12 +519,16 @@ impl ModoX11 {
 }
 
 /// Como uma conexão SSH (ou SFTP) sem item do cofre na `credencial` se autentica: a linha
-/// "Credencial" das propriedades. Com um item do cofre, o item vence e o modo não vale.
+/// "Credencial" das propriedades. Com um item do cofre, o item vence e o modo não vale. Numa
+/// pasta, vale para as conexões de dentro que herdam (`crate::credencial`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModoCredencial {
-    /// Pede a senha antes de abrir (sem chave privada nem chave do cofre).
+    /// Vale o da pasta de cima (e, sem nenhuma, `Perguntar`). Os arquivos de antes da herança,
+    /// que não gravavam o `Perguntar`, abrem assim e continuam perguntando.
     #[default]
+    Herdar,
+    /// Pede a senha antes de abrir (sem chave privada nem chave do cofre).
     Perguntar,
     /// Não pergunta: o agente SSH (e a chave, se houver). Uma recusa só mostra o erro na aba.
     Agente,
@@ -538,14 +547,14 @@ impl ModoCredencial {
     /// O rótulo da linha "Credencial".
     pub fn nome(self) -> String {
         match self {
-            ModoCredencial::Perguntar => t!("casca-perguntar-ao-conectar"),
+            ModoCredencial::Herdar | ModoCredencial::Perguntar => t!("casca-perguntar-ao-conectar"),
             ModoCredencial::Agente => t!("comum-credencial-agente"),
             ModoCredencial::AgenteOuSenha => t!("comum-credencial-agente-ou-senha"),
         }
     }
 
-    /// O modo cujo rótulo é `rotulo`; um item do cofre (ou um texto qualquer) vale como
-    /// `Perguntar`.
+    /// O modo cujo rótulo é `rotulo`; um item do cofre, a opção "Herdar" (ou um texto
+    /// qualquer) vale como `Herdar`.
     pub fn do_rotulo(rotulo: &str) -> Self {
         Self::TODOS
             .into_iter()
@@ -553,9 +562,9 @@ impl ModoCredencial {
             .unwrap_or_default()
     }
 
-    /// Se é o padrão (`Perguntar`), que o arquivo não grava.
-    pub fn e_perguntar(&self) -> bool {
-        *self == ModoCredencial::Perguntar
+    /// Se é o padrão (`Herdar`), que o arquivo não grava.
+    pub fn is_herdar(&self) -> bool {
+        *self == ModoCredencial::Herdar
     }
 }
 
@@ -731,6 +740,50 @@ impl SessaoPersistente {
     /// Para o `skip_serializing_if`: o padrão não é gravado.
     pub fn is_herdar(&self) -> bool {
         *self == SessaoPersistente::Herdar
+    }
+}
+
+/// O que o mouse faz no terminal da conexão: copiar ao selecionar e colar com o botão direito,
+/// ou abrir o menu. Herda da pasta e, sem pasta que decida, valem
+/// Configurações › Terminal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseDoTerminal {
+    /// Vale a da pasta de cima (e, sem nenhuma, as Configurações).
+    #[default]
+    Herdar,
+    /// Selecionar copia; o botão direito copia (com seleção) ou cola (sem), e o Ctrl+clique
+    /// direito abre o menu.
+    CopiarColar,
+    /// Selecionar não copia e o botão direito abre o menu.
+    Menu,
+}
+
+impl MouseDoTerminal {
+    /// Para o `skip_serializing_if`: o padrão não é gravado.
+    pub fn is_herdar(&self) -> bool {
+        *self == MouseDoTerminal::Herdar
+    }
+}
+
+/// Depois das tentativas de reconectar sozinho, quanto esperar para começar outra rodada. Herda
+/// da pasta e, sem pasta que decida, vale `conexoes.reconectar.retentar_mins`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Retentar {
+    /// Vale a da pasta de cima (e, sem nenhuma, as Configurações).
+    #[default]
+    Herdar,
+    /// Para depois das tentativas.
+    Desligado,
+    /// Espera estes minutos e começa outra rodada, até a conexão voltar (0 é `Desligado`).
+    Minutos(u32),
+}
+
+impl Retentar {
+    /// Para o `skip_serializing_if`: o padrão não é gravado.
+    pub fn is_herdar(&self) -> bool {
+        *self == Retentar::Herdar
     }
 }
 
@@ -1128,9 +1181,9 @@ pub struct Connection {
     #[serde(default)]
     pub credencial: Option<u64>,
     /// SSH e SFTP sem item na `credencial`: perguntar a senha antes de abrir, só o agente SSH,
-    /// ou o agente e a senha se o servidor recusar. Com um item, o item vence (ver
-    /// [`Connection::modo_da_credencial`]).
-    #[serde(default, skip_serializing_if = "ModoCredencial::e_perguntar")]
+    /// ou o agente e a senha se o servidor recusar; `Herdar` segue a pasta. Com um item, o item
+    /// vence (ver [`Connection::modo_da_credencial`]).
+    #[serde(default, skip_serializing_if = "ModoCredencial::is_herdar")]
     pub credencial_modo: ModoCredencial,
     /// Um texto livre sobre a conexão, como a "Description" do WinSSHTerm: aparece na dica da
     /// linha da árvore e entra na busca.
@@ -1164,6 +1217,9 @@ pub struct Connection {
     /// Rclone: o remoto e a pasta.
     #[serde(default)]
     pub rclone: RcloneOpcoes,
+    /// Link: o endereço que abre no navegador (`https://intranet.cliente/`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
     /// A rede por onde a conexão sai (M34): herda do grupo, vai direta ou usa um perfil.
     #[serde(default)]
     pub rede: Rede,
@@ -1182,6 +1238,12 @@ pub struct Connection {
     /// SSH: a aba roda numa sessão do `tmux` ou do `screen` no servidor; herda da pasta.
     #[serde(default, skip_serializing_if = "SessaoPersistente::is_herdar")]
     pub persistente: SessaoPersistente,
+    /// O mouse no terminal (copiar ao selecionar e o botão direito); herda da pasta.
+    #[serde(default, skip_serializing_if = "MouseDoTerminal::is_herdar")]
+    pub mouse: MouseDoTerminal,
+    /// Depois das tentativas de reconectar sozinho, outra rodada; herda da pasta.
+    #[serde(default, skip_serializing_if = "Retentar::is_herdar")]
+    pub retentar: Retentar,
     /// SSH: a sessão persistente em que a aba abre. Não vai para o arquivo: o app põe na cópia
     /// da conexão que abre a aba (`crate::tmux`).
     #[serde(skip)]
@@ -1265,7 +1327,7 @@ impl Connection {
             log_file: None,
             jump: None,
             credencial: None,
-            credencial_modo: ModoCredencial::Perguntar,
+            credencial_modo: ModoCredencial::Herdar,
             descricao: String::new(),
             nota: None,
             ftp_security: FtpSeguranca::Explicita,
@@ -1276,12 +1338,15 @@ impl Connection {
             ftp_active_ports: String::new(),
             s3: S3Opcoes::default(),
             rclone: RcloneOpcoes::default(),
+            url: String::new(),
             rede: Rede::Herdar,
             mcp: PermissaoIa::Herdar,
             perfil_ia: None,
             x11: ModoX11::Padrao,
             comandos: ComandosAoConectar::default(),
             persistente: SessaoPersistente::Herdar,
+            mouse: MouseDoTerminal::Herdar,
+            retentar: Retentar::Herdar,
             sessao_persistente: None,
             colar_arquivos: None,
             pasta_colar: String::new(),
@@ -1321,12 +1386,13 @@ impl Connection {
     }
 
     /// O modo da credencial que vale: o `credencial_modo` no SSH e no SFTP sem item do cofre;
-    /// `Perguntar` nos outros tipos e com um item na `credencial` (o item vence).
+    /// `Perguntar` nos outros tipos e com um item na `credencial` (o item vence). O `Herdar` já
+    /// vem resolvido na conexão de [`Tree::conexao_para_abrir`]; sem a árvore, vale `Perguntar`.
     pub fn modo_da_credencial(&self) -> ModoCredencial {
-        if self.kind.usa_ssh() && self.credencial.is_none() {
-            self.credencial_modo
-        } else {
-            ModoCredencial::Perguntar
+        match self.credencial_modo {
+            ModoCredencial::Herdar => ModoCredencial::Perguntar,
+            modo if self.kind.usa_ssh() && self.credencial.is_none() => modo,
+            _ => ModoCredencial::Perguntar,
         }
     }
 
@@ -1341,10 +1407,18 @@ impl Connection {
 
     /// Onde a conexão está, só com os campos que valem para o tipo (`campos::Campo`):
     /// `usuario@host` (ou só o host) no SSH, no SFTP, no FTP e no Telnet; o bucket e o serviço
-    /// (`bucket@servico`) no S3, sem o Access Key ID; o remoto (`gdrive:Backup`) no rclone; vazio
-    /// no shell local e quando falta o endereço. O rótulo da árvore e a busca usam este texto.
+    /// (`bucket@servico`) no S3, sem o Access Key ID; o remoto (`gdrive:Backup`) no rclone; o
+    /// endereço sem o `https://` no link; vazio no shell local e quando falta o endereço. O
+    /// rótulo da árvore e a busca usam este texto.
     pub fn servidor(&self) -> String {
         match self.kind {
+            Kind::Link => {
+                let url = self.url.trim();
+                url.split_once("://")
+                    .map_or(url, |(_, resto)| resto)
+                    .trim_end_matches('/')
+                    .to_owned()
+            }
             Kind::Rclone => match self.rclone.remote.is_empty() {
                 true => String::new(),
                 false => self.rclone.spec(),
@@ -1403,6 +1477,16 @@ pub struct Group {
     /// A sessão persistente (`tmux` ou `screen`) do grupo: vale para o que está dentro e herda.
     #[serde(default, skip_serializing_if = "SessaoPersistente::is_herdar")]
     pub persistente: SessaoPersistente,
+    /// O mouse no terminal do grupo: vale para o que está dentro e herda.
+    #[serde(default, skip_serializing_if = "MouseDoTerminal::is_herdar")]
+    pub mouse: MouseDoTerminal,
+    /// A nova rodada de reconexão do grupo: vale para o que está dentro e herda.
+    #[serde(default, skip_serializing_if = "Retentar::is_herdar")]
+    pub retentar: Retentar,
+    /// O modo da credencial das conexões SSH e SFTP do grupo (o agente SSH, por exemplo): vale
+    /// para o que está dentro e herda.
+    #[serde(default, skip_serializing_if = "ModoCredencial::is_herdar")]
+    pub credencial_modo: ModoCredencial,
 }
 
 /// Um item da árvore.
@@ -1494,6 +1578,9 @@ impl Tree {
             mcp: PermissaoIa::Herdar,
             comandos: ComandosAoConectar::default(),
             persistente: SessaoPersistente::Herdar,
+            mouse: MouseDoTerminal::Herdar,
+            retentar: Retentar::Herdar,
+            credencial_modo: ModoCredencial::Herdar,
         };
         self.children_mut(parent).push(Node::Group(group));
         id
@@ -1640,6 +1727,14 @@ impl Tree {
         }
         cadeia.reverse();
         cadeia
+    }
+
+    /// Uma cópia da conexão `id` pronta para abrir: o `Herdar` do modo da credencial vira o
+    /// modo que vale pela pasta (ver [`crate::credencial::modo_efetivo`]).
+    pub fn conexao_para_abrir(&self, id: u64) -> Option<Connection> {
+        let mut c = self.connection(id)?.clone();
+        c.credencial_modo = crate::credencial::modo_efetivo(self, id);
+        Some(c)
     }
 
     /// Todas as conexões, em ordem de leitura.
@@ -1969,13 +2064,35 @@ mod tests {
     }
 
     #[test]
-    fn arquivo_antigo_sem_o_modo_da_credencial_abre_como_perguntar() {
+    fn arquivo_antigo_sem_o_modo_da_credencial_abre_como_herdar_e_pergunta() {
         let json = r#"{ "nodes": [ { "Connection": { "name": "antiga", "credencial": null } } ] }"#;
         let tree: Tree = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            tree.connections()[0].credencial_modo,
-            ModoCredencial::Perguntar
+        let c = tree.connections()[0];
+        assert_eq!(c.credencial_modo, ModoCredencial::Herdar);
+        assert_eq!(c.modo_da_credencial(), ModoCredencial::Perguntar);
+        let aberta = tree.conexao_para_abrir(c.id).unwrap();
+        assert_eq!(aberta.credencial_modo, ModoCredencial::Perguntar);
+    }
+
+    #[test]
+    fn o_perguntar_escolhido_e_gravado_e_o_modo_da_pasta_vai_e_volta() {
+        let mut c = Connection::new("web", Kind::Ssh);
+        c.credencial_modo = ModoCredencial::Perguntar;
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains(r#""credencial_modo":"perguntar""#), "{json}");
+        let mut tree = Tree::default();
+        let pasta = tree.add_group(None, "cliente");
+        let json = serde_json::to_string(&tree).unwrap();
+        assert!(
+            !json.contains("credencial_modo"),
+            "o Herdar da pasta fica de fora"
         );
+        let Some(Node::Group(g)) = tree.find_mut(pasta) else {
+            unreachable!()
+        };
+        g.credencial_modo = ModoCredencial::Agente;
+        let volta: Tree = serde_json::from_str(&serde_json::to_string(&tree).unwrap()).unwrap();
+        assert_eq!(volta, tree);
     }
 
     #[test]
@@ -2006,6 +2123,26 @@ mod tests {
             panic!("sem a pasta");
         };
         assert!(g.comandos.e_padrao());
+    }
+
+    #[test]
+    fn a_rodada_nova_de_reconexao_so_vai_para_o_arquivo_quando_escolhida() {
+        let mut c = Connection::new("web", Kind::Ssh);
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(!json.contains("retentar"), "{json}");
+        let antigo: Connection = serde_json::from_str(r#"{ "name": "web" }"#).unwrap();
+        assert_eq!(antigo.retentar, Retentar::Herdar);
+        for escolha in [Retentar::Desligado, Retentar::Minutos(15)] {
+            c.retentar = escolha;
+            let json = serde_json::to_string(&c).unwrap();
+            let volta: Connection = serde_json::from_str(&json).unwrap();
+            assert_eq!(volta.retentar, escolha, "{json}");
+        }
+        assert!(
+            serde_json::to_string(&c)
+                .unwrap()
+                .contains(r#""retentar":{"minutos":15}"#)
+        );
     }
 
     #[test]

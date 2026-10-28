@@ -17,7 +17,7 @@ use tomni_ui::terminal::{PaneDirection, Session};
 use super::mcp_sessoes::LUGARES;
 use super::{Lugar, Tela};
 use crate::abrir::{Senhas, dividir_argumentos, juntar_argumentos};
-use crate::configuracoes::ConversaAoControlar;
+use crate::configuracoes::{Configuracoes, ConversaAoControlar};
 use crate::conversas::{
     self, Conversa, Diario, SessaoDoOpenCode, chave_da_aba, conversa_do_claude, conversa_do_codex,
     ler_aviso_do_codex, notify_da_pessoa, sessao_do_lancamento, sessoes_do_opencode,
@@ -209,7 +209,8 @@ struct Pedido<'a> {
     nome: &'a str,
     /// Os argumentos da ponte (`mcp --nome … --aba …`, ou `--cluster`).
     ponte: &'a [String],
-    /// O que vai para o prompt de sistema do Claude Code: a aba é o alvo, não este computador.
+    /// O que vai para o prompt de sistema do Claude Code: a aba é o alvo, não este computador. O
+    /// Codex e o OpenCode recebem o mesmo texto pela ponte (`--instrucoes`, já em `ponte`).
     instrucoes: &'a str,
     /// O arquivo de configuração do Claude Code (só ele usa).
     arquivo: &'a Path,
@@ -360,7 +361,8 @@ pub(super) struct Encomenda {
     pub(super) rotulo: String,
     /// Os argumentos da ponte depois do `--nome`: `--aba <chave>` ou `--cluster`.
     pub(super) ponte: Vec<String>,
-    /// O que vai para o prompt de sistema do Claude Code.
+    /// O que vai para o prompt de sistema do assistente: o do Claude Code pelo
+    /// `--append-system-prompt`; o do Codex e o do OpenCode pela ponte, no `initialize`.
     pub(super) instrucoes: String,
     /// Onde a aba do assistente abre.
     pub(super) lugar: Lugar,
@@ -777,7 +779,7 @@ impl Tela {
     /// Se os assistentes salvos voltam quando as abas reabrem (com o app ou com um espaço).
     pub(super) fn reabre_assistentes(&self) -> bool {
         self.config
-            .with_untracked(|c| c.ia.conversas_reabrir && c.ia.mcp_ligado)
+            .with_untracked(|c| c.ia.conversas_reabrir && c.mcp_no_ar())
     }
 
     /// Guarda os `assistentes` que voltam com a aba da conexão `id` (0 é o shell local) que vai
@@ -1047,6 +1049,11 @@ impl Tela {
         // o `TIRECH_OMNI_CONFIG`), e ela não acharia o app.
         let canal = crate::mcp::endereco_da_pasta(self.armazenamento.pasta());
         ponte.extend(["--canal".to_owned(), canal.to_string_lossy().into_owned()]);
+        // O Codex e o OpenCode não têm o `--append-system-prompt` do Claude Code: as instruções
+        // vão à ponte, que as devolve no `initialize`, e eles as põem no prompt de sistema.
+        if f != Ferramenta::Claude {
+            ponte.extend(["--instrucoes".to_owned(), encomenda.instrucoes.clone()]);
+        }
         if f == Ferramenta::Claude {
             let settings = settings_claude_avisos(&exe, &lancamento, ambiente.windows);
             let gravar = |caminho: &Path, conteudo: String| {
@@ -1390,8 +1397,9 @@ pub(super) fn submenu(tela: &Rc<Tela>, prefixo: &str, alvo: Alvo) -> MenuFlyout 
     menu
 }
 
-/// Se o submenu "Controlar com ▸" aparece para `alvo`: há uma aba, ela não é a de um assistente e
-/// ao menos um assistente está à mostra nas Configurações.
+/// Se o submenu "Controlar com ▸" aparece para `alvo`: o controle por assistentes está ligado em
+/// Geral, há uma aba, ela não é a de um assistente e ao menos um assistente está à mostra nas
+/// Configurações.
 pub(super) fn aparece(tela: &Rc<Tela>, alvo: Alvo) -> bool {
     let Some((_, sessao)) = tela.resolver_controle_rastreado(alvo) else {
         return false;
@@ -1399,7 +1407,7 @@ pub(super) fn aparece(tela: &Rc<Tela>, alvo: Alvo) -> bool {
     !tela.e_aba_de_assistente(sessao)
         && tela
             .config
-            .with(|c| Ferramenta::TODAS.into_iter().any(|f| c.ia.mostra(f)))
+            .with(|c| c.geral.mcp && Ferramenta::TODAS.into_iter().any(|f| c.ia.mostra(f)))
 }
 
 impl Tela {
@@ -1461,7 +1469,7 @@ pub(super) fn aparece_dar(tela: &Rc<Tela>, alvo: Alvo) -> bool {
         return false;
     };
     let _ = tela.mcp.marca_v.get();
-    tela.config.with(|c| c.ia.mcp_ligado)
+    tela.config.with(Configuracoes::mcp_no_ar)
         && !tela.e_aba_de_assistente(sessao)
         && tela.mcp.sessoes.with(|todas| {
             todas
@@ -1573,7 +1581,7 @@ mod tests {
     }
 
     #[test]
-    fn o_codex_sobrepoe_o_servidor_com_dois_c() {
+    fn o_codex_sobrepoe_o_servidor_com_tres_c() {
         let onde = Onde::Nome("codex".to_owned());
         let linha = montar_linha(&pedido(Ferramenta::Codex, &onde, &[], false, &ponte()));
         let comando = &linha.argumentos[2];
@@ -1586,6 +1594,10 @@ mod tests {
             "{comando}"
         );
         assert!(comando.contains("--aba"), "{comando}");
+        assert!(
+            comando.contains("'mcp_servers.tirech-omni.tool_timeout_sec=86400'"),
+            "{comando}"
+        );
     }
 
     #[test]

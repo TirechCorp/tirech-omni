@@ -36,7 +36,7 @@ pub const PASTA_PORTATIL: &str = "tirech-omnidata";
 pub const ARQUIVO_TRAVA: &str = "trava.lock";
 
 /// O arquivo das conexões, na pasta de dados.
-const ARQUIVO_CONEXOES: &str = "connections.json";
+pub(crate) const ARQUIVO_CONEXOES: &str = "connections.json";
 
 /// A pasta das cópias automáticas (uma por dia de cada arquivo), dentro da pasta de dados e, se o
 /// cofre mora em outra, dentro da do cofre também.
@@ -479,7 +479,10 @@ impl Armazenamento {
     ) -> (T, Option<String>) {
         let texto = match fs::read_to_string(arquivo) {
             Ok(texto) => texto,
-            Err(erro) if erro.kind() == io::ErrorKind::NotFound => return (T::default(), None),
+            Err(erro) if erro.kind() == io::ErrorKind::NotFound => {
+                crate::instancias::anotar_base(arquivo, None);
+                return (T::default(), None);
+            }
             Err(erro) => {
                 return (
                     T::default(),
@@ -491,6 +494,7 @@ impl Armazenamento {
                 );
             }
         };
+        crate::instancias::anotar_base(arquivo, Some(texto.as_bytes()));
         match serde_json::from_str::<T>(&texto) {
             Ok(valor) => (valor, None),
             Err(_) => {
@@ -517,14 +521,19 @@ impl Armazenamento {
     /// ([`copia_do_dia`]). Um arquivo de uma versão mais nova do app (`version` maior que
     /// [`VERSAO`]) não é tocado: fica só de leitura ([`somente_leitura_em`]), com o aviso.
     pub fn carregar(&self) -> (Tree, Option<String>) {
-        let (tree, aviso, _) = self.carregar_visto();
+        let (tree, aviso, _) = self.ler_visto(false);
         (tree, aviso)
     }
 
     /// O [`Armazenamento::carregar`], com o que se viu do arquivo, para a vigia
     /// ([`Armazenamento::reler_se_mudou`]) e a gravação ([`Armazenamento::salvar_visto`])
-    /// saberem se outro programa o mudou depois.
+    /// saberem se outro programa o mudou depois. É a árvore da tela: numa cópia secundária, o
+    /// lido é a base da junção com o que a principal grava ([`crate::instancias`]).
     pub fn carregar_visto(&self) -> (Tree, Option<String>, Visto) {
+        self.ler_visto(true)
+    }
+
+    fn ler_visto(&self, da_tela: bool) -> (Tree, Option<String>, Visto) {
         let arquivo = self.arquivo_conexoes();
         let visto = match Visto::ler(&arquivo) {
             Ok(visto) => visto,
@@ -540,6 +549,9 @@ impl Armazenamento {
                 );
             }
         };
+        if da_tela {
+            crate::instancias::anotar_base(&arquivo, visto.bytes.as_deref());
+        }
         let Some(bytes) = &visto.bytes else {
             return (Tree::default(), None, visto);
         };
@@ -594,6 +606,10 @@ impl Armazenamento {
     /// aqui e não é tirado do lugar.
     pub fn reler_se_mudou(&self, visto: &mut Visto) -> Option<(Tree, Option<String>)> {
         let arquivo = self.arquivo_conexoes();
+        // A mudança desta cópia ainda vai para a principal: o disco ainda não a tem.
+        if crate::instancias::pendente(&arquivo) {
+            return None;
+        }
         let meta = fs::metadata(&arquivo).ok()?;
         if visto.mesma_data(&meta) {
             return None;
@@ -605,6 +621,7 @@ impl Armazenamento {
             return None;
         }
         *visto = novo;
+        crate::instancias::anotar_base(&arquivo, Some(&bytes));
         self.entender(&bytes)
     }
 
@@ -628,6 +645,7 @@ impl Armazenamento {
         // Só de leitura (outra cópia do app é a dona, ou o arquivo é de uma versão mais nova):
         // a árvore fica na memória.
         if so_leitura(&arquivo) {
+            mandar_a_principal(&arquivo, tree);
             return Ok(None);
         }
         fs::create_dir_all(&self.pasta)?;
@@ -674,13 +692,15 @@ impl Armazenamento {
     /// Grava um valor como JSON bonito, de forma atômica ([`gravar_atomico`]). O que o arquivo
     /// tem e este app não conhece (os campos de uma versão mais nova) continua lá
     /// ([`enxertar`]). Num arquivo só de leitura ([`so_leitura`]), não grava nada e não é erro:
-    /// o valor fica na memória.
+    /// o valor fica na memória, e vai para a cópia principal se esta é uma secundária
+    /// ([`crate::instancias`]).
     pub(crate) fn gravar<T: Serialize + DeserializeOwned>(
         &self,
         arquivo: &Path,
         valor: &T,
     ) -> io::Result<()> {
         if so_leitura(arquivo) {
+            mandar_a_principal(arquivo, valor);
             return Ok(());
         }
         fs::create_dir_all(&self.pasta)?;
@@ -928,11 +948,44 @@ impl Visto {
 }
 
 /// A versão de um `connections.json` lido (`version`); sem ela, a 1.
-fn versao_do_json(valor: &Value) -> u32 {
+pub(crate) fn versao_do_json(valor: &Value) -> u32 {
     valor
         .get("version")
         .and_then(Value::as_u64)
         .map_or(1, |v| u32::try_from(v).unwrap_or(u32::MAX))
+}
+
+/// Numa cópia secundária ([`crate::instancias`]), manda `valor` para a principal gravar em
+/// `arquivo`, com o que o arquivo tem e este app não conhece ([`valor_com_enxerto`]). Um arquivo
+/// de uma versão mais nova não se toca.
+fn mandar_a_principal<T: Serialize + DeserializeOwned>(arquivo: &Path, valor: &T) {
+    if !crate::instancias::segue_a_principal(arquivo) {
+        return;
+    }
+    let disco = fs::read(arquivo)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    if disco.as_ref().is_some_and(|d| versao_do_json(d) > VERSAO) {
+        return;
+    }
+    if let Ok(nosso) = valor_com_enxerto(valor, disco.as_ref()) {
+        crate::instancias::enviar_json(arquivo, nosso);
+    }
+}
+
+/// O JSON de `valor` com o que `disco` tem e este app não conhece ([`enxertar`]).
+pub(crate) fn valor_com_enxerto<T: Serialize + DeserializeOwned>(
+    valor: &T,
+    disco: Option<&Value>,
+) -> io::Result<Value> {
+    let mut nosso = serde_json::to_value(valor)?;
+    if let Some(disco) = disco {
+        let entendido = serde_json::from_value::<T>(disco.clone())
+            .ok()
+            .and_then(|t| serde_json::to_value(t).ok());
+        enxertar(&mut nosso, disco, entendido.as_ref());
+    }
+    Ok(nosso)
 }
 
 /// O JSON bonito de `valor` com o que `disco` (o arquivo de agora) tem e este app não conhece:
@@ -1001,7 +1054,7 @@ fn enxertar(nosso: &mut Value, disco: &Value, entendido: Option<&Value>) -> bool
 
 /// A identidade de um item de lista para o [`enxertar`]: o `id` dele ou, num enum marcado por
 /// fora (`{"Group": {"id": 3, ..}}`), a variante com o `id` de dentro.
-fn identidade(valor: &Value) -> Option<String> {
+pub(crate) fn identidade(valor: &Value) -> Option<String> {
     let objeto = valor.as_object()?;
     if let Some(id) = objeto.get("id").filter(|id| !id.is_null()) {
         return Some(id.to_string());

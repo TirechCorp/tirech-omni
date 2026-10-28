@@ -168,6 +168,36 @@ fn com_espaco_a_lista_perde_listar_espacos() {
 }
 
 #[test]
+fn com_instrucoes_o_initialize_comeca_por_elas() {
+    // O "Controlar com" do Codex e do OpenCode: eles não têm o `--append-system-prompt` do
+    // Claude Code, e as `instructions` do `initialize` levam o mesmo texto.
+    let pasta = Pasta::nova("ponte-instrucoes");
+    let endereco = pasta.0.join("mcp.sock");
+    let (_, saida, _) = rodar(
+        &[
+            "--aba",
+            "0-3",
+            "--instrucoes",
+            "Você foi aberto para trabalhar na aba \"api\".",
+        ],
+        &endereco,
+        &format!("{}\n", inicio()),
+    );
+    let instrucoes = saida[0]["result"]["instructions"].as_str().unwrap();
+    assert!(
+        instrucoes.starts_with("Você foi aberto para trabalhar na aba \"api\".\n\n"),
+        "{instrucoes}"
+    );
+    // O resto continua: a aba padrão e o aviso sobre a saída do servidor.
+    assert!(instrucoes.contains("0-3"), "{instrucoes}");
+    assert!(instrucoes.contains("saida_do_servidor"), "{instrucoes}");
+    // Sem `--instrucoes`, nada muda.
+    let (_, saida, _) = rodar(&["--aba", "0-3"], &endereco, &format!("{}\n", inicio()));
+    let sem = saida[0]["result"]["instructions"].as_str().unwrap();
+    assert!(!sem.contains("\"api\""), "{sem}");
+}
+
+#[test]
 fn com_aba_a_ponte_conta_a_aba_ao_assistente() {
     let pasta = Pasta::nova("ponte-aba");
     let endereco = pasta.0.join("mcp.sock");

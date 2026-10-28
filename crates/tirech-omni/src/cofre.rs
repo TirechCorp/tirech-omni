@@ -2625,6 +2625,17 @@ impl Cofre {
     /// app gravar.
     fn escrever(&mut self) -> io::Result<()> {
         if so_leitura(&self.pasta) {
+            // Numa cópia secundária, o arquivo cifrado vai para a principal gravar, se ainda for
+            // o que se juntou aqui (`no_disco`). Se não for, a conferência periódica junta o
+            // novo e manda de novo.
+            let arquivo = self.pasta.join(ARQUIVO);
+            if let Some(chave) = self.chave
+                && crate::instancias::segue_a_principal(&arquivo)
+            {
+                self.conteudo.podar(agora());
+                let bytes = self.cifrado(&chave)?;
+                crate::instancias::enviar_pronto(&arquivo, &self.no_disco, bytes);
+            }
             return Ok(());
         }
         let chave = self.chave.ok_or_else(bloqueado_erro)?;
@@ -2641,17 +2652,43 @@ impl Cofre {
         }
         self.copia_do_dia(&self.no_disco);
         self.conteudo.podar(agora());
-        let chave = &chave;
+        let bytes = self.cifrado(&chave)?;
+        gravar_privado(&self.pasta, ARQUIVO, &bytes)?;
+        self.no_disco = bytes;
+        self.conteudo.marcar_vistos();
+        Ok(())
+    }
+}
+
+impl Cofre {
+    /// O `vault.json` do conteúdo de agora, cifrado com um nonce novo.
+    fn cifrado(&self, chave: &Chave) -> io::Result<Vec<u8>> {
         let claro = serde_json::to_vec(&self.conteudo).map_err(io::Error::other)?;
         let arquivo = Arquivo {
             versao: VERSAO,
             protecao: self.protecao.clone(),
             itens: cifrar(chave, &claro)?,
         };
-        let bytes = serde_json::to_vec_pretty(&arquivo).map_err(io::Error::other)?;
-        gravar_privado(&self.pasta, ARQUIVO, &bytes)?;
-        self.no_disco = bytes;
-        self.conteudo.marcar_vistos();
+        serde_json::to_vec_pretty(&arquivo).map_err(io::Error::other)
+    }
+
+    /// Se a principal pode gravar o `vault.json` que uma cópia secundária mandou: um cofre que
+    /// esta versão lê, com a mesma proteção (a mesma senha mestra, ou a mesma chave) deste.
+    pub fn aceita_de_outra_copia(&self, bytes: &[u8]) -> Result<(), String> {
+        let arquivo = serde_json::from_slice::<Arquivo>(bytes).map_err(|e| e.to_string())?;
+        if arquivo.versao > VERSAO {
+            return Err(t!("cofre-versao-mais-nova"));
+        }
+        let outra_chave = self
+            .chave
+            .is_some_and(|chave| decifrar(&chave, &arquivo.itens).is_none());
+        if arquivo.protecao != self.protecao || outra_chave {
+            return Err(if self.tem_senha_mestra() {
+                t!("cofre-alterado-com-outra-senha")
+            } else {
+                t!("cofre-alterado-com-outra-chave")
+            });
+        }
         Ok(())
     }
 }
@@ -4977,6 +5014,40 @@ mod tests {
         assert!(!fora.0.join("vault.json").exists());
         assert_eq!(texto_do_cofre(&pasta.0), antes);
         assert!(pasta.0.join("vault.key").exists());
+    }
+
+    #[test]
+    fn a_principal_so_aceita_da_outra_copia_um_cofre_com_a_mesma_protecao() {
+        let (cofre, pasta) = cofre_com_itens("outra-copia");
+        let (_outro, outra_pasta) = cofre_com_itens("outra-copia-outra-chave");
+        let proprio = fs::read(pasta.0.join("vault.json")).unwrap();
+        assert_eq!(cofre.aceita_de_outra_copia(&proprio), Ok(()));
+        // Outra chave: a principal não abriria o que gravasse.
+        let de_outra_chave = fs::read(outra_pasta.0.join("vault.json")).unwrap();
+        assert_eq!(
+            cofre.aceita_de_outra_copia(&de_outra_chave),
+            Err(t!("cofre-alterado-com-outra-chave"))
+        );
+        let mut json: serde_json::Value = serde_json::from_slice(&proprio).unwrap();
+        json["versao"] = (VERSAO + 1).into();
+        assert_eq!(
+            cofre.aceita_de_outra_copia(json.to_string().as_bytes()),
+            Err(t!("cofre-versao-mais-nova"))
+        );
+        assert!(cofre.aceita_de_outra_copia(b"{ pela metade").is_err());
+
+        // Com a senha mestra, a outra senha também fica de fora.
+        let (mut com_senha, pasta_com_senha) = cofre_com_itens("outra-copia-senha");
+        com_senha.definir_senha_mestra(Some("uma")).unwrap();
+        let (mut outra_senha, pasta_outra_senha) = cofre_com_itens("outra-copia-outra-senha");
+        outra_senha.definir_senha_mestra(Some("outra")).unwrap();
+        let proprio = fs::read(pasta_com_senha.0.join("vault.json")).unwrap();
+        assert_eq!(com_senha.aceita_de_outra_copia(&proprio), Ok(()));
+        let de_outra_senha = fs::read(pasta_outra_senha.0.join("vault.json")).unwrap();
+        assert_eq!(
+            com_senha.aceita_de_outra_copia(&de_outra_senha),
+            Err(t!("cofre-alterado-com-outra-senha"))
+        );
     }
 
     #[test]

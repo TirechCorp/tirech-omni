@@ -440,6 +440,13 @@ pub trait Opener {
         }
     }
 
+    /// Abre `url` (uma conexão Link com perfil de rede) no navegador só do perfil, que sai pela
+    /// `rede` do cliente ([`crate::navegador`]). Volta na hora; a mensagem diz o que faltou. Os
+    /// testes só anotam.
+    fn abrir_link_pela_rede(&self, _url: &str, _rede: RedeResolvida) -> Result<(), String> {
+        Err(t!("navegador-nenhum"))
+    }
+
     /// Roda `comando` no servidor da conexão sem aba, com o X11 ligado (o virt-manager e os
     /// programas gráficos). Volta na hora; o [`Lancamento`] mostra em que pé está.
     fn lancar(&self, _conexao: &Connection, _senhas: Senhas, _comando: &str) -> Lancamento {
@@ -1191,6 +1198,8 @@ pub struct RealOpener {
     /// Se o virt-manager está no `PATH`, e quando isso foi visto: o menu de cada conexão pergunta
     /// a cada quadro, e procurar no `PATH` toda vez custa uma ida ao disco por pasta.
     virt_manager: Cell<Option<(Instant, bool)>>,
+    /// Os proxies locais dos links com perfil de rede, um por perfil.
+    proxies: crate::navegador::Proxies,
 }
 
 impl RealOpener {
@@ -1204,6 +1213,7 @@ impl RealOpener {
             config: RefCell::default(),
             pasta: RefCell::default(),
             virt_manager: Cell::new(None),
+            proxies: crate::navegador::Proxies::default(),
         }
     }
 }
@@ -1237,8 +1247,9 @@ impl Opener for RealOpener {
                 Session::new(processo.spawn())
             }
             Kind::Telnet => Session::new(telnet(conexao, &senhas)),
-            // O FTP não abre terminal: a tela leva a conexão à página Arquivos.
-            Kind::Ftp | Kind::S3 | Kind::Rclone => Session::new(Loopback::new()),
+            // O FTP não abre terminal: a tela leva a conexão à página Arquivos. O link abre no
+            // navegador, sem aba.
+            Kind::Ftp | Kind::S3 | Kind::Rclone | Kind::Link => Session::new(Loopback::new()),
         };
         configura(
             sessao,
@@ -1256,6 +1267,13 @@ impl Opener for RealOpener {
 
     fn duplicar_rodando(&self, origem: Session, comando: Option<&str>) -> Option<Session> {
         origem.duplicate_running(comando)
+    }
+
+    fn abrir_link_pela_rede(&self, url: &str, rede: RedeResolvida) -> Result<(), String> {
+        let navegador = self.config.borrow().redes.navegador.clone();
+        let perfil = rede.perfil.id;
+        let pasta = self.pasta.borrow().clone();
+        crate::navegador::abrir(&self.proxies, &pasta, &navegador, perfil, rede, url)
     }
 
     fn definir_agente(&self, caminho: Option<PathBuf>) {
@@ -1892,6 +1910,8 @@ pub struct FakeOpener {
     pub locais: Rc<RefCell<Vec<Connection>>>,
     /// Os links que o terminal mandou abrir neste computador, na ordem das chamadas (M49).
     pub links: Rc<RefCell<Vec<DestinoDoLink>>>,
+    /// Os links abertos pela rede de um perfil: o endereço e o perfil, na ordem das chamadas.
+    pub links_pela_rede: Rc<RefCell<Vec<(String, RedeResolvida)>>>,
     /// A fonte do painel de portas (M58): as sessões novas leem dela (as cópias dividem as
     /// respostas). Sem ela, o painel fala com os canais da sessão, que no abridor falso não têm
     /// SSH.
@@ -2000,6 +2020,7 @@ impl Default for FakeOpener {
             distros_wsl: Arc::default(),
             externos: Rc::default(),
             links: Rc::default(),
+            links_pela_rede: Rc::default(),
             fonte_de_portas: Rc::default(),
             destinos_fechados: Arc::default(),
             link_falha: Rc::default(),
@@ -2092,6 +2113,16 @@ impl Opener for FakeOpener {
         self.links.borrow_mut().push(destino.clone());
         if self.link_falha.get() {
             return Err(std::io::Error::other("sem navegador"));
+        }
+        Ok(())
+    }
+
+    fn abrir_link_pela_rede(&self, url: &str, rede: RedeResolvida) -> Result<(), String> {
+        self.links_pela_rede
+            .borrow_mut()
+            .push((url.to_owned(), rede));
+        if self.link_falha.get() {
+            return Err("sem navegador".to_owned());
         }
         Ok(())
     }
@@ -2720,6 +2751,7 @@ mod tests {
             openvpn_erro: None,
             motor: None,
             motor_erro: None,
+            emprestimo: None,
         }
     }
 

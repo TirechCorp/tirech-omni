@@ -452,7 +452,9 @@ pub fn pagina_configuracoes(ctx: Contexto) -> impl View {
     let busca = ctx.busca;
     let portatil = ctx.origem_da_pasta == OrigemDaPasta::Portatil;
     let achados = memo(move || {
-        catalogo::buscar_em(&busca.get(), portatil)
+        let busca = busca.get();
+        config
+            .with(|c| catalogo::buscar_em(&busca, portatil, c))
             .iter()
             .map(|d| d.chave)
             .collect::<Vec<_>>()
@@ -461,6 +463,7 @@ pub fn pagina_configuracoes(ctx: Contexto) -> impl View {
         let termos = catalogo::termos(&busca.get());
         atalhos::CATALOGO
             .iter()
+            .filter(|a| config.with(|c| a.ligada(c)))
             .filter(|a| {
                 let palavras = [Idioma::PtBr, Idioma::EnUs, Idioma::EsEs]
                     .map(|i| i18n::texto_em(i, tk!("config-atalhos-palavras"), None))
@@ -582,12 +585,13 @@ fn expandir_tudo(p: &Pagina) -> Button {
 
 /// O campo de busca da página: filtra os cards e sugere os títulos.
 fn campo_de_busca(p: &Pagina) -> AutoSuggestBox {
-    AutoSuggestBox::bind(p.busca, |procurado: &str| {
+    let config = p.config;
+    AutoSuggestBox::bind(p.busca, move |procurado: &str| {
         if procurado.trim().is_empty() {
             return Vec::new();
         }
         let mut titulos: Vec<String> = Vec::new();
-        for d in catalogo::buscar(procurado) {
+        for d in config.with_untracked(|c| catalogo::buscar(procurado, c)) {
             if titulos.len() >= 8 {
                 break;
             }
@@ -801,6 +805,7 @@ fn secao_geral(p: &Pagina) -> Expander {
                     ),
             )
             .child(p.interruptor("geral.atalho_no_menu", campo!(p, geral.atalho_no_menu)))
+            .child(p.interruptor("geral.medidor_cpu", campo!(p, geral.medidor_cpu)))
             .child(p.numero(
                 "geral.recentes_max",
                 numero_de!(p, RECENTES_MIN, RECENTES_MAX, geral.recentes_max),
@@ -810,6 +815,8 @@ fn secao_geral(p: &Pagina) -> Expander {
             .child(p.acao("acao.limpar_recentes", Symbol::Delete, move || {
                 limpar.update(Recentes::limpar)
             }))
+            .child(p.interruptor("geral.assistente_ia", campo!(p, geral.assistente_ia)))
+            .child(p.interruptor("geral.mcp", campo!(p, geral.mcp)))
             .child(cartao_instalacao(p))
             .child(cartao_pasta(p))
             .child(p.acao("acao.sobre", Symbol::Info, move || {
@@ -1178,6 +1185,7 @@ fn secao_conexoes(p: &Pagina) -> Expander {
         "conexoes.reconectar.modo",
         "conexoes.reconectar.tentativas",
         "conexoes.reconectar.espera_secs",
+        "conexoes.reconectar.retentar_mins",
     ];
     let (importar_ssh, importar_aws) = (
         Rc::clone(&p.ctx.importar_ssh_config),
@@ -1239,6 +1247,12 @@ fn secao_conexoes(p: &Pagina) -> Expander {
                         numero_de!(p, 1, 300, conexoes.reconectar.espera_secs),
                         1.0,
                         300.0,
+                    ))
+                    .item(p.numero(
+                        "conexoes.reconectar.retentar_mins",
+                        numero_de!(p, 0, 1440, conexoes.reconectar.retentar_mins),
+                        0.0,
+                        1440.0,
                     )),
             )
             .child(p.escolha(
@@ -1828,7 +1842,13 @@ fn secao_redes(p: &Pagina) -> Expander {
                 1.0,
                 600.0,
             ))
-            .child(p.interruptor("redes.descer_ao_fechar", campo!(p, redes.descer_ao_fechar))),
+            .child(p.interruptor("redes.descer_ao_fechar", campo!(p, redes.descer_ao_fechar)))
+            .child(p.caminho(
+                "redes.navegador",
+                campo!(p, redes.navegador),
+                tk!("config-dica-navegador"),
+                Escolher::Arquivo,
+            )),
     )
 }
 

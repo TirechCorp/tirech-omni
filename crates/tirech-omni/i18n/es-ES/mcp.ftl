@@ -28,11 +28,11 @@ mcp-ponte-falta-valor = El argumento { $argumento } necesita un valor.
 mcp-ponte-ferramenta-desconhecida = La herramienta { $nome } no existe.
 mcp-ponte-argumentos-tortos = Los argumentos deben ser un objeto JSON.
 mcp-ponte-uso =
-    Uso: tirech-omni mcp [--espaco <nombre>] [--nome <texto>] [--aba <clave>] [--lancamento <código>] [--canal <dirección>] [--cluster]
+    Uso: tirech-omni mcp [--espaco <nombre>] [--nome <texto>] [--aba <clave>] [--lancamento <código>] [--canal <dirección>] [--instrucoes <texto>] [--cluster]
          tirech-omni mcp --avisos <código>
          tirech-omni mcp --conversa <archivo> [-- <comando>…] <json>
 
-    Servidor MCP para asistentes de código (Claude Code, Codex). Reenvía las solicitudes al
+    Servidor MCP para asistentes de código (Claude Code, Codex, OpenCode). Reenvía las solicitudes al
     Tirech Omni abierto; no abre la aplicación por sí solo.
 
       --espaco <nombre>  vincula este puente a un espacio de trabajo creado en Configuración
@@ -41,6 +41,7 @@ mcp-ponte-uso =
       --cluster         el asistente controla un clúster: la aplicación le da las pestañas de los equipos elegidos
       --lancamento <código>  el código del "Controlar con" que abrió el asistente
       --canal <dirección>  el socket (o la canalización) de la aplicación, cuando el asistente no pasa el entorno al puente
+      --instrucoes <texto>  el texto que abre las instrucciones del initialize (el "Controlar con" de Codex y de OpenCode)
       --avisos <código>  escribe los avisos pendientes de la sesión de ese código (el hook de Claude Code) y sale
       --conversa <archivo>  guarda en el archivo el id de la conversación (el notify de Codex), ejecuta el comando después de -- y sale
       --help            muestra este texto
@@ -318,6 +319,9 @@ mcp-como-assim-ele-nao-mexe = Así no lee ni edita archivos de tu equipo, solo l
 mcp-como-codex-toml = O, en el archivo ~/.codex/config.toml:
 mcp-como-codex-so-servidor = Para que trabaje solo en el servidor (en ~/.codex/config.toml):
 mcp-como-codex-aviso = Codex todavía puede editar archivos locales por su cuenta.
+mcp-como-opencode = OpenCode
+mcp-como-opencode-json = En el archivo opencode.json del proyecto, o en ~/.config/opencode/opencode.json para todas tus carpetas:
+mcp-como-opencode-prazo = El timeout, en milisegundos, deja que ejecutar espere comandos largos: sin él, OpenCode abandona la herramienta tras un plazo corto.
 mcp-como-pasta-do-servidor = En una carpeta del servidor
 mcp-como-pasta-do-servidor-texto = Elige un espacio de trabajo para que los comandos lleven su nombre. Sin espacio, el asistente usa las conexiones abiertas.
 mcp-como-app-aberto = Tirech Omni debe estar abierto y con el control activado. El puente no abre la aplicación por sí solo.

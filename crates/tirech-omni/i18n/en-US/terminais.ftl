@@ -336,6 +336,22 @@ tmux-fechar-manter = Keep on the server
 tmux-fechar-lembrar = Remember my choice (change it in Settings › Connections)
 tmux-fechar-texto-varias = { $n } tabs were running in persistent sessions ({ $lista }), which are still alive on the server. Ending the sessions closes the programs running in them; keeping them leaves the sessions for next time.
 
+mouse-linha = Mouse in the terminal
+mouse-linha-descricao = Copy and paste: selecting copies and the right button copies (with a selection) or pastes (without); Ctrl+right-click opens the menu. Menu: the right button opens the menu and selecting doesn't copy. Inherit follows the folder and, with no folder choosing, Settings › Terminal.
+mouse-linha-descricao-pasta = The mouse in the terminal for the connections in this folder that didn't choose something else.
+mouse-copiar-colar = Copy and paste
+mouse-menu = Menu
+mouse-herdar-de = Inherit ({ $nome })
+mouse-herdar-configuracoes = Inherit (Settings)
+retentar-linha = Retry after
+retentar-linha-descricao = When the connection reconnects automatically and the attempts run out, waits this long and starts another round, until the connection is back. Off: stops after the attempts. Applies with Settings › Connections › When the connection drops set to Reconnect automatically, and to an assistant's tab. Inherit follows the folder and, with no folder choosing, Settings.
+retentar-linha-descricao-pasta = For the connections in this folder that didn't choose something else: how long to wait, after the automatic reconnect attempts, before starting another round.
+retentar-desligado = Off
+retentar-minutos = { $n } min
+retentar-horas = { $n } h
+retentar-herdar-de = Inherit ({ $nome })
+retentar-herdar-configuracoes = Inherit (Settings)
+
 ## Persistent sessions open on the server
 
 sessoes-menu = Sessions on the server…
@@ -357,3 +373,8 @@ sessoes-nome-invalido = The name has characters the app does not open
 sessoes-abrir = Open in a tab
 sessoes-ir-para-a-aba = Go to the tab
 sessoes-encerrar = End
+links-sem-endereco = The link "{ $nome }" has no http or https address.
+links-menu = Links…
+links-titulo = Links
+links-explicacao = The links in the tree. With a network profile, a link opens in a browser just for the profile, going out through the client's network; without a profile, in the default browser.
+links-nenhum-link = No links in the tree. Create a connection of type Link.

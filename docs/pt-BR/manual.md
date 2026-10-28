@@ -45,6 +45,8 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   numa conexão abre a aba na última janela em que a pessoa mexeu. Arrastar uma aba para outra janela (ou para fora de todas, que
   abre uma janela nova) e o menu da aba "Mover para a janela" levam a **mesma sessão**: nada
   reconecta e o histórico continua. O menu Janela lista as janelas abertas e dá o foco.
+  Com mais de uma janela, a principal se marca: o título vira "Tirech Omni — Janela principal",
+  a barra de título mostra "Janela principal" e os menus a chamam de "Janela 1 (principal)".
 - **Estado das conexões na árvore**: um selo no canto do ícone mostra o estado de cada conexão
   com sessão aberta: verde cheio (conectada), anel âmbar (conectando), vermelho com "!" (caiu) e
   anel cinza (encerrada, com a aba ainda aberta); sem sessão, sem selo. Com várias sessões vale a
@@ -158,6 +160,32 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   sem pergunta, e a aba daqui que estava nela deixa de perguntar ao fechar. A lista roda pela
   conexão de uma aba aberta da conexão, se há uma, e senão por uma conexão nova com a senha do
   cofre.
+- **Mouse no terminal (copiar e colar ou menu)**: a linha **Mouse no terminal** das
+  propriedades de uma conexão SSH, shell local ou Telnet (e de uma pasta, que passa a escolha às
+  de dentro; "Herdar" diz de qual pasta vem) escolhe **Copiar e colar**: selecionar copia e o
+  botão direito copia (com seleção) ou cola (sem), e o Ctrl+clique direito abre o menu; ou
+  **Menu**: o botão direito abre o menu e selecionar não copia. Sem escolha na conexão nem nas pastas de cima,
+  valem as linhas Copiar ao selecionar e Botão direito de Configurações › Terminal. A aba aberta
+  muda junto quando a conexão ou a pasta mudam.
+- **Desempenho (CPU, memória e o peso de cada terminal)**: na barra de título, ao lado do botão
+  do tema, um medidor de quadradinhos, do amarelo-claro ao vermelho-escuro, mostra quanto da CPU
+  do computador o app inteiro usa agora (a dica diz o número). O interruptor **Medidor de CPU na
+  barra de título**, em Configurações › Geral, o esconde. O clique nele, ou Exibir ▸
+  **Desempenho**, abre a página Desempenho, como a do Gerenciador de Tarefas: à esquerda CPU,
+  Memória e Rede com a miniatura de cada uma; à direita o gráfico do último minuto do escolhido,
+  com a utilização, a memória, as abas abertas e o tempo aberto embaixo; e a tabela **Por
+  terminal**, uma linha por aba de todas as janelas, com a conexão, a CPU que o app gasta com ela
+  (desenhar o terminal mais as threads da conexão), os dados por segundo, a CPU do programa que
+  roda num shell local e o histórico, com as células pintadas conforme o peso. A linha
+  **Interface** é o resto do app. A tabela ordena por qualquer coluna, e o clique duplo numa
+  linha vai para a aba. Com o medidor desligado e a página fechada, nada é medido.
+- **Tentar de novo após (reconexão que não desiste)**: quando a aba reconecta sozinha (Configurações
+  › Conexões › Ao cair a conexão em **Reconectar sozinho**, e sempre na aba de um assistente)
+  e as tentativas acabam, ela espera e começa outra rodada, até a conexão voltar; a aba avisa
+  "Tento de novo em 5 min". O tempo vem de **Tentar de novo após (minutos)**, em Configurações ›
+  Conexões (5 por padrão; 0 desliga), e a linha **Tentar de novo após** das propriedades de uma
+  conexão SSH ou Telnet, ou de uma pasta, escolhe outro: Herdar, **Desligado**, 1, 2, 5, 10, 15
+  ou 30 min, ou 1 h. "Herdar" diz de qual pasta vem.
 - **Importar e exportar**: Arquivo ▸ **Importar ▸** traz as conexões do WinSSHTerm, do FileZilla, do
   WinSCP, do PuTTY/KiTTY, do mRemoteNG, do MobaXterm e do JSON do próprio app; **Exportar ▸** leva
   para esses mesmos programas e para o `~/.ssh/config` (seção "Importar e exportar", abaixo). O
@@ -385,12 +413,19 @@ quando o tipo da conexão tem Credencial (numa pasta, sempre).
 Sem item do cofre, a linha "Credencial" de uma conexão SSH ou SFTP escolhe quando a senha é
 pedida (o item do cofre, quando há, vence):
 
-- **Perguntar ao conectar** (o padrão): o diálogo da senha vem antes de conectar.
+- **Herdar** (o padrão): vale o modo da pasta mais próxima que escolheu um ("Herdar (Cliente)"
+  diz qual); sem nenhuma, é o "Perguntar ao conectar".
+- **Perguntar ao conectar:** o diálogo da senha vem antes de conectar.
 - **Agente SSH:** nunca pergunta. Entra pelo agente e pelas chaves; se o servidor recusar, o
   erro fica na aba, sem diálogo.
 - **Agente SSH, senão a senha:** conecta direto pelo agente e pelas chaves; se o servidor
   recusar, o diálogo da senha abre ("O servidor não aceitou o agente SSH nem as chaves.") e a
   conexão é refeita com a senha digitada.
+
+A pasta tem a mesma linha "Credencial" nas propriedades dela, ao lado de Rede, Assistentes
+(MCP), Sessão persistente e Comandos: escolher **Agente SSH** numa pasta faz todas as conexões
+SSH e SFTP de dentro (e das subpastas) que deixaram "Herdar" entrarem pelo agente, sem pedir a
+senha. Uma conexão que escolheu outro modo, ou que aponta para um item do cofre, segue a dela.
 
 O salto (jump server) não tem esses modos: a senha dele nunca é pedida antes de conectar. Ele
 tenta o agente e as chaves (e o item do cofre, se houver), e uma recusa só abre o diálogo da
@@ -638,7 +673,8 @@ Pageant e as sessões continuam), **Fechar** ou Cancelar, com "Não perguntar de
 fica em Configurações ▸ Geral ▸ "Ao fechar a janela". O ícone da bandeja tem "Abrir o Tirech
 SSH", "Travar o cofre", "Agente" (ligar e desligar, com o número de chaves) e "Sair" (que não
 pergunta). Um pedido de confirmação do agente traz a janela de volta e a esconde depois. No
-GNOME é preciso a extensão AppIndicator; sem bandeja no sistema não há ícone, fechar encerra o
+GNOME é preciso a extensão AppIndicator (no Cinnamon e no MATE o ícone vai como um PNG em
+`$XDG_RUNTIME_DIR/tomni-ui/`, que é o que o painel deles lê); sem bandeja no sistema não há ícone, fechar encerra o
 app e ele avisa uma vez. "Iniciar com o sistema, minimizado na bandeja" abre o app escondido no
 login (`~/.config/autostart/tirech-omni.desktop` no Linux, um LaunchAgent no macOS, a chave `Run`
 no Windows; o argumento é `--bandeja`).
@@ -1108,11 +1144,26 @@ variável `TIRECH_OMNI_CONFIG` apontar:
 - `trava.lock`: a trava da primeira cópia aberta com a pasta, a dona da configuração. No modo
   portable, ela impede a segunda cópia. Fora dele, a segunda abre **só de leitura**, como no
   WinSSHTerm: uma barra no topo avisa, e nada da pasta de dados nem do cofre é gravado por ela
-  (conexões, estado, cofre, configurações, espaços, anexos, recentes, a cópia do dia, a limpeza
-  dos arquivos do "Controlar com"); o que se muda nela fica na memória e se perde ao fechar. O
-  que a dona grava aparece sozinho na segunda (as conexões e o cofre são relidos). Quando a dona
+  (estado, espaços, anexos, recentes, a cópia do dia, a limpeza dos arquivos do "Controlar
+  com"). O que se muda nela nas conexões, nas configurações, nos provedores de IA e no cofre vai
+  para a dona pelo canal entre as cópias (`instancias.sock`, abaixo), que grava; o resto fica na
+  memória e se perde ao fechar. O que a dona grava aparece sozinho na segunda. Quando a dona
   fecha, a barra diz que dá para gravar depois de reiniciar, e o botão Reiniciar da barra abre
   esta cópia de novo, agora como dona. A ponte `tirech-omni mcp` também não grava nada da pasta.
+- `instancias.sock` (Unix): o canal entre as cópias do app na mesma pasta, sempre no ar na
+  dona (independe do MCP). No Linux fica em `$XDG_RUNTIME_DIR/tirech-omni/instancias-<resumo
+  da pasta>.sock`; no macOS, sem essa variável, com `TIRECH_OMNI_CONFIG`, no modo portable ou
+  com a pasta de dados mudada, na própria pasta. No Windows é o pipe
+  `\\.\pipe\tirech-omni-instancias-<usuário>-<resumo>`. A cópia só de leitura manda por ele o
+  `connections.json`, o `configuracoes.json`, o `ia.json` e o `vault.json` (já cifrado) inteiros
+  e o resumo SHA-256 do que leu; a dona confere (o tipo do arquivo, a mesma pasta, o JSON; no
+  cofre, a mesma senha mestra ou chave), grava só se o arquivo ainda é o lido e relê. Se mudou, a
+  secundária junta a mudança dela com a do disco (pela base, o que ela leu por último; nos dois
+  lados o mesmo campo vira conflito, com aviso, e fica o do disco) e manda de novo, até cinco
+  vezes. Dois itens novos com o mesmo id: o da secundária ganha outro. Pelo mesmo canal, a
+  secundária pede a VPN embutida de um perfil: a dona liga o motor (ou usa o que está ligado) e
+  responde com a ponte SOCKS5 dele (`127.0.0.1`, porta e credencial dela), os avisos de subida e
+  "pronta"; a ligação fica aberta enquanto a secundária usa a rede, e a dona conta esse uso.
 - `agente.json`: se o agente embutido liga com o app, o tempo de vida padrão e as chaves de
   arquivo que ele carrega ao iniciar (só o caminho do arquivo, a confirmação e a vida; nunca a
   passphrase). As chaves do cofre não entram aqui: ficam no próprio `vault.json`. O socket do
@@ -1120,11 +1171,20 @@ variável `TIRECH_OMNI_CONFIG` apontar:
   `~/.ssh`) quando o app usa a pasta de configuração padrão; com `TIRECH_OMNI_CONFIG`, fica na
   pasta.
 - `redes/<id>/trava.lock`: a trava de um perfil de rede embutida (OpenVPN, WireGuard, Tailscale,
-  Nebula e ZeroTier) enquanto o motor dele está ligado. Duas cópias do app abertas não ligam a
-  mesma rede juntas (com a mesma identidade, uma derrubaria a outra no servidor): a segunda avisa
-  que ela já está ligada na outra.
+  Nebula e ZeroTier) enquanto o motor dele está ligado, até ele parar de fato (um motor que as
+  abas ainda seguram fica com a trava). Duas cópias do app abertas não ligam a mesma rede juntas
+  (com a mesma identidade, uma derrubaria a outra no servidor): a cópia só de leitura pede a rede
+  à dona pelo `instancias.sock` e sai pela ponte do motor dela, que fica ligado enquanto a
+  secundária usa. Sem a dona no ar, a secundária liga o motor ela mesma; se uma dona aberta
+  depois achar a trava presa por ela, avisa que a rede já está ligada na outra cópia.
 - `redes/<id>/known_hosts`: as chaves de servidor de cada perfil de rede (o mesmo IP tem chave
   diferente em cada rede). Os perfis em si ficam no `connections.json`.
+- `navegador/<id>/`: o perfil do navegador separado de cada perfil de rede (a pasta que o
+  Chromium recebe em `--user-data-dir` ou o Firefox em `--profile`, com o `user.js` do proxy):
+  histórico, cookies e logins das páginas do cliente ficam aqui, longe do navegador de sempre.
+  Apagar só faz o próximo link começar num navegador limpo.
+- `navegador/portas.json`: a porta do proxy local de cada perfil de rede, para o navegador
+  achar o proxy na mesma porta depois de reiniciar o app.
 - `ia.json`: os provedores de IA (nome, URL, dialeto, modelo, rede, TLS e cabeçalhos) e o
   provedor padrão. **A chave da API não entra aqui**: fica num item do cofre ("Chave de API — …")
   e o perfil guarda só o id dele. Corrompido, vai para `ia.json.bak` e o app avisa.
@@ -1171,6 +1231,12 @@ variável `TIRECH_OMNI_CONFIG` apontar:
 - `desenho.txt`: a guarda da abertura (`<degrau> ok` ou `<degrau> abrindo`). Se o app caiu antes
   de mostrar a janela, a próxima abertura desenha de um jeito mais simples (o quadro na CPU; no
   Windows, também o DirectX 12 e o OpenGL). Apagar o arquivo volta ao desenho normal.
+- `travamentos.log`: quando a interface fica parada mais de 2 s, em que etapa ela estava (um
+  evento, o quadro, o layout, os terminais, a textura ou a apresentação da janela), o estado da
+  thread da interface, a carga, a memória e o swap e as threads do app que mais gastaram CPU;
+  repete a cada 10 s e diz quanto durou. A cada minuto em que a interface usou mais de 30% de
+  uma CPU, ou uma etapa passou de meio segundo, o tempo por etapa. Também o aviso da janela que
+  pinta sem parar. Recomeça acima de 1 MiB. O estado do sistema só aparece no Linux.
 - `vault-orphans.json`: na pasta de dados, os arquivos de `vault/` sem ficha e a hora em que a
   coleta os viu pela primeira vez (a margem de 24 horas dá tempo de a sincronização trazer a
   ficha de outra máquina).
@@ -1213,6 +1279,10 @@ máquinas" nos túneis novos), Janelas e espaços e Atalhos. Cada mudança vale 
   nascem **desligadas**. Proteger as senhas é uma escolha de quem usa o app, e o app continua
   salvando senhas. O bloqueio automático só vale com senha mestra e conta
   desde o último uso de uma senha.
+- **Desligar a IA ou o MCP**: em Geral, "Assistentes de IA" e "Controle por assistentes (MCP)"
+  nascem ligados. Desligado, some tudo da área: seções, menus, linhas das Propriedades, o botão,
+  o painel do chat e os atalhos (e, no MCP, o servidor). O que estava configurado fica guardado
+  e volta ao ligar de novo.
 
 O que a página ainda não faz: sincronizar entre máquinas, vigiar o arquivo por
 mudanças feitas fora do app (reinicie depois de editar o JSON à mão), escolher a família da fonte,
@@ -1378,6 +1448,31 @@ descer roda quando a última aba do perfil fecha e quando o app fecha. Cada perf
 O app **não** sobe a VPN por conta própria nem gerencia contêineres: as receitas (WireGuard,
 OpenVPN, OpenConnect, openfortivpn, `ip netns`, VM) e uma demonstração local sem VPN estão em
 [`redes/LEIAME.md`](../../crates/tirech-omni/redes/LEIAME.md).
+
+### Links pela rede do cliente
+
+Uma conexão do tipo **Link** guarda um endereço (`https://intranet.cliente/`; sem `http://`, o
+app põe) e fica na árvore com um globo, como as outras. O duplo clique (ou a busca, o Início e
+os recentes) abre o link sem criar aba:
+
+- **Sem perfil de rede** (Direta, ou nenhuma pasta com rede): no navegador padrão do sistema.
+- **Com perfil de rede** (herdado da pasta, como nas outras conexões): num navegador separado
+  daquele perfil, que sai pela rede do cliente. O app sobe um proxy HTTP só em `127.0.0.1`,
+  um por perfil, que leva cada pedido pelo proxy do perfil ou pela VPN embutida (OpenVPN,
+  WireGuard, Tailscale, Nebula, ZeroTier), ligando-a se for preciso. O navegador abre com um
+  perfil próprio (`navegador/<id>/`), então os cookies e logins de um cliente não se misturam
+  com os de outro nem com os do navegador de sempre, e o resto da máquina não passa pela rede
+  do cliente.
+
+O navegador vem de Configurações › Redes › **Navegador dos links**: vazio procura o Chrome, o
+Chromium, o Brave, o Edge, o Vivaldi e o Firefox, nessa ordem; um nome do `PATH` ou um caminho
+escolhe um. Os da família do Chromium recebem o proxy por `--proxy-server`; o Firefox (e o
+LibreWolf, o Waterfox, o Floorp, o Zen) por um `user.js` no perfil, com o DNS também pelo
+proxy. **Links…** no menu Ferramentas lista todos os links da árvore, com filtro, endereço e
+rede, para abrir sem procurar.
+
+Ainda não vale para um perfil só com salto SSH (sem proxy nem VPN embutida): o link avisa que o
+perfil não tem proxy.
 
 ### Rede Nebula embutida
 

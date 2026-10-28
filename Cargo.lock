@@ -5664,6 +5664,7 @@ dependencies = [
  "arboard",
  "jiff",
  "ksni",
+ "png",
  "pollster",
  "rfd",
  "tomni-ui-core",

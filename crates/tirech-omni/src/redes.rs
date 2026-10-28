@@ -7,14 +7,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
 use tomni_ui::terminal::Proxy;
 
+use crate::instancias::Emprestimo;
 use crate::modelo::{Jump, Node, Tree};
 use crate::nebula::MotorNebula;
 use crate::openvpn::MotorOpenVpn;
@@ -503,6 +504,9 @@ pub struct RedeResolvida {
     pub motor: Option<MotorRede>,
     /// Por que o motor WireGuard, Tailscale ou ZeroTier não subiu, com as mesmas regras do `nebula_erro`.
     pub motor_erro: Option<String>,
+    /// Numa cópia secundária do app, a VPN embutida que a principal empresta
+    /// ([`crate::instancias::redes`]): o `perfil.proxy` é a ponte do motor dela.
+    pub emprestimo: Option<Arc<Emprestimo>>,
 }
 
 // O `Debug` não mostra as senhas.
@@ -520,11 +524,31 @@ impl std::fmt::Debug for RedeResolvida {
             .field("openvpn_erro", &self.openvpn_erro)
             .field("motor", &self.motor)
             .field("motor_erro", &self.motor_erro)
+            .field("emprestimo", &self.emprestimo)
             .finish()
     }
 }
 
 impl RedeResolvida {
+    /// A rede só do perfil, sem nada do cofre e sem motor: a dos perfis que saem por um proxy
+    /// sem senha, e a dos testes.
+    pub fn sem_segredos(perfil: PerfilRede) -> Self {
+        Self {
+            perfil,
+            proxy_usuario: None,
+            proxy_senha: None,
+            salto_senha: None,
+            known_hosts: None,
+            nebula: None,
+            nebula_erro: None,
+            openvpn: None,
+            openvpn_erro: None,
+            motor: None,
+            motor_erro: None,
+            emprestimo: None,
+        }
+    }
+
     /// O proxy do perfil, com o usuário e a senha. `None` se o perfil não tem proxy.
     pub fn proxy(&self) -> Option<Proxy> {
         let p = self.perfil.proxy.as_ref()?;
@@ -569,13 +593,11 @@ impl RedeResolvida {
     ///
     /// A mensagem, em português, de por que a rede não ficou pronta.
     pub fn preparar(&self, aviso: &mut dyn FnMut(&str)) -> Result<(), String> {
-        if let Some(erro) = self
-            .nebula_erro
-            .as_ref()
-            .or(self.openvpn_erro.as_ref())
-            .or(self.motor_erro.as_ref())
-        {
-            return Err(erro.clone());
+        if let Some(erro) = self.erro_do_motor() {
+            return Err(erro.to_owned());
+        }
+        if let Some(emprestimo) = &self.emprestimo {
+            return emprestimo.esperar(aviso);
         }
         if let Some(motor) = &self.nebula {
             return motor.esperar(&self.perfil, aviso);
@@ -587,6 +609,14 @@ impl RedeResolvida {
             return motor.esperar(&self.perfil, aviso);
         }
         preparar(&self.perfil, aviso)
+    }
+
+    /// Por que a VPN embutida do perfil não subiu; `None` se subiu ou se o perfil não tem uma.
+    pub fn erro_do_motor(&self) -> Option<&str> {
+        self.nebula_erro
+            .as_deref()
+            .or(self.openvpn_erro.as_deref())
+            .or(self.motor_erro.as_deref())
     }
 
     /// O gancho do `before_connect`: [`RedeResolvida::preparar`] a rede.
@@ -624,7 +654,8 @@ pub fn known_hosts_do_perfil(pasta: &Path, perfil: u64) -> PathBuf {
 /// A trava que deixa um perfil de rede embutida (OpenVPN, WireGuard, Tailscale, Nebula ou
 /// ZeroTier) ligado em uma só cópia do app por vez: duas cópias com a mesma identidade derrubam
 /// uma à outra no servidor. É o `redes/<id>/trava.lock` da pasta de configuração, pego quando o
-/// motor liga e solto quando ele para (ou quando o app fecha ou cai).
+/// motor liga e solto quando ele para de fato (ou quando o app fecha ou cai): fica com o motor
+/// ([`TravaDoMotor`]), e não com a lista de ligados.
 #[derive(Default)]
 pub struct TravasDeRede {
     pasta: Mutex<Option<PathBuf>>,
@@ -659,6 +690,128 @@ impl TravasDeRede {
             Err(_) => Ok(None),
         }
     }
+}
+
+/// A trava de um perfil ([`TravasDeRede`]) enquanto o motor roda de verdade. Vai dentro do
+/// `on_state` do motor, que a solta quando ele para ou falha de vez, e com quem pede para ele
+/// parar (o `parar` dos motores), que a solta na hora para o perfil poder religar. Não morre com
+/// a lista de motores ligados: um motor que saiu dela pode seguir vivo pelas conexões abertas
+/// por ele ([`Orfaos`]), e enquanto ele fala com o servidor nenhuma outra cópia do app pode
+/// ligar o mesmo perfil.
+pub struct TravaDoMotor(Mutex<Option<std::fs::File>>);
+
+impl TravaDoMotor {
+    /// Guarda a trava pega pelo [`TravasDeRede::travar`].
+    pub fn new(arquivo: Option<std::fs::File>) -> Arc<Self> {
+        Arc::new(Self(Mutex::new(arquivo)))
+    }
+
+    /// Solta a trava (o motor parou ou vai parar).
+    pub fn soltar(&self) {
+        sem_veneno(&self.0).take();
+    }
+}
+
+/// Um motor de rede embutida visto pelos [`Orfaos`].
+pub trait MotorDeRede {
+    /// Pede para parar, sem esperar e sem precisar ser o único dono.
+    fn fechar(&self);
+    /// Se já parou ou falhou de vez: um órfão assim não é reaproveitado.
+    fn acabou(&self) -> bool;
+}
+
+/// Um motor que saiu da lista de ligados, com o que o app guarda dele.
+pub struct Orfao<M> {
+    /// O motor.
+    pub motor: Arc<M>,
+    /// O que o fez subir (o config e a identidade).
+    pub assinatura: u64,
+    /// Se os estados dele valem para a tela: volta a verdadeiro quando ele é reaproveitado.
+    pub vivo: Arc<AtomicBool>,
+    /// A trava do perfil entre as cópias do app.
+    pub trava: Arc<TravaDoMotor>,
+}
+
+/// Os motores que saíram da lista de ligados (o perfil ficou sem uso, ou mudou) enquanto
+/// conexões abertas por eles ainda seguravam o `Arc`. O motor segue rodando até a última largar.
+/// Sem esta lista, o próximo `garantir` do perfil subia um segundo motor com a mesma identidade,
+/// e os dois derrubavam um ao outro no servidor: num OpenVPN que não aceita duas conexões do
+/// mesmo usuário, o túnel ficava de pé uns 2 minutos e caía outros 2 (até o `ping-restart`).
+/// Com ela, o `garantir` reaproveita o órfão de mesma assinatura e fecha o de outra antes de
+/// ligar o novo.
+pub struct Orfaos<M> {
+    motores: Mutex<HashMap<u64, Guardado<M>>>,
+}
+
+struct Guardado<M> {
+    motor: Weak<M>,
+    assinatura: u64,
+    vivo: Arc<AtomicBool>,
+    trava: Arc<TravaDoMotor>,
+}
+
+impl<M> Default for Orfaos<M> {
+    fn default() -> Self {
+        Self {
+            motores: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl<M: MotorDeRede> Orfaos<M> {
+    /// Guarda o motor que saiu da lista de ligados. Se o perfil já tinha um órfão, o velho fecha:
+    /// só um motor por perfil.
+    pub fn guardar(&self, perfil: u64, orfao: Orfao<M>) {
+        let guardado = Guardado {
+            motor: Arc::downgrade(&orfao.motor),
+            assinatura: orfao.assinatura,
+            vivo: orfao.vivo,
+            trava: orfao.trava,
+        };
+        let velho = sem_veneno(&self.motores).insert(perfil, guardado);
+        if let Some(velho) = velho
+            && !Weak::ptr_eq(&velho.motor, &Arc::downgrade(&orfao.motor))
+        {
+            fechar_guardado(velho);
+        }
+    }
+
+    /// O órfão do perfil, se ainda roda com esta `assinatura`, com o `vivo` dele de novo
+    /// verdadeiro: o motor volta a ser o do perfil. Um órfão de outra assinatura fecha e solta a
+    /// trava, para o motor novo pegar.
+    pub fn retomar(&self, perfil: u64, assinatura: u64) -> Option<Orfao<M>> {
+        let guardado = sem_veneno(&self.motores).remove(&perfil)?;
+        match guardado.motor.upgrade() {
+            Some(motor) if guardado.assinatura == assinatura && !motor.acabou() => {
+                guardado.vivo.store(true, Ordering::Relaxed);
+                Some(Orfao {
+                    motor,
+                    assinatura,
+                    vivo: guardado.vivo,
+                    trava: guardado.trava,
+                })
+            }
+            _ => {
+                fechar_guardado(guardado);
+                None
+            }
+        }
+    }
+
+    /// Fecha todos (o app vai fechar).
+    pub fn fechar_todos(&self) {
+        let todos: Vec<Guardado<M>> = sem_veneno(&self.motores).drain().map(|(_, g)| g).collect();
+        for guardado in todos {
+            fechar_guardado(guardado);
+        }
+    }
+}
+
+fn fechar_guardado<M: MotorDeRede>(guardado: Guardado<M>) {
+    if let Some(motor) = guardado.motor.upgrade() {
+        motor.fechar();
+    }
+    guardado.trava.soltar();
 }
 
 impl Tree {
@@ -1348,6 +1501,7 @@ mod tests_preparar {
             openvpn_erro: None,
             motor: None,
             motor_erro: None,
+            emprestimo: None,
         };
         let mut avisos = Vec::new();
         let erro = rede
@@ -1451,5 +1605,100 @@ mod tests_rotulos {
         assert_eq!(nome_livre(&tree, "Herdar (x)", None), "Rede Herdar (x)");
         assert_eq!(nome_livre(&tree, "Herdar tudo", None), "Herdar tudo");
         assert_eq!(nome_livre(&tree, "  ", None), "Rede");
+    }
+}
+
+#[cfg(test)]
+mod tests_orfaos {
+    use super::*;
+
+    /// Um motor que só lembra se pediram para ele fechar.
+    #[derive(Default)]
+    struct Falso {
+        fechado: AtomicBool,
+    }
+
+    impl MotorDeRede for Falso {
+        fn fechar(&self) {
+            self.fechado.store(true, Ordering::Relaxed);
+        }
+
+        fn acabou(&self) -> bool {
+            self.fechado.load(Ordering::Relaxed)
+        }
+    }
+
+    fn trava() -> Arc<TravaDoMotor> {
+        let arquivo = std::fs::File::open(std::env::current_exe().unwrap()).unwrap();
+        TravaDoMotor::new(Some(arquivo))
+    }
+
+    fn solta(trava: &TravaDoMotor) -> bool {
+        sem_veneno(&trava.0).is_none()
+    }
+
+    fn orfao(motor: &Arc<Falso>, assinatura: u64) -> Orfao<Falso> {
+        Orfao {
+            motor: Arc::clone(motor),
+            assinatura,
+            vivo: Arc::new(AtomicBool::new(false)),
+            trava: trava(),
+        }
+    }
+
+    #[test]
+    fn o_orfao_de_mesma_assinatura_volta_vivo_e_com_a_trava() {
+        let orfaos = Orfaos::default();
+        let motor = Arc::new(Falso::default());
+        orfaos.guardar(7, orfao(&motor, 1));
+        let volta = orfaos.retomar(7, 1).expect("o mesmo motor");
+        assert!(Arc::ptr_eq(&volta.motor, &motor));
+        assert!(volta.vivo.load(Ordering::Relaxed));
+        assert!(!solta(&volta.trava));
+        assert!(!motor.acabou());
+        assert!(orfaos.retomar(7, 1).is_none(), "saiu da lista");
+    }
+
+    #[test]
+    fn o_orfao_de_outra_assinatura_fecha_e_solta_a_trava() {
+        let orfaos = Orfaos::default();
+        let motor = Arc::new(Falso::default());
+        let guardado = orfao(&motor, 1);
+        let trava = Arc::clone(&guardado.trava);
+        orfaos.guardar(7, guardado);
+        assert!(orfaos.retomar(7, 2).is_none());
+        assert!(motor.acabou());
+        assert!(solta(&trava));
+    }
+
+    #[test]
+    fn o_orfao_que_ja_acabou_ou_foi_largado_nao_volta() {
+        let orfaos = Orfaos::default();
+        let acabado = Arc::new(Falso::default());
+        acabado.fechar();
+        orfaos.guardar(7, orfao(&acabado, 1));
+        assert!(orfaos.retomar(7, 1).is_none());
+
+        let largado = Arc::new(Falso::default());
+        orfaos.guardar(8, orfao(&largado, 1));
+        drop(largado);
+        assert!(orfaos.retomar(8, 1).is_none());
+    }
+
+    #[test]
+    fn um_segundo_orfao_do_perfil_fecha_o_primeiro_e_fechar_todos_fecha_o_resto() {
+        let orfaos = Orfaos::default();
+        let (primeiro, segundo, outro) = (
+            Arc::new(Falso::default()),
+            Arc::new(Falso::default()),
+            Arc::new(Falso::default()),
+        );
+        orfaos.guardar(7, orfao(&primeiro, 1));
+        orfaos.guardar(7, orfao(&segundo, 1));
+        assert!(primeiro.acabou());
+        assert!(!segundo.acabou());
+        orfaos.guardar(8, orfao(&outro, 1));
+        orfaos.fechar_todos();
+        assert!(segundo.acabou() && outro.acabou());
     }
 }

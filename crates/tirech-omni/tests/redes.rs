@@ -633,6 +633,76 @@ fn duas_copias_do_app_nao_ligam_a_mesma_openvpn_juntas() {
     segunda.parar_todos();
 }
 
+/// O caso das quedas a cada `ping-restart`: o perfil fica sem uso enquanto uma conexão ainda
+/// segura o motor (o `parar` não consegue largá-lo). O próximo `garantir` tem de reaproveitar
+/// esse motor, e não subir um segundo com a mesma identidade, que derrubaria o primeiro no
+/// servidor (e seria derrubado por ele).
+#[test]
+fn o_motor_parado_que_uma_conexao_segura_volta_em_vez_de_subir_outro() {
+    let pasta = Pasta::nova("redes-openvpn-orfao");
+    let agora = UNIX_EPOCH + Duration::from_secs(1_900_000_000);
+    let importacao = openvpn::importar(
+        include_str!("dados/openvpn/tudo-embutido.ovpn"),
+        None,
+        agora,
+    )
+    .expect("o .ovpn de teste");
+    let mut perfil = PerfilRede::new("Cliente V");
+    perfil.id = 8;
+    let config = || {
+        openvpn::config_de(
+            &importacao.ovpn,
+            &importacao.identidade,
+            "",
+            "",
+            false,
+            SystemTime::now(),
+        )
+    };
+    let (primeira, segunda) = (MotoresVpn::default(), MotoresVpn::default());
+    primeira.na_pasta(pasta.caminho());
+    segunda.na_pasta(pasta.caminho());
+
+    // A conexão segura o motor (como o gancho da aba) enquanto o perfil fica sem uso.
+    let da_conexao = primeira.garantir(&perfil, config(), 1).expect("liga");
+    primeira.parar(perfil.id);
+    assert!(!primeira.ligado(perfil.id));
+    // O motor segue falando com o servidor: outra cópia do app continua sem poder ligar.
+    let erro = segunda
+        .garantir(&perfil, config(), 1)
+        .expect_err("a trava fica com o motor que ainda roda");
+    assert!(erro.contains("outro Tirech Omni"), "{erro}");
+
+    let de_novo = primeira.garantir(&perfil, config(), 1).expect("volta");
+    assert_eq!(de_novo, da_conexao, "o mesmo motor, e não um segundo");
+    assert!(primeira.ligado(perfil.id));
+    assert!(
+        primeira.estado(perfil.id).is_some(),
+        "o estado volta à tela"
+    );
+
+    // Com outra identidade, o motor velho fecha, mesmo seguro pela conexão.
+    drop(de_novo);
+    primeira.parar(perfil.id);
+    let outro = primeira
+        .garantir(&perfil, config(), 2)
+        .expect("liga com a identidade nova");
+    assert_ne!(outro, da_conexao);
+    let limite = Instant::now() + Duration::from_secs(5);
+    while da_conexao.estado() != tomni_ui_openvpn::State::Stopped && Instant::now() < limite {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(da_conexao.estado(), tomni_ui_openvpn::State::Stopped);
+
+    // Parado sem ninguém segurar, a trava sai na hora: a outra cópia liga.
+    drop(outro);
+    primeira.parar(perfil.id);
+    segunda
+        .garantir(&perfil, config(), 1)
+        .expect("livre, a segunda cópia liga");
+    segunda.parar_todos();
+}
+
 #[test]
 fn testar_a_openvpn_ligada_em_outra_copia_do_app_avisa() {
     let pasta = Pasta::nova("redes-openvpn-outra-copia");

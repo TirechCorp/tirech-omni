@@ -144,6 +144,9 @@ fn andar(
                     perfil,
                     comandos: g.comandos.clone(),
                     persistente: g.persistente,
+                    mouse: g.mouse,
+                    retentar: g.retentar,
+                    credencial_modo: g.credencial_modo,
                 }));
                 andar(arvore, &g.children, caminho, com_cofre, importacao);
                 caminho.pop();

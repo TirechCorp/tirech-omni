@@ -8,7 +8,7 @@ use tomni_ui::terminal::{LinkHit, Session};
 
 use super::Tela;
 use crate::links::{self, DestinoDoLink};
-use crate::modelo::Kind;
+use crate::modelo::{Connection, Kind};
 use crate::t;
 
 impl Tela {
@@ -60,6 +60,33 @@ impl Tela {
                     );
                 }
             }
+        }
+    }
+}
+
+impl Tela {
+    /// Abre a conexão Link `c`: sem perfil de rede, no navegador padrão; com perfil, no
+    /// navegador só do perfil, que sai pela rede do cliente ([`crate::navegador`]).
+    pub(super) fn abrir_link_da_arvore(&self, c: &Connection) {
+        let Some(url) = crate::navegador::endereco_do_link(&c.url) else {
+            self.avisar(
+                InfoBarSeverity::Warning,
+                t!("links-sem-endereco", nome = c.name.as_str()),
+            );
+            return;
+        };
+        let resultado = match self.rede_resolvida(c) {
+            None => self
+                .opener
+                .abrir_link(&DestinoDoLink::Navegador(url))
+                .map_err(|e| e.to_string()),
+            Some(rede) => match rede.erro_do_motor() {
+                Some(erro) => Err(erro.to_owned()),
+                None => self.opener.abrir_link_pela_rede(&url, rede),
+            },
+        };
+        if let Err(erro) = resultado {
+            self.avisar(InfoBarSeverity::Warning, t!("links-nao-abriu", erro = erro));
         }
     }
 }

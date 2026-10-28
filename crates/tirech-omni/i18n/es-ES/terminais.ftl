@@ -333,6 +333,22 @@ tmux-fechar-manter = Mantener en el servidor
 tmux-fechar-lembrar = Recordar la elección (se cambia en Configuración › Conexiones)
 tmux-fechar-texto-varias = { $n } pestañas se ejecutaban en sesiones persistentes ({ $lista }), que siguen vivas en el servidor. Terminar las sesiones cierra los programas que se ejecutan en ellas; mantenerlas deja las sesiones para la próxima vez.
 
+mouse-linha = Ratón en la terminal
+mouse-linha-descricao = Copiar y pegar: seleccionar copia y el botón derecho copia (con selección) o pega (sin ella); Ctrl+clic derecho abre el menú. Menú: el botón derecho abre el menú y seleccionar no copia. Heredar sigue la carpeta y, sin carpeta que elija, Configuración › Terminal.
+mouse-linha-descricao-pasta = El ratón en la terminal de las conexiones de esta carpeta que no eligieron otra cosa.
+mouse-copiar-colar = Copiar y pegar
+mouse-menu = Menú
+mouse-herdar-de = Heredar ({ $nome })
+mouse-herdar-configuracoes = Heredar (Configuración)
+retentar-linha = Reintentar tras
+retentar-linha-descricao = Cuando la conexión se reconecta automáticamente y se acaban los intentos, espera este tiempo y empieza otra ronda, hasta que la conexión vuelva. Desactivado: se detiene tras los intentos. Vale con Configuración › Conexiones › Al caerse la conexión en Reconectar automáticamente y en la pestaña de un asistente. Heredar sigue la carpeta y, sin carpeta que elija, la Configuración.
+retentar-linha-descricao-pasta = Para las conexiones de esta carpeta que no eligieron otra cosa: cuánto esperar, tras los intentos de reconexión automática, antes de empezar otra ronda.
+retentar-desligado = Desactivado
+retentar-minutos = { $n } min
+retentar-horas = { $n } h
+retentar-herdar-de = Heredar ({ $nome })
+retentar-herdar-configuracoes = Heredar (Configuración)
+
 ## Sesiones persistentes abiertas en el servidor
 
 sessoes-menu = Sesiones en el servidor…
@@ -354,3 +370,8 @@ sessoes-nome-invalido = Nombre con caracteres que la aplicación no abre
 sessoes-abrir = Abrir en una pestaña
 sessoes-ir-para-a-aba = Ir a la pestaña
 sessoes-encerrar = Terminar
+links-sem-endereco = El enlace "{ $nome }" no tiene una dirección http o https.
+links-menu = Enlaces…
+links-titulo = Enlaces
+links-explicacao = Los enlaces del árbol. Con un perfil de red, el enlace se abre en un navegador solo del perfil, que sale por la red del cliente; sin perfil, en el navegador predeterminado.
+links-nenhum-link = Ningún enlace en el árbol. Cree una conexión de tipo Enlace.

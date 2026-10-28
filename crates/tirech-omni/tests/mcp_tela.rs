@@ -209,6 +209,17 @@ fn como_ligar_mostra_o_exe_e_copia() {
     assert!(codex.contains("codex mcp add"), "{codex}");
     m.app.click("mcp-copiar-5");
     assert_eq!(m.app.clipboard().read().as_deref(), Some(codex.as_str()));
+
+    // A do OpenCode, o opencode.json com o prazo das ferramentas.
+    m.app.click("mcp-como-abas-opencode");
+    let opencode = m.app.text("mcp-como-bloco-8");
+    let lido: serde_json::Value = serde_json::from_str(&opencode).expect(&opencode);
+    let servidor = &lido["mcp"]["tirech-omni"];
+    assert_eq!(servidor["type"], "local");
+    assert_eq!(servidor["command"], json!([exe, "mcp"]));
+    assert_eq!(servidor["timeout"], 86_400_000);
+    m.app.click("mcp-copiar-8");
+    assert_eq!(m.app.clipboard().read().as_deref(), Some(opencode.as_str()));
 }
 
 #[test]

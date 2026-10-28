@@ -333,6 +333,22 @@ tmux-fechar-manter = Manter no servidor
 tmux-fechar-lembrar = Lembrar a escolha (muda em Configurações › Conexões)
 tmux-fechar-texto-varias = { $n } abas rodavam em sessões persistentes ({ $lista }), que continuam vivas no servidor. Encerrar as sessões fecha os programas que rodam nelas; manter deixa as sessões para a próxima vez.
 
+mouse-linha = Mouse no terminal
+mouse-linha-descricao = Copiar e colar: selecionar copia e o botão direito copia (com seleção) ou cola (sem); o Ctrl+clique direito abre o menu. Menu: o botão direito abre o menu e selecionar não copia. Herdar segue a pasta e, sem pasta que escolha, as Configurações › Terminal.
+mouse-linha-descricao-pasta = O mouse no terminal das conexões desta pasta que não escolheram outra coisa.
+mouse-copiar-colar = Copiar e colar
+mouse-menu = Menu
+mouse-herdar-de = Herdar ({ $nome })
+mouse-herdar-configuracoes = Herdar (Configurações)
+retentar-linha = Tentar de novo após
+retentar-linha-descricao = Quando a conexão reconecta sozinha e as tentativas acabam, espera este tempo e começa outra rodada, até a conexão voltar. Desligado: para depois das tentativas. Vale com Configurações › Conexões › Ao cair a conexão em Reconectar sozinho e na aba de um assistente. Herdar segue a pasta e, sem pasta que escolha, as Configurações.
+retentar-linha-descricao-pasta = Para as conexões desta pasta que não escolheram outra coisa: quanto esperar, depois das tentativas de reconectar sozinho, para começar outra rodada.
+retentar-desligado = Desligado
+retentar-minutos = { $n } min
+retentar-horas = { $n } h
+retentar-herdar-de = Herdar ({ $nome })
+retentar-herdar-configuracoes = Herdar (Configurações)
+
 ## Sessões persistentes abertas no servidor
 
 sessoes-menu = Sessões no servidor…
@@ -354,3 +370,8 @@ sessoes-nome-invalido = Nome com caracteres que o app não abre
 sessoes-abrir = Abrir numa aba
 sessoes-ir-para-a-aba = Ir para a aba
 sessoes-encerrar = Encerrar
+links-sem-endereco = O link "{ $nome }" não tem um endereço http ou https.
+links-menu = Links…
+links-titulo = Links
+links-explicacao = Os links da árvore. Com um perfil de rede, o link abre num navegador só do perfil, que sai pela rede do cliente; sem perfil, no navegador padrão.
+links-nenhum-link = Nenhum link na árvore. Crie uma conexão do tipo Link.

@@ -28,7 +28,8 @@ AI assistants such as Claude Code, Codex and OpenCode.
   `rclone`, with a transfer queue and editing of remote files.
 - **Client networks**: built-in OpenVPN, WireGuard, Tailscale, Nebula and ZeroTier, per folder
   or per connection. Only the app's traffic goes through the VPN, with no virtual network
-  adapter and no admin rights, and two clients with the same IP can coexist.
+  adapter and no admin rights, and two clients with the same IP can coexist. Links in the tree
+  open in a browser for that client only, going out through its network.
 - **AI assistants**: an assistant on your computer operates the app over MCP (opens
   connections, reads the screen, types, runs commands), with per-connection permissions,
   approval and auditing. "Control with" opens Claude Code, Codex or OpenCode in a tab tied to a
@@ -38,6 +39,8 @@ AI assistants such as Claude Code, Codex and OpenCode.
   MobaXterm, with a preview.
 - **Server ports**: what is listening on the server, with one click to forward the port or open
   the page in the browser through the SSH channel.
+- **Performance**: a CPU meter in the title bar and a page like the Task Manager's, with the
+  weight of each terminal.
 - Interface in **Portuguese, English and Spanish**.
 - **Portable** version for Windows, **ARM** packages, system tray and per-user installation
   without admin rights.

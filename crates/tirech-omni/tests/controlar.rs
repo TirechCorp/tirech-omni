@@ -137,6 +137,9 @@ fn o_claude_abre_numa_aba_a_direita_com_a_ponte_presa_a_aba() {
     let json = std::fs::read_to_string(ponte).expect("o arquivo de lançamento");
     assert!(json.contains("--aba"), "{json}");
     assert!(json.contains("1-1"), "{json}");
+    // O Claude Code recebe as instruções pelo `--append-system-prompt`, e a ponte não as repete.
+    assert!(args.contains("--append-system-prompt"), "{args}");
+    assert!(!json.contains("--instrucoes"), "{json}");
     // O endereço do canal vai escrito, porque o Codex roda a ponte sem o `XDG_RUNTIME_DIR`.
     assert!(json.contains("--canal"), "{json}");
     let lancamento = json
@@ -152,7 +155,7 @@ fn o_claude_abre_numa_aba_a_direita_com_a_ponte_presa_a_aba() {
 }
 
 #[test]
-fn o_codex_leva_a_ponte_em_dois_c_e_o_opencode_no_ambiente() {
+fn o_codex_leva_a_ponte_em_tres_c_e_o_opencode_no_ambiente() {
     let (_pasta, mut m) = cenario("controlar-codex-opencode", true);
     controlar_pelo_terminal(&mut m, "1-1", "codex");
     controlar_pelo_terminal(&mut m, "1-1", "opencode");
@@ -192,6 +195,32 @@ fn o_codex_leva_a_ponte_em_dois_c_e_o_opencode_no_ambiente() {
     assert_eq!(nome, "OPENCODE_CONFIG_CONTENT");
     assert!(valor.contains("--aba"), "{valor}");
     assert!(valor.contains("1-1"), "{valor}");
+
+    // As instruções do "Controlar com" vão à ponte, que as devolve no `initialize`: os dois não
+    // têm o `--append-system-prompt` do Claude Code.
+    let instrucoes = ponte_instrucoes(&codex.local_argumentos);
+    assert!(instrucoes.contains("salva"), "{instrucoes}");
+    let config: serde_json::Value = serde_json::from_str(valor).unwrap();
+    let comando: Vec<&str> = config["mcp"]["tirech-omni"]["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .collect();
+    let i = comando
+        .iter()
+        .position(|a| *a == "--instrucoes")
+        .expect(valor);
+    assert!(comando[i + 1].contains("salva"), "{valor}");
+}
+
+/// O valor do `--instrucoes` da ponte nos argumentos do Codex (o `args` do TOML num `-c`).
+fn ponte_instrucoes(argumentos: &str) -> String {
+    let depois = argumentos
+        .split("\"--instrucoes\", \"")
+        .nth(1)
+        .unwrap_or_else(|| panic!("a ponte sem --instrucoes: {argumentos}"));
+    depois.split('"').next().unwrap_or_default().to_owned()
 }
 
 #[test]

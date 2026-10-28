@@ -2,6 +2,7 @@
 //! indo para todas. Aqui ficam as funções puras (a grade, as linhas do diálogo e o filtro); a
 //! tela está em `tela/cluster.rs`.
 
+use crate::comandos::tem_terminal;
 use crate::modelo::{Kind, Node, Tree};
 use crate::t;
 
@@ -45,7 +46,7 @@ pub struct Linha {
     pub kind: Kind,
     /// O caminho dos grupos, separado por " › " (vazio na raiz).
     pub grupo: String,
-    /// `usuario@host` (só o host sem usuário; vazio no shell local).
+    /// `usuario@host` (só o host sem usuário; vazio no shell local; o endereço no link).
     pub host: String,
 }
 
@@ -64,22 +65,37 @@ impl Linha {
 /// As conexões de terminal da árvore (SSH, Telnet e shell local; as só de arquivos ficam de
 /// fora), na ordem de leitura.
 pub fn linhas(arvore: &Tree) -> Vec<Linha> {
+    linhas_onde(arvore, tem_terminal)
+}
+
+/// Os links da árvore (o lançador "Links…"), na ordem de leitura; o `host` é o endereço.
+pub fn links(arvore: &Tree) -> Vec<Linha> {
+    linhas_onde(arvore, |k| k == Kind::Link)
+}
+
+fn linhas_onde(arvore: &Tree, aceita: fn(Kind) -> bool) -> Vec<Linha> {
     let mut saida = Vec::new();
-    juntar(&arvore.nodes, &mut Vec::new(), &mut saida);
+    juntar(&arvore.nodes, aceita, &mut Vec::new(), &mut saida);
     saida
 }
 
-fn juntar<'a>(nos: &'a [Node], caminho: &mut Vec<&'a str>, saida: &mut Vec<Linha>) {
+fn juntar<'a>(
+    nos: &'a [Node],
+    aceita: fn(Kind) -> bool,
+    caminho: &mut Vec<&'a str>,
+    saida: &mut Vec<Linha>,
+) {
     for no in nos {
         match no {
             Node::Group(g) => {
                 caminho.push(&g.name);
-                juntar(&g.children, caminho, saida);
+                juntar(&g.children, aceita, caminho, saida);
                 caminho.pop();
             }
-            Node::Connection(c) if !c.kind.so_arquivos() => {
+            Node::Connection(c) if aceita(c.kind) => {
                 let host = match (c.kind, c.user.is_empty()) {
                     (Kind::Local, _) => String::new(),
+                    (Kind::Link, _) => c.url.clone(),
                     (_, true) => c.host.clone(),
                     (_, false) => format!("{}@{}", c.user, c.host),
                 };
@@ -148,11 +164,14 @@ mod tests {
         t.add_connection(Some(prod), b);
         t.add_connection(None, Connection::new("shell", Kind::Local));
         t.add_connection(None, Connection::new("arquivos", Kind::Sftp));
+        let mut intranet = Connection::new("intranet", Kind::Link);
+        intranet.url = "https://intranet.cliente/".into();
+        t.add_connection(Some(prod), intranet);
         t
     }
 
     #[test]
-    fn as_linhas_trazem_o_caminho_o_host_e_deixam_os_arquivos_de_fora() {
+    fn as_linhas_trazem_o_caminho_o_host_e_deixam_os_arquivos_e_os_links_de_fora() {
         let l = linhas(&arvore());
         let nomes: Vec<_> = l.iter().map(|x| x.nome.as_str()).collect();
         assert_eq!(nomes, ["web-01", "roteador", "shell"]);
@@ -174,5 +193,16 @@ mod tests {
         assert!(!l[0].combina("roteador"));
         assert!(l[2].combina("shell"));
         assert!(!l[2].combina("produção"));
+    }
+
+    #[test]
+    fn os_links_trazem_o_endereco_no_lugar_do_host() {
+        let l = links(&arvore());
+        assert_eq!(l.len(), 1);
+        assert_eq!(
+            (l[0].nome.as_str(), l[0].grupo.as_str(), l[0].host.as_str()),
+            ("intranet", "Produção", "https://intranet.cliente/")
+        );
+        assert!(l[0].combina("INTRANET.cliente"));
     }
 }

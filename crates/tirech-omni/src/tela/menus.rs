@@ -14,7 +14,7 @@ use tomni_ui::prelude::*;
 use tomni_ui::terminal::LogMode;
 
 use super::duplicar::Destino;
-use super::{Lugar, Tela, acao, ia, importacao, janelas, mcp_sessoes, wsl};
+use super::{Lugar, Tela, acao, com_ia, com_mcp, ia, importacao, janelas, mcp_sessoes, wsl};
 use crate::abrir::{abrir_log_cifrado, com_sufixo_cifrado};
 use crate::atalhos;
 use crate::janelas::Janela;
@@ -175,6 +175,13 @@ fn menu_ferramentas(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
         )
         .icon(Symbol::Code)
         .shortcut(atalhos::atalho(tela.config, "scripts"))
+        .item(
+            "links-menu",
+            t!("links-menu"),
+            acao(tela, |t| t.na_principal(|t| t.abrir_lancador_de_links())),
+        )
+        .icon(Symbol::Globe)
+        .shortcut(atalhos::atalho(tela.config, "links"))
         .submenu(
             "ia",
             t!("ia-remoto-menu"),
@@ -183,7 +190,8 @@ fn menu_ferramentas(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
         .icon(Symbol::Sparkle)
         .item_visible({
             let t = Rc::clone(tela);
-            move || t.aba_ssh(ia::AlvoIa::Janela(janela))
+            let ligada = com_ia(tela.config);
+            move || ligada() && t.aba_ssh(ia::AlvoIa::Janela(janela))
         })
         .separator()
         .item(
@@ -289,13 +297,14 @@ fn menu_ferramentas(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
             }),
         )
         .icon(Symbol::Stop)
-        .separator()
+        .separator_visible(com_mcp(tela.config))
         .submenu(
             "mcp-assistentes",
             t!("mcp-assistentes-de-ia"),
             mcp_sessoes::menu_assistentes(tela),
         )
         .icon(Symbol::Sparkle)
+        .item_visible(com_mcp(tela.config))
 }
 
 fn menu_ajuda(tela: &Rc<Tela>) -> MenuFlyout {
@@ -357,6 +366,14 @@ fn menu_exibir(
         )
         .icon(Symbol::Eye)
         .shortcut(atalhos::atalho(tela.config, "identificar_paineis"))
+        .item(
+            "desempenho",
+            t!("casca-desempenho"),
+            acao(tela, |t| {
+                t.na_principal(|t| t.pagina.set(super::desempenho::PAGINA.to_owned()))
+            }),
+        )
+        .icon(Symbol::DataArea)
         .separator()
         .submenu(
             "envio",
@@ -398,7 +415,10 @@ fn menu_exibir(
         )
         .icon(Symbol::Chat)
         .shortcut(atalhos::atalho(tela.config, "ia_chat"))
-        .item_visible(em(paineis::TERMINAIS))
+        .item_visible({
+            let (terminais, ligada) = (em(paineis::TERMINAIS), com_ia(tela.config));
+            move || terminais() && ligada()
+        })
         .item_enabled(principal)
         .toggle(
             "painel-portas",
@@ -472,7 +492,7 @@ fn menu_janela(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
         menu = menu
             .item(
                 format!("janela-foco-{}", n + 1),
-                t!("casca-janela-n", n = n + 1),
+                janelas::no_menu(n),
                 move || {
                     if let Some(janela) = janelas.todas_agora().get(n) {
                         janela.handle.focus();
@@ -507,4 +527,5 @@ fn menu_cluster(tela: &Rc<Tela>) -> MenuFlyout {
         )
         .icon(Symbol::Sparkle)
         .shortcut(atalhos::atalho(tela.config, "cluster_ia"))
+        .item_visible(com_mcp(tela.config))
 }

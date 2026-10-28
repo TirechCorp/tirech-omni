@@ -261,7 +261,7 @@ impl Tela {
     /// A conexão `id`, se for SSH.
     pub(super) fn conexao_ssh(&self, id: u64) -> Option<Connection> {
         self.tree
-            .with_untracked(|t| t.connection(id).cloned())
+            .with_untracked(|t| t.conexao_para_abrir(id))
             .filter(|c| c.kind == Kind::Ssh)
     }
 
@@ -1082,7 +1082,10 @@ pub(super) fn botao(tela: &Rc<Tela>, janela: Janela) -> Button {
         })
         .flyout(submenu_ia(tela, "ia-botao", AlvoIa::Janela(janela)))
         .visible(move || {
-            visivel.config.with(|c| c.ia.mostrar_botao) && visivel.aba_ssh(AlvoIa::Janela(janela))
+            visivel
+                .config
+                .with(|c| c.geral.assistente_ia && c.ia.mostrar_botao)
+                && visivel.aba_ssh(AlvoIa::Janela(janela))
         })
 }
 

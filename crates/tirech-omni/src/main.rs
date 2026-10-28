@@ -85,6 +85,7 @@ fn main() -> Result<(), tomni_ui::platform::Error> {
     };
     relatorio.clone().install();
     let guarda = pasta.join("desenho.txt");
+    let travamentos = pasta.join("travamentos.log");
     let resultado = tomni_ui::App::new(move || {
         i18n::entregar_a_lib();
         // No modo portable, o `known_hosts` padrão fica na pasta, e não no `~/.ssh`.
@@ -106,6 +107,8 @@ fn main() -> Result<(), tomni_ui::platform::Error> {
     // Se a abertura anterior caiu antes do primeiro quadro (um driver de vídeo), esta desenha
     // de um jeito mais simples; o degrau que funcionou fica no `desenho.txt`.
     .render_guard(guarda)
+    // A interface parada mais de 2 s, ou pesada por um minuto: onde, e o estado do sistema.
+    .stall_log(travamentos)
     .run();
     if let Err(erro) = &resultado {
         relatorio.failure(erro);

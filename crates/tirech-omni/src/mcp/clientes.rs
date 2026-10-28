@@ -150,18 +150,39 @@ fn toml_texto(texto: &str) -> String {
     s
 }
 
-/// O trecho do `~/.codex/config.toml`.
+/// O trecho do `~/.codex/config.toml`, com o prazo das ferramentas em segundos
+/// ([`PRAZO_DAS_FERRAMENTAS`]): o padrão do Codex corta um `executar` longo.
 pub fn toml_codex(exe: &str, espaco: Option<&str>) -> String {
     let args: Vec<String> = args_da_ponte(espaco)
         .iter()
         .map(|a| toml_texto(a))
         .collect();
     format!(
-        "[mcp_servers.{}]\ncommand = {}\nargs = [{}]\n",
+        "[mcp_servers.{}]\ncommand = {}\nargs = [{}]\ntool_timeout_sec = {PRAZO_DAS_FERRAMENTAS}\n",
         nome_do_servidor(espaco),
         toml_texto(exe),
         args.join(", ")
     )
+}
+
+/// O `opencode.json` do OpenCode (o do projeto ou o `~/.config/opencode/opencode.json`): o
+/// servidor local com o comando inteiro numa lista e o `timeout` das ferramentas em
+/// milissegundos ([`PRAZO_DAS_FERRAMENTAS`]), porque o prazo padrão corta um `executar` longo.
+pub fn json_opencode(exe: &str, espaco: Option<&str>) -> String {
+    let mut comando = vec![exe.to_owned()];
+    comando.extend(args_da_ponte(espaco));
+    let config = json!({
+        "$schema": "https://opencode.ai/config.json",
+        "mcp": {
+            nome_do_servidor(espaco): {
+                "type": "local",
+                "command": comando,
+                "enabled": true,
+                "timeout": PRAZO_DAS_FERRAMENTAS * 1000,
+            }
+        }
+    });
+    serde_json::to_string_pretty(&config).unwrap_or_default()
 }
 
 /// Os argumentos da ponte presa a uma aba: `mcp --nome <nome> --aba <chave>` (M63).
@@ -218,8 +239,14 @@ pub fn lancar_claude(arquivo: &Path, avisos: &Path, nome: &str, instrucoes: &str
     ]
 }
 
-/// Os argumentos do `codex` que ligam o app presos a uma aba (M63): dois `-c` que sobrepõem
-/// `mcp_servers.tirech-omni` só nesta execução, sem tocar no `~/.codex/config.toml`.
+/// Quanto o assistente espera uma ferramenta do app, em segundos: 24 h. O `executar` espera o
+/// comando acabar, e um comando longo (um backup, uma compilação) passaria do prazo padrão do
+/// Codex (60 s) e o do OpenCode (o do SDK do MCP), que dariam a ferramenta por perdida.
+pub const PRAZO_DAS_FERRAMENTAS: u64 = 24 * 60 * 60;
+
+/// Os argumentos do `codex` que ligam o app presos a uma aba (M63): três `-c` que sobrepõem
+/// `mcp_servers.tirech-omni` só nesta execução, sem tocar no `~/.codex/config.toml`: o
+/// comando, os argumentos e o prazo das ferramentas ([`PRAZO_DAS_FERRAMENTAS`]).
 pub fn lancar_codex(exe: &str, ponte: &[String]) -> Vec<String> {
     let args: Vec<String> = ponte.iter().map(|a| toml_texto(a)).collect();
     vec![
@@ -227,6 +254,8 @@ pub fn lancar_codex(exe: &str, ponte: &[String]) -> Vec<String> {
         format!("mcp_servers.{NOME}.command={}", toml_texto(exe)),
         "-c".into(),
         format!("mcp_servers.{NOME}.args=[{}]", args.join(", ")),
+        "-c".into(),
+        format!("mcp_servers.{NOME}.tool_timeout_sec={PRAZO_DAS_FERRAMENTAS}"),
     ]
 }
 
@@ -262,12 +291,18 @@ pub fn notify_codex(exe: &str, arquivo: &Path, original: &[String]) -> Vec<Strin
 /// O que o `opencode` precisa para ligar o app presos a uma aba (M63): sem argumentos, e a
 /// variável `OPENCODE_CONFIG_CONTENT` com o JSON do servidor local, que vence a configuração
 /// da pessoa e não grava nada. Formato da documentação do OpenCode (`mcp`, `type: "local"`,
-/// `command` como lista, `enabled`).
+/// `command` como lista, `enabled`, e `timeout` em milissegundos, o prazo das ferramentas
+/// deste servidor: [`PRAZO_DAS_FERRAMENTAS`]).
 pub fn lancar_opencode(exe: &str, ponte: &[String]) -> (Vec<String>, Vec<(String, String)>) {
     let mut comando = vec![exe.to_owned()];
     comando.extend(ponte.iter().cloned());
     let config = json!({
-        "mcp": { NOME: { "type": "local", "command": comando, "enabled": true } }
+        "mcp": { NOME: {
+            "type": "local",
+            "command": comando,
+            "enabled": true,
+            "timeout": PRAZO_DAS_FERRAMENTAS * 1000,
+        } }
     });
     (
         Vec::new(),
@@ -360,8 +395,23 @@ mod tests {
         let toml = toml_codex(r#"C:\Users\Ana\tirech "omni".exe"#, None);
         assert_eq!(
             toml,
-            "[mcp_servers.tirech-omni]\ncommand = \"C:\\\\Users\\\\Ana\\\\tirech \\\"omni\\\".exe\"\nargs = [\"mcp\"]\n"
+            "[mcp_servers.tirech-omni]\ncommand = \"C:\\\\Users\\\\Ana\\\\tirech \\\"omni\\\".exe\"\nargs = [\"mcp\"]\ntool_timeout_sec = 86400\n"
         );
+    }
+
+    #[test]
+    fn json_opencode_com_o_prazo_e_o_espaco() {
+        let json = json_opencode(r"C:\Tirech\tirech-omni.exe", Some("web"));
+        let lido: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let servidor = &lido["mcp"]["tirech-omni-web"];
+        assert_eq!(servidor["type"], "local");
+        assert_eq!(servidor["enabled"], true);
+        assert_eq!(servidor["timeout"], 86_400_000);
+        assert_eq!(
+            servidor["command"],
+            json!([r"C:\Tirech\tirech-omni.exe", "mcp", "--espaco", "web"])
+        );
+        assert_eq!(lido["$schema"], "https://opencode.ai/config.json");
     }
 
     #[test]
@@ -507,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn lancar_o_codex_com_dois_c() {
+    fn lancar_o_codex_com_tres_c() {
         let ponte = args_da_ponte_na_aba("Codex", "3-2");
         assert_eq!(
             lancar_codex("/usr/bin/tirech-omni", &ponte),
@@ -515,7 +565,9 @@ mod tests {
                 "-c",
                 "mcp_servers.tirech-omni.command=\"/usr/bin/tirech-omni\"",
                 "-c",
-                "mcp_servers.tirech-omni.args=[\"mcp\", \"--nome\", \"Codex\", \"--aba\", \"3-2\"]"
+                "mcp_servers.tirech-omni.args=[\"mcp\", \"--nome\", \"Codex\", \"--aba\", \"3-2\"]",
+                "-c",
+                "mcp_servers.tirech-omni.tool_timeout_sec=86400"
             ]
         );
         // Com barras e espaço, o TOML escapa e o valor volta igual.
@@ -537,6 +589,8 @@ mod tests {
         let servidor = &json["mcp"]["tirech-omni"];
         assert_eq!(servidor["type"], "local");
         assert_eq!(servidor["enabled"], true);
+        // 24 h em milissegundos: o `executar` de um comando longo não cai no prazo padrão.
+        assert_eq!(servidor["timeout"], 86_400_000);
         assert_eq!(
             servidor["command"],
             json!([

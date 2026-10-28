@@ -402,6 +402,9 @@ pub fn aplicar(
                         g.rede = rede;
                         g.comandos = p.comandos;
                         g.persistente = p.persistente;
+                        g.mouse = p.mouse;
+                        g.retentar = p.retentar;
+                        g.credencial_modo = p.credencial_modo;
                     }
                 }
             }
@@ -428,7 +431,7 @@ pub fn aplicar(
                                 nova.id = existente;
                                 nova.credencial = nova.credencial.or(c.credencial);
                                 // Os formatos de fora não trazem o modo: o da conexão fica.
-                                if nova.credencial_modo.e_perguntar() {
+                                if nova.credencial_modo.is_herdar() {
                                     nova.credencial_modo = c.credencial_modo;
                                 }
                                 // O formato sem descrição não apaga a que a conexão tinha.

@@ -18,6 +18,7 @@ use super::controlar::{Conversar, Encomenda};
 use super::{Lugar, Tela, geometria_de, icone_do_cartao, paineis_de};
 use crate::abrir_em::AlvoAbrir;
 use crate::cluster::{self, grade_do_cluster};
+use crate::comandos::tem_terminal;
 use crate::espacos::{Aba, ClusterIaSalvo, JanelaSalva, Resolvida, id_da_chave};
 use crate::ia::{Ferramenta, ficha};
 use crate::janelas::Janela;
@@ -155,7 +156,7 @@ impl Tela {
         ids.into_iter()
             .filter(|id| {
                 self.tree
-                    .with_untracked(|t| t.connection(*id).is_some_and(|c| !c.kind.so_arquivos()))
+                    .with_untracked(|t| t.connection(*id).is_some_and(|c| tem_terminal(c.kind)))
             })
             .collect()
     }

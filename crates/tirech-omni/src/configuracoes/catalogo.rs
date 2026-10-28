@@ -7,7 +7,7 @@
 //! card mais `-valor`.
 
 use crate::busca::normalizar;
-use crate::configuracoes::Idioma;
+use crate::configuracoes::{Configuracoes, Idioma};
 use crate::{i18n, t, tk};
 
 /// O que um card é.
@@ -64,6 +64,19 @@ impl Definicao {
         (cfg!(windows) || !SO_WINDOWS.contains(&self.chave))
             && (cfg!(target_os = "linux") || !SO_LINUX.contains(&self.chave))
             && !(portatil && DO_SISTEMA.contains(&self.chave))
+    }
+
+    /// Se o card aparece com o que `config` liga em Geral: as seções dos assistentes de IA
+    /// somem com o `geral.assistente_ia` desligado, e as do controle por assistentes com o
+    /// `geral.mcp`.
+    pub fn ligada(&self, config: &Configuracoes) -> bool {
+        if [tk!("config-secao-ia"), tk!("config-secao-ia-servidor")].contains(&self.secao) {
+            config.geral.assistente_ia
+        } else if [tk!("config-secao-ia-local"), tk!("config-secao-mcp")].contains(&self.secao) {
+            config.geral.mcp
+        } else {
+            true
+        }
     }
 
     /// O id do card na tela.
@@ -143,18 +156,21 @@ pub fn termos(busca: &str) -> Vec<String> {
         .collect()
 }
 
-/// As definições que casam com a `busca`, na ordem da página.
-pub fn buscar(busca: &str) -> Vec<&'static Definicao> {
-    buscar_em(busca, crate::armazenamento::modo_portatil())
+/// As definições que casam com a `busca`, na ordem da página, sem as que `config` desliga.
+pub fn buscar(busca: &str, config: &Configuracoes) -> Vec<&'static Definicao> {
+    buscar_em(busca, crate::armazenamento::modo_portatil(), config)
 }
 
 /// [`buscar`] com o modo portable dado.
-pub fn buscar_em(busca: &str, portatil: bool) -> Vec<&'static Definicao> {
+pub fn buscar_em(busca: &str, portatil: bool, config: &Configuracoes) -> Vec<&'static Definicao> {
     let termos = termos(busca);
     CATALOGO
         .iter()
         .filter(|d| {
-            d.tipo != Tipo::Grupo && d.disponivel_em(portatil) && casa(&termos, &d.texto_da_busca())
+            d.tipo != Tipo::Grupo
+                && d.disponivel_em(portatil)
+                && d.ligada(config)
+                && casa(&termos, &d.texto_da_busca())
         })
         .collect()
 }
@@ -186,8 +202,11 @@ pub const CATALOGO: &[Definicao] = &[
     ),
     def!("geral.iniciar_na_bandeja", tk!("config-secao-geral"), Valor),
     def!("geral.atalho_no_menu", tk!("config-secao-geral"), Valor),
+    def!("geral.medidor_cpu", tk!("config-secao-geral"), Valor),
     def!("geral.recentes_max", tk!("config-secao-geral"), Valor),
     def!("acao.limpar_recentes", tk!("config-secao-geral"), Acao),
+    def!("geral.assistente_ia", tk!("config-secao-geral"), Valor),
+    def!("geral.mcp", tk!("config-secao-geral"), Valor),
     def!("acao.instalacao", tk!("config-secao-geral"), Acao),
     def!("acao.pasta_dados", tk!("config-secao-geral"), Acao),
     def!("acao.sobre", tk!("config-secao-geral"), Acao),
@@ -311,6 +330,11 @@ pub const CATALOGO: &[Definicao] = &[
     ),
     def!(
         "conexoes.reconectar.espera_secs",
+        tk!("config-secao-conexoes"),
+        Valor
+    ),
+    def!(
+        "conexoes.reconectar.retentar_mins",
         tk!("config-secao-conexoes"),
         Valor
     ),
@@ -488,6 +512,7 @@ pub const CATALOGO: &[Definicao] = &[
     def!("acao.perfis_de_rede", tk!("config-secao-redes"), Acao),
     def!("redes.espera_padrao_secs", tk!("config-secao-redes"), Valor),
     def!("redes.descer_ao_fechar", tk!("config-secao-redes"), Valor),
+    def!("redes.navegador", tk!("config-secao-redes"), Valor),
     // X11 e túneis
     def!("x11.padrao", tk!("config-secao-x11"), Valor),
     def!("x11.display", tk!("config-secao-x11"), Valor),
@@ -671,17 +696,50 @@ mod testes {
 
     #[test]
     fn a_busca_ignora_acentos_e_exige_todos_os_termos() {
-        let chaves = |q: &str| -> Vec<&str> { buscar(q).iter().map(|d| d.chave).collect() };
+        let padrao = Configuracoes::default();
+        let chaves =
+            |q: &str| -> Vec<&str> { buscar(q, &padrao).iter().map(|d| d.chave).collect() };
         assert!(chaves("FONTE").contains(&"terminal.tamanho_fonte"));
         assert!(chaves("pagina iniciar").contains(&"geral.pagina_inicial"));
         assert!(chaves("página ao iniciar").contains(&"geral.pagina_inicial"));
         assert!(chaves("fonte cursor zzz").is_empty());
-        assert!(buscar("xyz-nada").is_empty());
+        assert!(buscar("xyz-nada", &padrao).is_empty());
     }
 
     #[test]
     fn uma_secao_inteira_casa_pelo_nome() {
-        let ftp: Vec<_> = buscar("ftp").iter().map(|d| d.chave).collect();
+        let ftp: Vec<_> = buscar("ftp", &Configuracoes::default())
+            .iter()
+            .map(|d| d.chave)
+            .collect();
         assert!(ftp.contains(&"ftp.modo") && ftp.contains(&"ftp.tls"));
+    }
+
+    #[test]
+    fn as_areas_desligadas_em_geral_somem_da_busca() {
+        let chaves = |c: &Configuracoes, q: &str| -> Vec<&str> {
+            buscar(q, c).iter().map(|d| d.chave).collect()
+        };
+        let mut c = Configuracoes::default();
+        assert!(chaves(&c, "ollama").contains(&"acao.perfis_de_ia"));
+        assert!(chaves(&c, "auditoria").contains(&"ia.auditoria"));
+
+        c.geral.assistente_ia = false;
+        assert!(!chaves(&c, "ollama").contains(&"acao.perfis_de_ia"));
+        assert!(!chaves(&c, "claude").contains(&"ia.mostrar_claude"));
+        assert!(chaves(&c, "auditoria").contains(&"ia.auditoria"));
+        assert!(
+            chaves(&c, "assistente").contains(&"geral.assistente_ia"),
+            "o interruptor fica achável"
+        );
+
+        c.geral.mcp = false;
+        assert!(chaves(&c, "auditoria").is_empty());
+        assert!(
+            chaves(&c, "conversas")
+                .iter()
+                .all(|k| !k.starts_with("ia.conversas"))
+        );
+        assert!(chaves(&c, "mcp").contains(&"geral.mcp"));
     }
 }

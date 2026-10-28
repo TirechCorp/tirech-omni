@@ -111,7 +111,7 @@ pub fn endereco_da_pasta(pasta: &Path) -> PathBuf {
 /// chega: o Codex roda os servidores MCP só com `HOME`, `PATH`, `USER` e poucas outras. O uid é
 /// o dono do `/proc/self`, este processo.
 #[cfg(target_os = "linux")]
-fn pasta_de_execucao_do_usuario() -> Option<PathBuf> {
+pub(crate) fn pasta_de_execucao_do_usuario() -> Option<PathBuf> {
     use std::os::unix::fs::MetadataExt;
     let uid = std::fs::metadata("/proc/self").ok()?.uid();
     let pasta = PathBuf::from(format!("/run/user/{uid}"));
@@ -119,7 +119,7 @@ fn pasta_de_execucao_do_usuario() -> Option<PathBuf> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn pasta_de_execucao_do_usuario() -> Option<PathBuf> {
+pub(crate) fn pasta_de_execucao_do_usuario() -> Option<PathBuf> {
     None
 }
 

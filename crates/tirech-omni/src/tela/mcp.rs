@@ -25,6 +25,7 @@ use tomni_ui::terminal::Session;
 
 use super::mcp_aprovacao::Aprovacao;
 use super::{Janela, Tela};
+use crate::configuracoes::Configuracoes;
 use crate::espacos::id_da_chave;
 use crate::mcp::alvo::achar_conexao;
 use crate::mcp::auditoria::{self, DecisaoRegistrada, Registro};
@@ -347,11 +348,11 @@ impl EstadoMcp {
 }
 
 impl Tela {
-    /// Sobe e derruba o servidor conforme `ia.mcp_ligado`, e atende os pedidos que chegam.
+    /// Sobe e derruba o servidor conforme `ia.mcp_ligado` e `geral.mcp`, e atende os pedidos que chegam.
     pub(super) fn ligar_mcp(self: &Rc<Self>) {
         let (tela, config) = (Rc::clone(self), self.config);
         effect(move || {
-            let ligado = config.with(|c| c.ia.mcp_ligado);
+            let ligado = config.with(Configuracoes::mcp_no_ar);
             untrack(|| tela.alternar_servidor_mcp(ligado));
         });
         let (tela, fila) = (Rc::clone(self), self.mcp.fila.clone());
@@ -449,7 +450,7 @@ impl Tela {
         let liberada = |id: u64| {
             self.tree.with_untracked(|t| {
                 (permissao_efetiva(t, id) != PermissaoIa::Desligada)
-                    .then(|| t.connection(id).cloned())
+                    .then(|| t.conexao_para_abrir(id))
                     .flatten()
             })
         };

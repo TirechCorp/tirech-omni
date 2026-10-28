@@ -44,6 +44,10 @@ pub struct Opcoes {
     /// O endereço do canal do app (`--canal`), que vence o calculado: o "Controlar com" passa o
     /// seu, porque o Codex roda a ponte sem o `XDG_RUNTIME_DIR` e sem o `TIRECH_OMNI_CONFIG`.
     pub canal: Option<PathBuf>,
+    /// O texto que abre as `instructions` do `initialize` (`--instrucoes`): o "Controlar com"
+    /// passa ao Codex e ao OpenCode o mesmo que o Claude Code recebe pelo
+    /// `--append-system-prompt`, que eles não têm.
+    pub instrucoes: Option<String>,
 }
 
 /// O que fazer com os argumentos.
@@ -90,7 +94,8 @@ pub fn analisar(args: impl IntoIterator<Item = String>) -> Result<Pedido, String
                     json,
                 });
             }
-            "--espaco" | "--nome" | "--aba" | "--lancamento" | "--avisos" | "--canal" => {
+            "--espaco" | "--nome" | "--aba" | "--lancamento" | "--avisos" | "--canal"
+            | "--instrucoes" => {
                 let valor = args
                     .next()
                     .filter(|v| !v.trim().is_empty())
@@ -101,6 +106,7 @@ pub fn analisar(args: impl IntoIterator<Item = String>) -> Result<Pedido, String
                     "--lancamento" => opcoes.lancamento = Some(valor),
                     "--avisos" => return Ok(Pedido::Avisos(valor)),
                     "--canal" => opcoes.canal = Some(PathBuf::from(valor)),
+                    "--instrucoes" => opcoes.instrucoes = Some(valor),
                     _ => opcoes.nome = Some(valor),
                 }
             }
@@ -511,7 +517,7 @@ impl McpTools for Atendente<'_> {
     }
 
     fn instructions(&self) -> String {
-        let mut partes = Vec::new();
+        let mut partes: Vec<String> = self.ponte.opcoes.instrucoes.iter().cloned().collect();
         if let Some(aba) = &self.ponte.opcoes.aba {
             partes.push(t!("mcp-instrucoes-aba", aba = aba.clone()));
         }
@@ -570,6 +576,7 @@ mod tests {
                 lancamento: None,
                 cluster: false,
                 canal: None,
+                instrucoes: None,
             }))
         );
         assert!(analisar(args(&["--aba", "  "])).is_err());
@@ -594,6 +601,20 @@ mod tests {
                 ..Opcoes::default()
             }))
         );
+        assert_eq!(
+            analisar(args(&[
+                "--aba",
+                "0-3",
+                "--instrucoes",
+                "Trabalhe na aba \"api\"."
+            ])),
+            Ok(Pedido::Servir(Opcoes {
+                aba: Some("0-3".into()),
+                instrucoes: Some("Trabalhe na aba \"api\".".into()),
+                ..Opcoes::default()
+            }))
+        );
+        assert!(analisar(args(&["--instrucoes", " "])).is_err());
         assert_eq!(
             analisar(args(&["--avisos", "42-1"])),
             Ok(Pedido::Avisos("42-1".into()))

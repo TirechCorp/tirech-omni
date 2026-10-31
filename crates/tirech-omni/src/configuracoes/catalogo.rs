@@ -203,6 +203,7 @@ pub const CATALOGO: &[Definicao] = &[
     def!("geral.iniciar_na_bandeja", tk!("config-secao-geral"), Valor),
     def!("geral.atalho_no_menu", tk!("config-secao-geral"), Valor),
     def!("geral.medidor_cpu", tk!("config-secao-geral"), Valor),
+    def!("geral.origem_medidor", tk!("config-secao-geral"), Valor),
     def!("geral.recentes_max", tk!("config-secao-geral"), Valor),
     def!("acao.limpar_recentes", tk!("config-secao-geral"), Acao),
     def!("geral.assistente_ia", tk!("config-secao-geral"), Valor),

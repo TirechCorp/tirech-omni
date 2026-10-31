@@ -12,6 +12,19 @@ follow [SemVer](https://semver.org/).
   or the disk reads and writes of each one; filter, sort by column, the process tree and the End
   and Force end buttons, also in the right-click menu. On top, the charts of the last minute,
   as in the This app tab: the machine's CPU and memory, or the disk reads and writes.
+- The machine's available and total memory below the charts of the Processes tab, on Linux,
+  Windows, macOS and the SSH server.
+- The kernel time in red on the CPU chart and one chart per core, from the chart's right-click
+  menu (Change graph to > Logical processors), like Task Manager. The charts fit in the big
+  chart's area; above 32 cores they become a heat map, one tile per core with its usage in a
+  tooltip (512 cores fit).
+- The Network tab in Performance: what was received and sent in the last minute and a table
+  with each interface, physical or virtual, with its rates, totals and history.
+- Disk operations in the Disk tab: the Operations curve on the chart, the reads and writes per
+  second below it and a table with each disk, physical or virtual, with its history. On
+  Windows, also each process's operations per second.
+- Right-clicking the CPU meter in the title bar picks where the number comes from: this app,
+  this computer or the server of an open SSH connection.
 - macOS package: `tirech-omni-macos.dmg`, universal (Apple Silicon and Intel), with
   `Tirech Omni.app` and the command-line tools inside it, built by `empacotar-mac.sh` on a Mac.
 - Terminal autocomplete (Ctrl+Space): a list with the commands that fit the tab and where each

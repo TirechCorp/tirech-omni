@@ -1,6 +1,7 @@
-//! As abas Processos e Disco da página Desempenho. Com a fonte de teste (três processos que
-//! gastam sempre o mesmo: `init`, o `sshd` e o `rsync` que ele roda), a lista, o resumo, o
-//! filtro, a árvore, a ordem e os pedidos de encerrar; no Linux, também contra o servidor SSH de
+//! As abas Processos, Disco e Rede da página Desempenho. Com a fonte de teste (três processos
+//! que gastam sempre o mesmo: `init`, o `sshd` e o `rsync` que ele roda, quatro núcleos e três
+//! interfaces de rede), a lista, o resumo, o filtro, a árvore, a ordem, os pedidos de encerrar,
+//! o gráfico por núcleo e as interfaces; no Linux, também contra o servidor SSH de
 //! teste, que roda o script de leitura no `sh` deste computador e encerra um processo de verdade.
 
 mod comum;
@@ -8,6 +9,7 @@ mod comum;
 #[path = "comum/servidor.rs"]
 mod servidor;
 
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,7 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use tirech_omni::modelo::{Connection, Kind, Tree};
-use tirech_omni::processos::{FonteDeTeste, Maquina, PONTOS, foto_de_exemplo};
+use tirech_omni::processos::{FonteDeTeste, Foto, Maquina, PONTOS, TemposDeCpu, foto_de_exemplo};
 use tomni_ui::kurbo::Point;
 use tomni_ui::theme::Theme;
 use tomni_ui::{Key, Modifiers};
@@ -71,6 +73,7 @@ fn arvore() -> Tree {
 
 const TABELA: &str = "desempenho-processos-tabela";
 const DISCO: &str = "desempenho-disco-tabela";
+const REDE: &str = "desempenho-rede-tabela";
 
 /// A tela com a fonte de teste, a página Desempenho aberta na aba Processos e a primeira leitura
 /// já na tabela. Devolve também as máquinas que a fábrica recebeu.
@@ -90,6 +93,15 @@ impl Cena {
     /// taxas) e depois para, e a cena espera a última chegar. Assim os totais do disco e as
     /// curvas saem sempre iguais.
     fn para_snapshot(nome: &str, tema: Theme) -> Self {
+        Self::para_snapshot_com(nome, tema, foto_de_exemplo)
+    }
+
+    /// Como [`para_snapshot`](Self::para_snapshot), com as fotos de `fotos`.
+    fn para_snapshot_com(
+        nome: &str,
+        tema: Theme,
+        fotos: impl Fn(u64) -> Foto + Send + Sync + 'static,
+    ) -> Self {
         let ultima = PONTOS as u64;
         let parou = Arc::new(AtomicBool::new(false));
         let p = Arc::clone(&parou);
@@ -99,7 +111,7 @@ impl Cena {
                 p.store(true, Ordering::SeqCst);
                 thread::sleep(Duration::from_secs(60));
             }
-            Ok(foto_de_exemplo(n.min(ultima)))
+            Ok(fotos(n.min(ultima)))
         });
         let mut c = Self::com_fonte(nome, tema, fonte);
         esperar(&mut c.m.app, "a última foto", |_| {
@@ -372,10 +384,101 @@ fn os_graficos_mostram_a_maquina_e_o_disco() {
         "512,0 KB/s"
     );
     assert_eq!(c.m.app.text("desempenho-disco-usando"), "1");
+    // As operações vêm do `sda`; o `dm-0` por cima dele fica fora do total.
+    assert_eq!(c.m.app.text("desempenho-disco-leituras-numero"), "40/s");
+    assert_eq!(c.m.app.text("desempenho-disco-escritas-numero"), "120/s");
+    c.m.app.click("desempenho-disco-operacoes");
+    assert!(c.m.app.visible("desempenho-disco-grafico-operacoes"));
+    assert!(c.m.app.visible("desempenho-disco-quantos-discos"));
+    assert!(!c.m.app.visible("desempenho-disco-usando"));
+    assert_eq!(c.m.app.text("desempenho-disco-quantos-discos"), "1");
+    assert!((c.m.app.value("desempenho-disco-grafico-operacoes") - 160.0).abs() < 0.01);
+    assert_eq!(chaves(&c.m.app, "desempenho-disco-discos"), ["sda", "dm-0"]);
+    assert_eq!(
+        celulas(&c.m.app, "desempenho-disco-discos", "sda")[..6],
+        ["sda", "Físico", "40/s", "120/s", "512,0 KB/s", "2,0 MB/s"]
+    );
+    assert_eq!(
+        celulas(&c.m.app, "desempenho-disco-discos", "dm-0")[1],
+        "Virtual"
+    );
     // O ponto mais novo da série da escrita, em bytes por segundo.
     assert!(
         (c.m.app.value("desempenho-disco-grafico-escrita") - 2.0 * 1024.0 * 1024.0).abs() < 1.0
     );
+}
+
+#[test]
+fn a_cpu_mostra_o_kernel_e_um_grafico_por_nucleo_pelo_menu() {
+    let mut c = Cena::nova("processos-nucleos", Theme::Light);
+    esperar(&mut c.m.app, "a segunda leitura com taxas", |a| {
+        a.text("desempenho-processos-utilizacao") != "—"
+    });
+    // A média dos núcleos (40, 10, 4 e 2%) e a parte do kernel (10, 3, 1 e 1%).
+    assert_eq!(c.m.app.text("desempenho-processos-utilizacao"), "14%");
+    assert!(
+        c.m.app
+            .text("desempenho-processos-kernel")
+            .starts_with("3,")
+    );
+    assert!(!c.m.app.visible("desempenho-processos-nucleos"));
+    c.m.app.context_menu("desempenho-processos-grafico-cpu");
+    c.m.app.click("desempenho-processos-grafico-mudar");
+    c.m.app.click("desempenho-processos-grafico-nucleos");
+    assert!(c.m.app.visible("desempenho-processos-nucleos"));
+    assert!(!c.m.app.visible("desempenho-processos-grafico-cpu"));
+    for (n, uso) in [40.0, 10.0, 4.0, 2.0].into_iter().enumerate() {
+        let id = format!("desempenho-processos-nucleo-{n}");
+        assert!(c.m.app.visible(&id), "o núcleo {n}");
+        assert!(
+            (c.m.app.value(&id) - uso).abs() < 0.01,
+            "o uso do núcleo {n}"
+        );
+    }
+    // O mesmo menu, na grade, desliga o kernel e volta ao gráfico geral.
+    c.m.app.context_menu("desempenho-processos-nucleos");
+    c.m.app.click("desempenho-processos-grade-kernel");
+    c.m.app.context_menu("desempenho-processos-nucleos");
+    assert!(!c.m.app.checked("desempenho-processos-grade-kernel"));
+    c.m.app.click("desempenho-processos-grade-mudar");
+    c.m.app.click("desempenho-processos-grade-geral");
+    assert!(c.m.app.visible("desempenho-processos-grafico-cpu"));
+    assert!(!c.m.app.visible("desempenho-processos-nucleos"));
+    // Os números embaixo são os da curva escolhida.
+    assert!(c.m.app.visible("desempenho-processos-threads"));
+    assert!(!c.m.app.visible("desempenho-processos-memoria-total"));
+    c.m.app.click("desempenho-processos-memoria");
+    assert_eq!(c.m.app.text("desempenho-processos-memoria-total"), "8,0 GB");
+    assert!(!c.m.app.visible("desempenho-processos-threads"));
+}
+
+#[test]
+fn a_aba_rede_mostra_as_interfaces_e_o_trafego() {
+    let mut c = Cena::nova("processos-rede", Theme::Light);
+    c.m.app.click("desempenho-secoes-rede");
+    esperar(&mut c.m.app, "o tráfego", |a| {
+        a.text("desempenho-rede-recebendo") == "1,5 MB/s"
+    });
+    // Só as placas físicas contam no total: a ponte do Docker fica de fora.
+    assert_eq!(c.m.app.text("desempenho-rede-enviando"), "257,0 KB/s");
+    assert_eq!(
+        c.m.app.text("desempenho-rede-resumo"),
+        "3 interfaces · Recebendo 1,5 MB/s · Enviando 257,0 KB/s"
+    );
+    esperar(&mut c.m.app, "as taxas na tabela", |a| {
+        celulas(a, REDE, "docker0")[2] != "—"
+    });
+    assert_eq!(chaves(&c.m.app, REDE), ["eth0", "docker0", "wlan0"]);
+    assert_eq!(
+        celulas(&c.m.app, REDE, "docker0")[..4],
+        ["docker0", "Virtual", "64,0 KB/s", "64,0 KB/s"]
+    );
+    assert_eq!(celulas(&c.m.app, REDE, "eth0")[1], "Física");
+    // A rede não tem botões de encerrar, e o filtro procura no nome da interface.
+    assert!(c.m.app.tree().find("desempenho-rede-encerrar").is_none());
+    c.m.app.click("desempenho-rede-filtro").type_text("ETH");
+    assert_eq!(chaves(&c.m.app, REDE), ["eth0"]);
+    c.m.app.assert_lint();
 }
 
 #[test]
@@ -407,6 +510,113 @@ fn snapshot_da_aba_disco_escuro() {
     );
     c.m.app.click("desempenho-disco-escrita");
     c.m.app.assert_snapshot("desempenho-disco-escuro");
+}
+
+#[test]
+fn snapshot_da_aba_rede_claro() {
+    let mut c = Cena::para_snapshot("processos-snapshot-rede", Theme::Light);
+    c.m.app.click("desempenho-secoes-rede");
+    esperar(&mut c.m.app, "a tabela da rede", |a| {
+        a.grid(REDE).rows.len() == 3
+    });
+    c.m.app.assert_snapshot("desempenho-rede-claro");
+}
+
+#[test]
+fn snapshot_da_cpu_por_nucleo_escuro() {
+    let mut c = Cena::para_snapshot("processos-snapshot-nucleos", Theme::Dark);
+    c.m.app.context_menu("desempenho-processos-grafico-cpu");
+    c.m.app.click("desempenho-processos-grafico-mudar");
+    c.m.app.click("desempenho-processos-grafico-nucleos");
+    c.m.app.assert_snapshot("desempenho-nucleos-escuro");
+}
+
+/// A foto de exemplo com `total` núcleos, cada um com um uso diferente: o núcleo `i` gasta
+/// `i * 97 % 1000` milésimos de cada segundo, um quarto disso no kernel.
+fn foto_com_nucleos(n: u64, total: usize) -> Foto {
+    let mut foto = foto_de_exemplo(n);
+    foto.nucleos = total;
+    foto.cpus = (0..total as u64)
+        .map(|i| {
+            let ocupado = i * 97 % 1000;
+            let kernel = ocupado / 4;
+            TemposDeCpu {
+                usuario: Duration::from_millis(n * (ocupado - kernel)),
+                sistema: Duration::from_millis(n * kernel),
+                ocioso: Duration::from_millis(n * (1000 - ocupado)),
+            }
+        })
+        .collect();
+    foto
+}
+
+/// Troca o gráfico da CPU pela grade dos processadores lógicos, e confere que ela fica na
+/// área do gráfico, acima dos números.
+fn abrir_a_grade(app: &mut TestApp) {
+    app.context_menu("desempenho-processos-grafico-cpu");
+    app.click("desempenho-processos-grafico-mudar");
+    app.click("desempenho-processos-grafico-nucleos");
+    let grade = app.rect("desempenho-processos-nucleos");
+    let numeros = app.rect("desempenho-processos-utilizacao");
+    assert!(
+        grade.y1 <= numeros.y0,
+        "a grade {grade:?} passou por cima dos números {numeros:?}"
+    );
+}
+
+#[test]
+fn doze_nucleos_cabem_na_area_do_grafico() {
+    let mut c = Cena::para_snapshot_com("processos-snapshot-12", Theme::Light, |n| {
+        foto_com_nucleos(n, 12)
+    });
+    abrir_a_grade(&mut c.m.app);
+    let grade = c.m.app.rect("desempenho-processos-nucleos");
+    // Duas linhas de seis, todas dentro da grade e com altura para ler.
+    let topos: BTreeSet<i64> = (0..12)
+        .map(|n| {
+            let r = c.m.app.rect(&format!("desempenho-processos-nucleo-{n}"));
+            assert!(
+                r.x0 >= grade.x0 && r.x1 <= grade.x1 && r.y0 >= grade.y0 && r.y1 <= grade.y1,
+                "o núcleo {n} {r:?} fora da grade {grade:?}"
+            );
+            assert!(r.height() >= 40.0, "o núcleo {n} ficou baixo demais: {r:?}");
+            r.y0 as i64
+        })
+        .collect();
+    assert_eq!(topos.len(), 2);
+    assert!((c.m.app.value("desempenho-processos-nucleo-1") - 9.7).abs() < 0.01);
+    c.m.app.assert_snapshot("desempenho-nucleos-12-claro");
+}
+
+#[test]
+fn com_512_nucleos_fica_o_mapa_de_calor() {
+    let mut c = Cena::para_snapshot_com("processos-snapshot-512", Theme::Dark, |n| {
+        foto_com_nucleos(n, 512)
+    });
+    abrir_a_grade(&mut c.m.app);
+    const MAPA: &str = "desempenho-processos-nucleos-mapa";
+    assert!(c.m.app.visible(MAPA));
+    assert!(
+        c.m.app
+            .tree()
+            .find("desempenho-processos-nucleo-0")
+            .is_none()
+    );
+    let usos = c.m.app.values(MAPA);
+    assert_eq!(usos.len(), 512);
+    assert!((usos[1] - 9.7).abs() < 0.01 && (usos[11] - 6.7).abs() < 0.01);
+    // A dica fala do ladrilho sob o ponteiro.
+    let mapa = c.m.app.rect(MAPA);
+    c.m.app
+        .move_to(tomni_ui::heat_map_cell(512, mapa, 1).center());
+    c.m.app.wait(tomni_ui::TOOLTIP_DELAY);
+    let dica = format!("{MAPA}-tooltip");
+    assert!(c.m.app.is_open(&dica));
+    let arvore = c.m.app.tree();
+    let no = arvore.find(&dica).expect("a dica do mapa");
+    let texto = no.children.first().and_then(|t| t.text.clone());
+    assert_eq!(texto.as_deref(), Some("Processador 1: 9,7%"));
+    c.m.app.assert_snapshot("desempenho-nucleos-512-escuro");
 }
 
 /// Contra o servidor SSH de teste: o script de leitura roda no `sh` deste computador, então a
@@ -468,12 +678,14 @@ mod remoto {
         app.click("desempenho-secoes-processos");
         app.select("desempenho-processos-maquina", "servidor");
         app.type_into("desempenho-processos-filtro", &pid);
+        // A linha precisa existir na tela, não só nos dados da tabela, para receber o clique.
+        let linha = format!("{TABELA}-{pid}");
         esperar(&mut app, "o sleep na lista", |a| {
-            chaves(a, TABELA) == [pid.clone()]
+            chaves(a, TABELA) == [pid.clone()] && a.tree().find(&linha).is_some()
         });
         assert_eq!(celulas(&app, TABELA, &pid)[0], "sleep");
         assert_eq!(celulas(&app, TABELA, &pid)[7], "sleep 30");
-        app.click(&format!("{TABELA}-{pid}"));
+        app.click(&linha);
         app.click("desempenho-processos-encerrar");
         let status = filho.wait().expect("o fim do sleep");
         assert!(!status.success());
@@ -488,5 +700,72 @@ mod remoto {
             "{:?}",
             servidor.comandos()
         );
+    }
+
+    #[test]
+    fn o_medidor_mostra_a_cpu_do_servidor_ate_a_sessao_fechar() {
+        let pasta = Pasta::nova("processos-medidor-remoto");
+        let servidor = Rc::new(Servidor::novo(&pasta.caminho().join("servidor")));
+        let mut tree = Tree::default();
+        let mut c = Connection::new("servidor", Kind::Ssh);
+        c.host = "127.0.0.1".into();
+        c.port = servidor.porta;
+        c.user = "ana".into();
+        c.key_file = Some("/chaves/ana".into());
+        tree.add_connection(None, c);
+        pasta.semear(&tree);
+        pasta.pagina_inicial_padrao("terminais");
+        pasta.agente_padrao(false);
+        let mut ambiente = Ambiente::de_teste(pasta.caminho(), pasta.ssh());
+        ambiente.processos = Rc::new(fonte_do_sistema);
+        ambiente.ritmo_dos_processos = Duration::from_millis(300);
+        let caminho = pasta.caminho().to_path_buf();
+        let s = Rc::clone(&servidor);
+        let mut app = TestApp::new(move || {
+            tela_com_ferramentas(caminho, ambiente, move |_| Rc::new(AbreReal(s)), |_| {})
+        })
+        .size(1280, 720)
+        .theme(Theme::Light);
+        app.double_click("arvore-1");
+        esperar(&mut app, "a sessão SSH", |_| {
+            Session::find("1-1").is_some_and(|s| s.ssh_channels().is_some())
+        });
+        app.right_click("barra-de-titulo-cpu");
+        assert!(app.visible("barra-de-titulo-cpu-servidor-0"));
+        assert_eq!(app.label("barra-de-titulo-cpu-servidor-0"), "servidor");
+        assert!(!app.visible("barra-de-titulo-cpu-servidor-1"));
+        app.click("barra-de-titulo-cpu-servidor-0");
+        // A dica sai do "—" quando a primeira leitura do servidor chega.
+        let dica = |app: &mut TestApp| {
+            app.hover("barra-de-titulo-cpu");
+            app.wait(tomni_ui::TOOLTIP_DELAY + Duration::from_millis(10));
+            app.tree()
+                .find("barra-de-titulo-cpu-tooltip")
+                .and_then(|n| n.children.first().and_then(|t| t.text.clone()))
+                .unwrap_or_default()
+        };
+        let limite = Instant::now() + Duration::from_secs(10);
+        loop {
+            let texto = dica(&mut app);
+            if texto.starts_with("CPU de servidor: ") && !texto.ends_with('—') {
+                break;
+            }
+            assert!(Instant::now() < limite, "a dica do servidor: {texto}");
+            thread::sleep(Duration::from_millis(50));
+        }
+        app.right_click("barra-de-titulo-cpu");
+        assert!(app.checked("barra-de-titulo-cpu-servidor-0"));
+        app.key(Key::Escape);
+        // A sessão fechou: o medidor volta para o app.
+        app.close_tab("paineis-painel-0", "1-1");
+        let limite = Instant::now() + Duration::from_secs(10);
+        loop {
+            let texto = dica(&mut app);
+            if texto.starts_with("CPU do Tirech Omni: ") {
+                break;
+            }
+            assert!(Instant::now() < limite, "a dica de volta ao app: {texto}");
+            thread::sleep(Duration::from_millis(50));
+        }
     }
 }

@@ -104,8 +104,12 @@ config-geral-atalho_no_menu = Shortcut in the applications menu
     .palavras = desktop dock launcher icon menu applications
 
 config-geral-medidor_cpu = CPU meter in the title bar
-    .descricao = Shows how much of the processor { -app } uses. Clicking it opens the Performance page, with the weight of each terminal.
+    .descricao = Shows the processor usage. Clicking it opens the Performance page, with the weight of each terminal; right-clicking chooses where the number comes from.
     .palavras = cpu processor performance usage load meter chart task manager
+
+config-geral-origem_medidor = CPU meter source
+    .descricao = How much { -app } uses or the whole processor of this computer. The server of an open SSH connection is chosen in the meter's menu (right-click) and lasts until the session closes.
+    .palavras = cpu processor computer machine server ssh meter source average usage
 
 config-geral-recentes_max = Recents kept
     .descricao = How many connections the recents list keeps, not counting pinned ones.
@@ -995,6 +999,10 @@ opcao-validade-link-sete-dias = 7 days
 # AbrirEspaco
 opcao-abrir-espaco-nova-janela = New window
 opcao-abrir-espaco-janela-ativa = Active window
+
+# OrigemDoMedidor
+opcao-origem-do-medidor-app = This app
+opcao-origem-do-medidor-computador = This computer
 
 # AoFechar
 opcao-ao-fechar-perguntar = Ask

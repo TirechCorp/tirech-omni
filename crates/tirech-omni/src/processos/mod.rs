@@ -1,9 +1,10 @@
-//! Os processos de uma máquina, para as abas Processos e Disco da página Desempenho: este
+//! Os processos de uma máquina, para as abas Processos, Disco e Rede da página Desempenho: este
 //! computador ou o servidor do outro lado de uma conexão SSH.
 //!
-//! Uma [`FonteDeProcessos`] tira uma [`Foto`] (o que cada processo gastou até agora); o
-//! [`Comparador`] compara com a foto de antes e devolve a [`Leitura`], com a CPU em % da máquina
-//! e o disco por segundo de cada um. O [`Leitor`] faz isso numa thread, a cada `ritmo`, e
+//! Uma [`FonteDeProcessos`] tira uma [`Foto`] (o que cada processo, cada núcleo, cada disco e
+//! cada interface de rede gastou até agora); o [`Comparador`] compara com a foto de antes e
+//! devolve a [`Leitura`], com a CPU em % da máquina, o disco por segundo de cada processo, o uso
+//! de cada núcleo, as operações por segundo de cada disco e o tráfego de cada interface. O [`Leitor`] faz isso numa thread, a cada `ritmo`, e
 //! encerra processos quando a tela pede.
 //!
 //! As fontes: [`local::FonteLocal`] (o `/proc` no Linux, o Win32 no Windows e o `libproc` no
@@ -90,6 +91,42 @@ pub struct Processo {
     pub memoria: Option<u64>,
     /// Os bytes lidos e escritos até agora.
     pub disco: Option<(u64, u64)>,
+    /// As operações de leitura e de escrita até agora (só o Windows conta por processo).
+    pub operacoes: Option<(u64, u64)>,
+}
+
+/// O tempo de um núcleo lógico em cada modo, desde o boot.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TemposDeCpu {
+    pub usuario: Duration,
+    /// No kernel (com as interrupções, no Linux).
+    pub sistema: Duration,
+    pub ocioso: Duration,
+}
+
+/// Uma interface de rede e os bytes que passaram por ela até agora.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Interface {
+    pub nome: String,
+    pub recebidos: u64,
+    pub enviados: u64,
+    /// Se é uma placa de verdade, não uma VPN, ponte ou a interface de um contêiner.
+    pub fisica: bool,
+}
+
+/// Um disco e o que passou por ele até agora.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Disco {
+    pub nome: String,
+    /// As operações de leitura e de escrita.
+    pub leituras: u64,
+    pub escritas: u64,
+    /// Os bytes lidos e escritos.
+    pub lidos: u64,
+    pub escritos: u64,
+    /// Se é um disco de verdade, não um volume lógico, um RAID por software ou o contêiner do
+    /// APFS, que repetem o tráfego dos discos por baixo deles.
+    pub fisico: bool,
 }
 
 /// Uma foto da máquina: os processos e o relógio de quando foi tirada.
@@ -101,6 +138,12 @@ pub struct Foto {
     pub memoria_total: Option<u64>,
     pub memoria_disponivel: Option<u64>,
     pub processos: Vec<Processo>,
+    /// Os tempos de cada núcleo; vazio quando a fonte não diz.
+    pub cpus: Vec<TemposDeCpu>,
+    /// As interfaces ligadas, sem a de loopback.
+    pub interfaces: Vec<Interface>,
+    /// Os discos inteiros (sem as partições); vazio quando a fonte não diz.
+    pub discos: Vec<Disco>,
 }
 
 /// Um processo com o que gastou desde a foto de antes.
@@ -113,25 +156,105 @@ pub struct Linha {
     pub leitura: Option<f64>,
     /// Bytes escritos no disco por segundo.
     pub escrita: Option<f64>,
+    /// As operações de leitura e de escrita por segundo, onde a fonte conta por processo.
+    pub operacoes: Option<(f64, f64)>,
+}
+
+/// O uso de um núcleo desde a foto de antes, em %.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct UsoDoNucleo {
+    pub total: f64,
+    /// A parte do kernel.
+    pub sistema: f64,
+}
+
+/// Uma interface de rede com o tráfego desde a foto de antes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UsoDaInterface {
+    pub nome: String,
+    pub fisica: bool,
+    /// Os bytes recebidos e enviados até agora.
+    pub recebidos: u64,
+    pub enviados: u64,
+    /// Bytes por segundo; `None` na primeira foto em que a interface aparece.
+    pub recebendo: Option<f64>,
+    pub enviando: Option<f64>,
+}
+
+/// Um disco com as operações e os bytes desde a foto de antes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UsoDoDisco {
+    pub nome: String,
+    pub fisico: bool,
+    /// Os bytes lidos e escritos até agora.
+    pub lidos: u64,
+    pub escritos: u64,
+    /// As operações por segundo; `None` na primeira foto em que o disco aparece.
+    pub leituras: Option<f64>,
+    pub escritas: Option<f64>,
+    /// Os bytes por segundo, como nas operações.
+    pub lendo: Option<f64>,
+    pub escrevendo: Option<f64>,
 }
 
 /// O que a tela mostra: as linhas e os números da máquina.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Leitura {
     pub linhas: Vec<Linha>,
     pub nucleos: usize,
     pub memoria_total: Option<u64>,
     pub memoria_disponivel: Option<u64>,
+    /// O uso de cada núcleo; vazio sem os tempos da fonte ou na primeira foto.
+    pub nucleos_uso: Vec<UsoDoNucleo>,
+    /// As interfaces que já passaram algum byte.
+    pub interfaces: Vec<UsoDaInterface>,
+    /// Os discos que já fizeram alguma operação.
+    pub discos: Vec<UsoDoDisco>,
 }
 
 impl Leitura {
-    /// A CPU somada de todos os processos, em % da máquina.
+    /// A CPU da máquina em %: a média dos núcleos quando a fonte dá os tempos deles, senão a
+    /// soma dos processos.
     pub fn cpu(&self) -> f64 {
+        if !self.nucleos_uso.is_empty() {
+            return media(self.nucleos_uso.iter().map(|n| n.total));
+        }
         self.linhas
             .iter()
             .filter_map(|l| l.cpu)
             .sum::<f64>()
             .min(100.0)
+    }
+
+    /// A parte do kernel na CPU da máquina, em %; `None` sem os tempos dos núcleos.
+    pub fn cpu_sistema(&self) -> Option<f64> {
+        (!self.nucleos_uso.is_empty()).then(|| media(self.nucleos_uso.iter().map(|n| n.sistema)))
+    }
+
+    /// As interfaces que contam no total da máquina: as físicas, ou todas se não houver
+    /// nenhuma física (um contêiner, uma VM só com a ponte).
+    pub fn interfaces_do_total(&self) -> impl Iterator<Item = &UsoDaInterface> {
+        let alguma_fisica = self.interfaces.iter().any(|i| i.fisica);
+        self.interfaces
+            .iter()
+            .filter(move |i| i.fisica || !alguma_fisica)
+    }
+
+    /// A rede da máquina por segundo: o recebido e o enviado, somados das
+    /// [`interfaces_do_total`](Self::interfaces_do_total).
+    pub fn rede(&self) -> (f64, f64) {
+        self.interfaces_do_total().fold((0.0, 0.0), |(r, e), i| {
+            (
+                r + i.recebendo.unwrap_or(0.0),
+                e + i.enviando.unwrap_or(0.0),
+            )
+        })
+    }
+
+    /// O que a máquina já recebeu e enviou, pelas mesmas interfaces de [`rede`](Self::rede).
+    pub fn rede_total(&self) -> (u64, u64) {
+        self.interfaces_do_total()
+            .fold((0, 0), |(r, e), i| (r + i.recebidos, e + i.enviados))
     }
 
     /// A memória em uso: a da máquina quando a fonte diz, senão a soma dos processos.
@@ -142,8 +265,29 @@ impl Leitura {
         }
     }
 
-    /// O disco da máquina por segundo: a leitura e a escrita somadas.
+    /// Os discos que contam no total da máquina: os físicos, ou todos se não houver nenhum
+    /// físico (uma VM só com o volume lógico).
+    pub fn discos_do_total(&self) -> impl Iterator<Item = &UsoDoDisco> {
+        let algum_fisico = self.discos.iter().any(|d| d.fisico);
+        self.discos
+            .iter()
+            .filter(move |d| d.fisico || !algum_fisico)
+    }
+
+    /// Se a fonte disse as operações dos discos (e já há duas fotos para comparar).
+    fn discos_com_taxa(&self) -> bool {
+        self.discos.iter().any(|d| d.leituras.is_some())
+    }
+
+    /// O disco da máquina por segundo, a leitura e a escrita: o que passou pelos
+    /// [`discos_do_total`](Self::discos_do_total) quando a fonte diz, senão a soma dos processos
+    /// (que deixa de fora os de outros usuários quando não se é root).
     pub fn disco(&self) -> (f64, f64) {
+        if self.discos_com_taxa() {
+            return self.discos_do_total().fold((0.0, 0.0), |(l, e), d| {
+                (l + d.lendo.unwrap_or(0.0), e + d.escrevendo.unwrap_or(0.0))
+            });
+        }
         self.linhas.iter().fold((0.0, 0.0), |(l, e), linha| {
             (
                 l + linha.leitura.unwrap_or(0.0),
@@ -151,15 +295,67 @@ impl Leitura {
             )
         })
     }
+
+    /// As operações por segundo da máquina (o IOPS), as leituras e as escritas, somadas dos
+    /// [`discos_do_total`](Self::discos_do_total); `None` quando a fonte não diz.
+    pub fn operacoes(&self) -> Option<(f64, f64)> {
+        self.discos_com_taxa().then(|| {
+            self.discos_do_total().fold((0.0, 0.0), |(l, e), d| {
+                (l + d.leituras.unwrap_or(0.0), e + d.escritas.unwrap_or(0.0))
+            })
+        })
+    }
+}
+
+/// A média de valores em %, sem passar de 100.
+fn media(valores: impl ExactSizeIterator<Item = f64>) -> f64 {
+    let quantos = valores.len().max(1) as f64;
+    (valores.sum::<f64>() / quantos).clamp(0.0, 100.0)
 }
 
 /// Os processos de uma foto pelo pid e pelo início (o pid se repete depois que um acaba).
 type PorProcesso = HashMap<(u32, u64), Processo>;
 
+/// O que o comparador guarda da foto de antes.
+struct Anterior {
+    relogio: Duration,
+    processos: PorProcesso,
+    cpus: Vec<TemposDeCpu>,
+    /// Os bytes recebidos e enviados pelo nome da interface.
+    interfaces: HashMap<String, (u64, u64)>,
+    /// Os contadores de cada disco pelo nome.
+    discos: HashMap<String, Disco>,
+}
+
 /// Compara cada foto com a de antes.
 #[derive(Default)]
 pub struct Comparador {
-    anterior: Option<(Duration, PorProcesso)>,
+    anterior: Option<Anterior>,
+}
+
+/// O uso de cada núcleo entre duas fotos, pelos tempos deles (que já dizem quanto tempo passou).
+/// Se o número de núcleos mudou, não há uso.
+fn uso_dos_nucleos(antes: &[TemposDeCpu], agora: &[TemposDeCpu]) -> Vec<UsoDoNucleo> {
+    if antes.len() != agora.len() {
+        return Vec::new();
+    }
+    antes
+        .iter()
+        .zip(agora)
+        .map(|(antes, agora)| {
+            let delta = |a: Duration, b: Duration| b.saturating_sub(a).as_secs_f64();
+            let usuario = delta(antes.usuario, agora.usuario);
+            let sistema = delta(antes.sistema, agora.sistema);
+            let total = usuario + sistema + delta(antes.ocioso, agora.ocioso);
+            if total <= 0.0 {
+                return UsoDoNucleo::default();
+            }
+            UsoDoNucleo {
+                total: ((usuario + sistema) / total * 100.0).clamp(0.0, 100.0),
+                sistema: (sistema / total * 100.0).clamp(0.0, 100.0),
+            }
+        })
+        .collect()
 }
 
 impl Comparador {
@@ -176,20 +372,23 @@ impl Comparador {
             memoria_total,
             memoria_disponivel,
             processos,
+            cpus,
+            interfaces,
+            discos,
         } = foto;
         let nucleos = nucleos.max(1);
         let anterior = self.anterior.take();
         let intervalo = anterior
             .as_ref()
-            .map(|(antes, _)| relogio.saturating_sub(*antes).as_secs_f64())
+            .map(|a| relogio.saturating_sub(a.relogio).as_secs_f64())
             .filter(|s| *s > 0.0);
         let linhas = processos
             .iter()
             .map(|p| {
                 let antes = anterior
                     .as_ref()
-                    .and_then(|(_, mapa)| mapa.get(&(p.pid, p.inicio)));
-                let (cpu, leitura, escrita) = match (antes, intervalo) {
+                    .and_then(|a| a.processos.get(&(p.pid, p.inicio)));
+                let (cpu, leitura, escrita, operacoes) = match (antes, intervalo) {
                     (Some(antes), Some(segundos)) => {
                         let cpu = p.cpu.zip(antes.cpu).map(|(agora, antes)| {
                             let gasto = agora.saturating_sub(antes).as_secs_f64();
@@ -201,32 +400,95 @@ impl Comparador {
                                 agora.1.saturating_sub(antes.1) as f64 / segundos,
                             )
                         });
-                        (cpu, disco.map(|d| d.0), disco.map(|d| d.1))
+                        let operacoes = p.operacoes.zip(antes.operacoes).map(|(agora, antes)| {
+                            (
+                                agora.0.saturating_sub(antes.0) as f64 / segundos,
+                                agora.1.saturating_sub(antes.1) as f64 / segundos,
+                            )
+                        });
+                        (cpu, disco.map(|d| d.0), disco.map(|d| d.1), operacoes)
                     }
-                    _ => (None, None, None),
+                    _ => (None, None, None, None),
                 };
                 Linha {
                     processo: p.clone(),
                     cpu,
                     leitura,
                     escrita,
+                    operacoes,
                 }
             })
             .collect();
-        self.anterior = Some((
+        let nucleos_uso = anterior
+            .as_ref()
+            .map(|a| uso_dos_nucleos(&a.cpus, &cpus))
+            .unwrap_or_default();
+        let uso_das_interfaces = interfaces
+            .iter()
+            .filter(|i| i.recebidos > 0 || i.enviados > 0)
+            .map(|i| {
+                let antes = anterior
+                    .as_ref()
+                    .and_then(|a| a.interfaces.get(&i.nome))
+                    .zip(intervalo);
+                UsoDaInterface {
+                    nome: i.nome.clone(),
+                    fisica: i.fisica,
+                    recebidos: i.recebidos,
+                    enviados: i.enviados,
+                    recebendo: antes.map(|(a, s)| taxa(i.recebidos, a.0, s)),
+                    enviando: antes.map(|(a, s)| taxa(i.enviados, a.1, s)),
+                }
+            })
+            .collect();
+        let uso_dos_discos = discos
+            .iter()
+            .filter(|d| d.leituras > 0 || d.escritas > 0)
+            .map(|d| {
+                let antes = anterior
+                    .as_ref()
+                    .and_then(|a| a.discos.get(&d.nome))
+                    .zip(intervalo);
+                UsoDoDisco {
+                    nome: d.nome.clone(),
+                    fisico: d.fisico,
+                    lidos: d.lidos,
+                    escritos: d.escritos,
+                    leituras: antes.map(|(a, s)| taxa(d.leituras, a.leituras, s)),
+                    escritas: antes.map(|(a, s)| taxa(d.escritas, a.escritas, s)),
+                    lendo: antes.map(|(a, s)| taxa(d.lidos, a.lidos, s)),
+                    escrevendo: antes.map(|(a, s)| taxa(d.escritos, a.escritos, s)),
+                }
+            })
+            .collect();
+        self.anterior = Some(Anterior {
             relogio,
-            processos
+            processos: processos
                 .into_iter()
                 .map(|p| ((p.pid, p.inicio), p))
                 .collect(),
-        ));
+            cpus,
+            interfaces: interfaces
+                .into_iter()
+                .map(|i| (i.nome, (i.recebidos, i.enviados)))
+                .collect(),
+            discos: discos.into_iter().map(|d| (d.nome.clone(), d)).collect(),
+        });
         Leitura {
             linhas,
             nucleos,
             memoria_total,
             memoria_disponivel,
+            nucleos_uso,
+            interfaces: uso_das_interfaces,
+            discos: uso_dos_discos,
         }
     }
+}
+
+/// Quanto um contador andou por segundo (um contador que voltou a zero não anda).
+fn taxa(agora: u64, antes: u64, segundos: f64) -> f64 {
+    agora.saturating_sub(antes) as f64 / segundos
 }
 
 /// De qual máquina a fonte lê.
@@ -379,7 +641,10 @@ impl FonteDeTeste {
     }
 
     /// Três processos que gastam sempre o mesmo, um segundo por foto: `init` (pid 1), o
-    /// `sshd` (filho do 1) e o `rsync` que ele roda, que escreve 2 MB/s.
+    /// `sshd` (filho do 1) e o `rsync` que ele roda, que lê 512 KB/s e escreve 2 MB/s, em 40
+    /// leituras e 120 escritas por segundo no `sda` (o volume lógico `dm-0` por cima repete o
+    /// mesmo e fica fora do total). Os quatro núcleos somam os 14% deles, e a rede passa pela
+    /// `eth0` e pela `wlan0` (e pela ponte `docker0`, que fica fora do total).
     pub fn exemplo() -> Self {
         Self::nova(|n| Ok(foto_de_exemplo(n)))
     }
@@ -408,6 +673,7 @@ pub fn foto_de_exemplo(n: u64) -> Foto {
         cpu: Some(Duration::ZERO),
         memoria: Some(8 * 1024 * 1024),
         disco: Some((0, 0)),
+        operacoes: None,
     };
     let mut init = processo(1, 0, "init", "/sbin/init", "root");
     init.cpu = Some(segundos / 100);
@@ -420,12 +686,45 @@ pub fn foto_de_exemplo(n: u64) -> Foto {
     rsync.cpu = Some(segundos / 2);
     rsync.memoria = Some(120 * 1024 * 1024);
     rsync.disco = Some((n * 512 * 1024, n * 2 * 1024 * 1024));
+    rsync.operacoes = Some((n * 40, n * 120));
+    // O uso e a parte do kernel de cada núcleo, em milésimos de segundo por segundo.
+    let cpus = [(400, 100), (100, 30), (40, 10), (20, 10)]
+        .into_iter()
+        .map(|(ocupado, kernel): (u64, u64)| TemposDeCpu {
+            usuario: Duration::from_millis(n * (ocupado - kernel)),
+            sistema: Duration::from_millis(n * kernel),
+            ocioso: Duration::from_millis(n * (1000 - ocupado)),
+        })
+        .collect();
+    let interface = |nome: &str, recebidos: u64, enviados: u64, fisica| Interface {
+        nome: nome.to_owned(),
+        recebidos: n * recebidos * 1024,
+        enviados: n * enviados * 1024,
+        fisica,
+    };
     Foto {
         relogio: segundos,
         nucleos: 4,
         memoria_total: Some(8 * 1024 * 1024 * 1024),
         memoria_disponivel: Some(6 * 1024 * 1024 * 1024),
         processos: vec![init, sshd, rsync],
+        cpus,
+        interfaces: vec![
+            interface("eth0", 1536, 256, true),
+            interface("wlan0", 4, 1, true),
+            interface("docker0", 64, 64, false),
+        ],
+        discos: ["sda", "dm-0"]
+            .into_iter()
+            .map(|nome| Disco {
+                nome: nome.to_owned(),
+                leituras: n * 40,
+                escritas: n * 120,
+                lidos: n * 512 * 1024,
+                escritos: n * 2 * 1024 * 1024,
+                fisico: nome == "sda",
+            })
+            .collect(),
     }
 }
 
@@ -459,6 +758,7 @@ mod testes {
             memoria_total: None,
             memoria_disponivel: None,
             processos,
+            ..Foto::default()
         }
     }
 
@@ -513,6 +813,159 @@ mod testes {
         l.memoria_total = Some(1000);
         l.memoria_disponivel = Some(300);
         assert_eq!(l.memoria_em_uso(), 700);
+    }
+
+    fn tempos(usuario_ms: u64, sistema_ms: u64, ocioso_ms: u64) -> TemposDeCpu {
+        TemposDeCpu {
+            usuario: Duration::from_millis(usuario_ms),
+            sistema: Duration::from_millis(sistema_ms),
+            ocioso: Duration::from_millis(ocioso_ms),
+        }
+    }
+
+    #[test]
+    fn os_nucleos_dao_o_uso_e_a_parte_do_kernel() {
+        let mut c = Comparador::novo();
+        let mut primeira = foto(0, vec![processo(1, 1, 0, (0, 0))]);
+        primeira.cpus = vec![tempos(100, 100, 100), tempos(0, 0, 0)];
+        let l = c.comparar(primeira);
+        assert!(l.nucleos_uso.is_empty());
+        let mut segunda = foto(1000, vec![processo(1, 1, 3000, (0, 0))]);
+        // O primeiro núcleo: 600 ms ocupado (200 no kernel) de 1 s; o segundo, ocioso.
+        segunda.cpus = vec![tempos(500, 300, 500), tempos(0, 0, 1000)];
+        let l = c.comparar(segunda);
+        let arredondar = |v: f64| (v * 1000.0).round() / 1000.0;
+        let uso: Vec<(f64, f64)> = l
+            .nucleos_uso
+            .iter()
+            .map(|n| (arredondar(n.total), arredondar(n.sistema)))
+            .collect();
+        assert_eq!(uso, vec![(60.0, 20.0), (0.0, 0.0)]);
+        // A CPU da máquina vem dos núcleos, não da soma dos processos (que daria 75%).
+        assert_eq!(arredondar(l.cpu()), 30.0);
+        assert_eq!(l.cpu_sistema().map(arredondar), Some(10.0));
+        // Um núcleo a mais (ou a menos) entre as fotos: sem uso, e a CPU volta à soma.
+        let mut terceira = foto(2000, vec![processo(1, 1, 3000, (0, 0))]);
+        terceira.cpus = vec![tempos(0, 0, 0)];
+        let l = c.comparar(terceira);
+        assert!(l.nucleos_uso.is_empty());
+        assert_eq!(l.cpu_sistema(), None);
+        assert_eq!(l.cpu(), 0.0);
+    }
+
+    #[test]
+    fn a_rede_soma_as_placas_fisicas_por_segundo() {
+        let interface = |nome: &str, recebidos, enviados, fisica| Interface {
+            nome: nome.to_owned(),
+            recebidos,
+            enviados,
+            fisica,
+        };
+        let mut c = Comparador::novo();
+        let mut primeira = foto(0, Vec::new());
+        primeira.interfaces = vec![
+            interface("eth0", 1000, 100, true),
+            interface("docker0", 50, 50, false),
+            interface("tun0", 0, 0, false),
+        ];
+        let l = c.comparar(primeira);
+        // A que nunca passou nada some; as outras ainda não têm taxa.
+        let nomes: Vec<&str> = l.interfaces.iter().map(|i| i.nome.as_str()).collect();
+        assert_eq!(nomes, ["eth0", "docker0"]);
+        assert_eq!(l.rede(), (0.0, 0.0));
+        assert_eq!(l.rede_total(), (1000, 100));
+        let mut segunda = foto(2000, Vec::new());
+        segunda.interfaces = vec![
+            interface("eth0", 5000, 300, true),
+            interface("docker0", 450, 50, false),
+            interface("wg0", 10, 10, false),
+        ];
+        let l = c.comparar(segunda);
+        let eth0 = &l.interfaces[0];
+        assert_eq!((eth0.recebendo, eth0.enviando), (Some(2000.0), Some(100.0)));
+        assert_eq!(l.interfaces[1].recebendo, Some(200.0));
+        // A `wg0` apareceu agora: ainda sem taxa.
+        assert_eq!(l.interfaces[2].recebendo, None);
+        // O total da máquina é só da `eth0`.
+        assert_eq!(l.rede(), (2000.0, 100.0));
+        assert_eq!(l.rede_total(), (5000, 300));
+        // Sem placa física (um contêiner), contam todas.
+        let mut terceira = foto(4000, Vec::new());
+        terceira.interfaces = vec![interface("docker0", 850, 250, false)];
+        let l = c.comparar(terceira);
+        assert_eq!(l.rede(), (200.0, 100.0));
+    }
+
+    #[test]
+    fn a_foto_de_exemplo_tem_os_mesmos_14_por_cento_nos_nucleos() {
+        let mut c = Comparador::novo();
+        c.comparar(foto_de_exemplo(1));
+        let l = c.comparar(foto_de_exemplo(2));
+        let soma_dos_processos: f64 = l.linhas.iter().filter_map(|l| l.cpu).sum();
+        assert!((l.cpu() - 14.0).abs() < 1e-9, "{}", l.cpu());
+        assert!((soma_dos_processos - 14.0).abs() < 1e-9);
+        assert!((l.cpu_sistema().unwrap_or(0.0) - 3.75).abs() < 1e-9);
+        let (recebendo, enviando) = l.rede();
+        assert_eq!((recebendo, enviando), (1540.0 * 1024.0, 257.0 * 1024.0));
+        // O disco da máquina é o do `sda`, o mesmo que o rsync faz.
+        assert_eq!(l.disco(), (512.0 * 1024.0, 2.0 * 1024.0 * 1024.0));
+        assert_eq!(l.operacoes(), Some((40.0, 120.0)));
+    }
+
+    #[test]
+    fn os_discos_dao_as_operacoes_por_segundo_dos_fisicos() {
+        let disco = |nome: &str, leituras, escritas, fisico| Disco {
+            nome: nome.to_owned(),
+            leituras,
+            escritas,
+            lidos: leituras * 4096,
+            escritos: escritas * 4096,
+            fisico,
+        };
+        let mut c = Comparador::novo();
+        let mut primeira = foto(0, vec![processo(1, 1, 0, (0, 0))]);
+        primeira.discos = vec![
+            disco("sda", 100, 50, true),
+            disco("dm-0", 100, 50, false),
+            disco("sr0", 0, 0, true),
+        ];
+        let l = c.comparar(primeira);
+        // O que nunca fez nada some; os outros ainda não têm taxa, e o disco vem dos processos.
+        let nomes: Vec<&str> = l.discos.iter().map(|d| d.nome.as_str()).collect();
+        assert_eq!(nomes, ["sda", "dm-0"]);
+        assert_eq!(l.operacoes(), None);
+        let mut segunda = foto(2000, vec![processo(1, 1, 0, (2000, 0))]);
+        segunda.discos = vec![
+            disco("sda", 300, 450, true),
+            disco("dm-0", 300, 450, false),
+            disco("nvme0n1", 10, 10, true),
+        ];
+        let l = c.comparar(segunda);
+        let sda = &l.discos[0];
+        assert_eq!((sda.leituras, sda.escritas), (Some(100.0), Some(200.0)));
+        assert_eq!(sda.lendo, Some(100.0 * 4096.0));
+        assert_eq!(l.discos[2].leituras, None, "o nvme apareceu agora");
+        // O total é só do `sda`; o `dm-0` repete o mesmo tráfego.
+        assert_eq!(l.operacoes(), Some((100.0, 200.0)));
+        assert_eq!(l.disco(), (100.0 * 4096.0, 200.0 * 4096.0));
+        // Sem disco físico, contam todos.
+        let mut terceira = foto(4000, Vec::new());
+        terceira.discos = vec![disco("dm-0", 500, 450, false)];
+        assert_eq!(c.comparar(terceira).operacoes(), Some((100.0, 0.0)));
+    }
+
+    #[test]
+    fn as_operacoes_do_processo_por_segundo() {
+        let mut c = Comparador::novo();
+        let mut p = processo(9, 9, 0, (0, 0));
+        p.operacoes = Some((10, 20));
+        c.comparar(foto(0, vec![p.clone()]));
+        p.operacoes = Some((30, 120));
+        let l = c.comparar(foto(2000, vec![p]));
+        assert_eq!(l.linhas[0].operacoes, Some((10.0, 50.0)));
+        // Sem os contadores (Linux, macOS), sem operações.
+        let l = c.comparar(foto(3000, vec![processo(9, 9, 0, (0, 0))]));
+        assert_eq!(l.linhas[0].operacoes, None);
     }
 
     #[test]

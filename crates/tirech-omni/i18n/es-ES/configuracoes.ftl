@@ -104,8 +104,12 @@ config-geral-atalho_no_menu = Acceso directo en el menú de aplicaciones
     .palavras = desktop dock lanzador icono launcher menu aplicaciones
 
 config-geral-medidor_cpu = Medidor de CPU en la barra de título
-    .descricao = Muestra cuánto del procesador usa { -app }. Al hacer clic en él se abre la página Rendimiento, con el peso de cada terminal.
+    .descricao = Muestra cuánto del procesador usa { -app }. Al hacer clic en él se abre la página Rendimiento, con el peso de cada terminal; el botón derecho elige de dónde sale el número.
     .palavras = cpu procesador rendimiento uso consumo medidor grafico administrador de tareas
+
+config-geral-origem_medidor = Origen del medidor de CPU
+    .descricao = Lo que usa { -app } o el procesador entero de este equipo. El servidor de una conexión SSH abierta se elige en el menú del medidor (botón derecho) y vale hasta que la sesión se cierra.
+    .palavras = cpu procesador equipo maquina servidor ssh medidor origen media uso
 
 config-geral-recentes_max = Recientes guardados
     .descricao = Cuántas conexiones guarda la lista de recientes, sin contar las ancladas.
@@ -992,6 +996,10 @@ opcao-validade-link-sete-dias = 7 días
 # AbrirEspaco
 opcao-abrir-espaco-nova-janela = Nueva ventana
 opcao-abrir-espaco-janela-ativa = Ventana activa
+
+# OrigemDoMedidor
+opcao-origem-do-medidor-app = Esta aplicación
+opcao-origem-do-medidor-computador = Este equipo
 
 # AoFechar
 opcao-ao-fechar-perguntar = Preguntar

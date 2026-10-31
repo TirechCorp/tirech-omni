@@ -4,17 +4,14 @@
 
 mod comum;
 
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use serde_json::{Value, json};
-use tirech_omni::mcp::permissao::PermissaoIa;
 use tirech_omni::mcp::ponte;
-use tirech_omni::modelo::{Connection, Kind, Tree};
-use tomni_ui::theme::Theme;
 
-use comum::{Montagem, Pasta, montar};
+use comum::Pasta;
 
 /// Uma saída que o teste lê de volta.
 #[derive(Clone, Default)]
@@ -323,17 +320,21 @@ fn ajuda_e_argumento_desconhecido() {
 #[cfg(unix)]
 mod unix {
     use std::collections::HashMap;
-    use std::io::BufReader;
+    use std::io::{BufRead, BufReader};
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixStream;
     use std::path::PathBuf;
     use std::time::{Duration, Instant};
 
     use tirech_omni::mcp::canal::{Abertura, RespostaDaAbertura, VERSAO, conectar};
+    use tirech_omni::mcp::permissao::PermissaoIa;
     use tirech_omni::mcp::servidor::{AVISOS, Fila, Pedido, ServidorMcp, tirar};
+    use tirech_omni::modelo::{Connection, Kind, Tree};
     use tomni_ui::files::Live;
+    use tomni_ui::theme::Theme;
     use tomni_ui_test::TestApp;
 
+    use super::comum::{Montagem, montar};
     use super::*;
 
     fn abrir(

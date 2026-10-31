@@ -14,7 +14,8 @@ use tirech_omni::configuracoes::{
     AbrirAbaAuto, AbrirAbaIa, AbrirEm, AbrirEspaco, AbrirIa, AoFechar, AssistentePreferido,
     BotaoDireito, Campainha, ChaveNova, ColarArquivos, Configuracoes, ConflitoCfg,
     ConversaAoControlar, Cursor, EnviarEditado, Esquema, Idioma, MetodoIa, ModoComparar, ModoNotas,
-    ModoReconectar, PaginaInicial, Tema, TipoChave, TmuxAoFechar, ValidadeLink, X11Padrao,
+    ModoReconectar, OrigemDoMedidor, PaginaInicial, Tema, TipoChave, TmuxAoFechar, ValidadeLink,
+    X11Padrao,
 };
 use tirech_omni::modelo::{FtpCodificacao, FtpModo, FtpSeguranca, FtpTls, S3Estilo};
 use tomni_ui::Key;
@@ -659,6 +660,12 @@ efeito_escolha!(
     "geral.idioma",
     Idioma::TODAS,
     geral.idioma
+);
+efeito_escolha!(
+    efeito_geral__origem_medidor,
+    "geral.origem_medidor",
+    OrigemDoMedidor::TODAS,
+    geral.origem_medidor
 );
 efeito_escolha!(
     efeito_geral__ao_fechar,

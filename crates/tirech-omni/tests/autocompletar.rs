@@ -5,12 +5,10 @@
 
 mod comum;
 
-use std::net::TcpStream;
-use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use tirech_omni::modelo::{
-    ComandosAoConectar, Connection, Espera, Kind, ModoComandos, Passo, TipoTunel, Tree, Tunel,
+    ComandosAoConectar, Connection, Espera, Kind, ModoComandos, Passo, Tree,
 };
 use tomni_ui::Shortcut;
 use tomni_ui::theme::Theme;
@@ -108,7 +106,11 @@ fn os_comandos_ao_conectar_e_os_escolhidos_entram_e_o_enter_insere_sem_executar(
 #[cfg(unix)]
 #[test]
 fn o_tunel_do_shell_local_sugere_o_rdp_na_porta_de_verdade() {
+    use std::net::TcpStream;
+    use std::rc::Rc;
+
     use tirech_omni::abrir::RealOpener;
+    use tirech_omni::modelo::{TipoTunel, Tunel};
     use tirech_omni::redes::{PerfilRede, ProxyRede, Rede, TipoProxy};
     use tirech_omni::tela::tela_com_ssh;
     use tomni_ui::net::HttpProxyServer;

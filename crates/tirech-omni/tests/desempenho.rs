@@ -4,8 +4,11 @@
 mod comum;
 
 use std::rc::Rc;
+use std::thread;
 use std::time::{Duration, Instant};
 
+use tirech_omni::armazenamento::Armazenamento;
+use tirech_omni::configuracoes::{Configuracoes, OrigemDoMedidor};
 use tirech_omni::desempenho::{FonteFixa, LeituraDaAba, Medicao, UsoDoProcesso};
 use tirech_omni::modelo::{Connection, Kind, Tree};
 use tomni_ui::TOOLTIP_DELAY;
@@ -155,6 +158,87 @@ fn o_medidor_mostra_a_cpu_do_app_e_a_dica() {
         dica(&mut c.m.app, "barra-de-titulo-cpu").as_deref(),
         Some("CPU do Tirech Omni: 40%")
     );
+}
+
+/// Espera de verdade (o leitor de processos anda numa thread): dorme um pouco e desenha um
+/// quadro, até `pronto` ou 10 s.
+fn esperar(app: &mut TestApp, o_que: &str, pronto: impl Fn(&TestApp) -> bool) {
+    let limite = Instant::now() + Duration::from_secs(10);
+    while !pronto(app) {
+        assert!(Instant::now() < limite, "esperando {o_que}");
+        thread::sleep(Duration::from_millis(20));
+        app.frame();
+    }
+}
+
+/// A origem do medidor gravada no arquivo.
+fn origem_gravada(pasta: &Pasta) -> OrigemDoMedidor {
+    Configuracoes::carregar(&Armazenamento::new(pasta.caminho()))
+        .0
+        .geral
+        .origem_medidor
+}
+
+/// O medidor mostra os 14% deste computador (os quatro núcleos da fonte de teste).
+fn mostra_o_computador(app: &TestApp) -> bool {
+    (app.value("barra-de-titulo-cpu") - 0.14).abs() < 1e-9
+}
+
+#[test]
+fn o_menu_do_medidor_escolhe_de_onde_vem_a_cpu() {
+    let mut c = Cena::nova("desempenho-origem", Theme::Light, &[]);
+    c.um_segundo_de_uso();
+    c.m.app.right_click("barra-de-titulo-cpu");
+    assert!(c.m.app.visible("barra-de-titulo-cpu-menu"));
+    assert_eq!(c.m.app.label("barra-de-titulo-cpu-app"), "Este app");
+    assert_eq!(
+        c.m.app.label("barra-de-titulo-cpu-computador"),
+        "Este computador"
+    );
+    assert!(c.m.app.checked("barra-de-titulo-cpu-app"));
+    assert!(!c.m.app.checked("barra-de-titulo-cpu-computador"));
+    // As conexões de teste não têm SSH de verdade: nenhum servidor no menu.
+    assert!(!c.m.app.visible("barra-de-titulo-cpu-servidor-0"));
+    c.m.app.assert_lint();
+
+    c.m.app.click("barra-de-titulo-cpu-computador");
+    assert!(!c.m.app.visible("barra-de-titulo-cpu-menu"));
+    esperar(&mut c.m.app, "a CPU deste computador", mostra_o_computador);
+    assert_eq!(
+        dica(&mut c.m.app, "barra-de-titulo-cpu").as_deref(),
+        Some("CPU deste computador: 14%")
+    );
+    assert_eq!(origem_gravada(&c._pasta), OrigemDoMedidor::Computador);
+    c.m.app.right_click("barra-de-titulo-cpu");
+    assert!(c.m.app.checked("barra-de-titulo-cpu-computador"));
+
+    // De volta ao app: os 40% do segundo de uso.
+    c.m.app.click("barra-de-titulo-cpu-app");
+    assert!((c.m.app.value("barra-de-titulo-cpu") - 0.4).abs() < 1e-9);
+    assert_eq!(origem_gravada(&c._pasta), OrigemDoMedidor::App);
+}
+
+#[test]
+fn a_origem_das_configuracoes_vale_ao_abrir_e_o_app_nao_e_medido() {
+    let mut c = Cena::nova(
+        "desempenho-origem-gravada",
+        Theme::Light,
+        &[("geral", "origem_medidor", serde_json::json!("computador"))],
+    );
+    esperar(&mut c.m.app, "a CPU deste computador", mostra_o_computador);
+    // Com o medidor neste computador e a página fechada, o app não é amostrado.
+    c.um_segundo_de_uso();
+    assert!(mostra_o_computador(&c.m.app));
+    c.m.app.click("barra-de-titulo-cpu");
+    assert_eq!(c.m.app.text("desempenho-utilizacao"), "0%");
+}
+
+#[test]
+fn o_item_do_menu_do_medidor_abre_a_pagina() {
+    let mut c = Cena::nova("desempenho-menu-abrir", Theme::Light, &[]);
+    c.m.app.right_click("barra-de-titulo-cpu");
+    c.m.app.click("barra-de-titulo-cpu-abrir");
+    assert!(c.m.app.visible("desempenho-pagina"));
 }
 
 #[test]

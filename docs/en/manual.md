@@ -175,7 +175,10 @@ tabs from the previous state does not count. Deleting a connection removes its r
   the folder changes.
 - **Performance (CPU, memory and the weight of each terminal)**: in the title bar, next to the
   theme button, a meter of small squares, from light yellow to dark red, shows how much of the
-  computer's CPU the whole app is using right now (the tooltip gives the number). The **CPU meter
+  computer's CPU the whole app is using right now (the tooltip gives the number). Right-clicking
+  the meter picks where the number comes from: **This app**, **This computer** (the whole
+  processor) or the server of an open SSH connection, which holds until the session closes; the
+  choice between the first two is kept in **CPU meter source**, in Settings › General. The **CPU meter
   in the title bar** switch, in Settings › General, hides it. Clicking it, or View ▸
   **Performance**, opens the Performance page, like the Task Manager's: CPU, Memory and Network on
   the left with a small graph of each; on the right the chart of the last minute for the chosen

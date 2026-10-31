@@ -3,8 +3,10 @@
 //! escolhida, com os números embaixo; e a tabela "Por terminal", com o peso de cada aba. As
 //! contas estão em [`crate::desempenho`].
 //!
-//! As amostras só correm com o medidor ligado (`geral.medidor_cpu`) ou com a página aberta: uma
-//! thread bate a cada segundo e para quando nenhum dos dois pede.
+//! As amostras só correm com o medidor ligado (`geral.medidor_cpu`) mostrando o app ou com a
+//! página aberta: uma thread bate a cada segundo e para quando nenhum dos dois pede. Com o
+//! medidor mostrando este computador ou um servidor SSH (o menu do botão direito), quem lê é um
+//! leitor de processos só dele.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -17,10 +19,13 @@ use tomni_ui::files::Live;
 use tomni_ui::prelude::*;
 
 use super::Tela;
-use super::processos::{self, Processos};
+use super::processos::{self, Corrente, Processos};
+use crate::agente::ler_contador;
+use crate::configuracoes::OrigemDoMedidor;
 use crate::desempenho::{self as conta, Amostra, Amostrador, PONTOS, RITMO};
 use crate::espacos::id_da_chave;
 use crate::janelas::Janela;
+use crate::processos::Evento;
 use crate::t;
 
 /// O id da página na navegação.
@@ -28,6 +33,38 @@ pub(super) const PAGINA: &str = "desempenho";
 
 /// A chave da linha "Interface" da tabela (o que não é de nenhuma aba).
 const INTERFACE: &str = "interface";
+
+/// Quantos servidores SSH o menu do medidor oferece.
+const SERVIDORES_NO_MENU: usize = 9;
+
+/// De onde vem o número do medidor (o grupo dos itens de rádio do menu dele).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Origem {
+    /// O quanto o app usa.
+    App,
+    /// Este computador inteiro.
+    Computador,
+    /// O servidor do lugar `n` da lista de servidores do menu.
+    Servidor(usize),
+}
+
+impl From<OrigemDoMedidor> for Origem {
+    fn from(origem: OrigemDoMedidor) -> Self {
+        match origem {
+            OrigemDoMedidor::App => Self::App,
+            OrigemDoMedidor::Computador => Self::Computador,
+        }
+    }
+}
+
+/// Os servidores do menu do medidor: as sessões SSH conectadas, pelo rótulo do seletor da aba
+/// Processos.
+fn servidores(tela: &Tela) -> Vec<(String, tomni_ui::terminal::Session)> {
+    processos::maquinas(tela)
+        .into_iter()
+        .filter_map(|(rotulo, sessao)| Some((rotulo, sessao?)))
+        .collect()
+}
 
 /// O que a página guarda enquanto o app está aberto.
 #[derive(Clone, Copy)]
@@ -52,12 +89,25 @@ pub(super) struct Desempenho {
     grafico: Signal<usize>,
     /// As abas Processos e Disco.
     processos: Processos,
+    /// De onde vem o número do medidor.
+    origem: Signal<Origem>,
+    /// O rótulo do servidor escolhido no menu do medidor, com a origem num servidor.
+    servidor: Signal<Option<String>>,
+    /// A CPU da máquina do medidor, em %, com a origem fora do app (`None` antes da primeira
+    /// leitura ou com erro).
+    cpu_da_maquina: Signal<Option<f64>>,
+    /// Sobe a cada entrega do leitor do medidor.
+    pronto: Signal<u64>,
 }
 
-/// Se a amostragem deve correr: o medidor ligado ou a página aberta em alguma janela.
-fn ativo(tela: &Tela) -> impl Fn() -> bool + Clone + 'static {
+/// Se a amostragem deve correr: o medidor ligado mostrando o app ou a página aberta em alguma
+/// janela.
+fn ativo(tela: &Tela, origem: Signal<Origem>) -> impl Fn() -> bool + Clone + 'static {
     let (config, janelas) = (tela.config, tela.janelas.clone());
-    move || config.with(|c| c.geral.medidor_cpu) || janelas.alguma_em(PAGINA)
+    move || {
+        (config.with(|c| c.geral.medidor_cpu) && origem.get() == Origem::App)
+            || janelas.alguma_em(PAGINA)
+    }
 }
 
 /// Põe `valor` no fim da série, que guarda os [`PONTOS`] mais novos.
@@ -84,9 +134,14 @@ pub(super) fn ligar(tela: &Rc<Tela>) -> Desempenho {
             let janelas = tela.janelas.clone();
             move || janelas.alguma_em(PAGINA)
         }),
+        origem: signal(Origem::App),
+        servidor: signal(None),
+        cpu_da_maquina: signal(None),
+        pronto: signal(0),
     };
+    ligar_a_origem(tela, d);
     let medicao = tela.ferramentas.ambiente().medicao.clone();
-    let ativo = ativo(tela);
+    let ativo = ativo(tela, d.origem);
     let batida = match medicao.batida {
         Some(batida) => batida,
         None => batida_do_sistema(ativo.clone()),
@@ -143,6 +198,123 @@ pub(super) fn ligar(tela: &Rc<Tela>) -> Desempenho {
         });
     });
     d
+}
+
+/// A origem do medidor: a das configurações, um servidor escolhido no menu enquanto a sessão
+/// dele existe, e o leitor de processos da máquina quando a origem não é o app.
+fn ligar_a_origem(tela: &Rc<Tela>, d: Desempenho) {
+    let config = tela.config;
+
+    // As configurações mandam na origem quando mudam (e na abertura).
+    let gravada = memo(move || config.with(|c| c.geral.origem_medidor));
+    effect(move || {
+        let origem = Origem::from(gravada.get());
+        if d.origem.get_untracked() != origem {
+            d.origem.set(origem);
+        }
+    });
+
+    // A escolha no menu: o app ou este computador ficam gravados; um servidor guarda o rótulo
+    // do lugar escolhido.
+    let t = Rc::clone(tela);
+    effect(move || {
+        let origem = d.origem.get();
+        untrack(|| match origem {
+            Origem::App | Origem::Computador => {
+                d.servidor.set(None);
+                let gravar = match origem {
+                    Origem::Computador => OrigemDoMedidor::Computador,
+                    _ => OrigemDoMedidor::App,
+                };
+                if config.with(|c| c.geral.origem_medidor) != gravar {
+                    t.config.update(|c| c.geral.origem_medidor = gravar);
+                }
+            }
+            Origem::Servidor(n) => match servidores(&t).into_iter().nth(n) {
+                Some((rotulo, _)) => {
+                    if d.servidor.get() != Some(rotulo.clone()) {
+                        d.servidor.set(Some(rotulo));
+                    }
+                }
+                None => d.origem.set(gravada.get().into()),
+            },
+        });
+    });
+
+    // A cada leitura e a cada aba que abre ou fecha, o servidor escolhido continua na lista?
+    // Mudou de lugar, a origem segue; saiu (a sessão fechou), volta para a das configurações.
+    let t = Rc::clone(tela);
+    effect(move || {
+        ler_contador(d.pronto);
+        let lista = servidores(&t);
+        untrack(|| {
+            let (Origem::Servidor(n), Some(rotulo)) = (d.origem.get(), d.servidor.get()) else {
+                return;
+            };
+            match lista.iter().position(|(r, _)| *r == rotulo) {
+                Some(lugar) if lugar != n => d.origem.set(Origem::Servidor(lugar)),
+                Some(_) => {}
+                None => d.origem.set(gravada.get().into()),
+            }
+        });
+    });
+
+    // O leitor: nasce com o medidor ligado fora do app, troca com a máquina e para quando o
+    // medidor volta para o app ou some.
+    let t = Rc::clone(tela);
+    let correndo: Rc<RefCell<Option<Corrente>>> = Rc::default();
+    let antes: RefCell<Option<Option<Option<String>>>> = RefCell::new(None);
+    let leitor = Rc::clone(&correndo);
+    effect(move || {
+        let ligado = config.with(|c| c.geral.medidor_cpu);
+        // `None`: nada a ler; `Some(None)`: este computador; `Some(Some(rótulo))`: o servidor.
+        let maquina = match d.origem.get() {
+            _ if !ligado => None,
+            Origem::App => None,
+            Origem::Computador => Some(None),
+            Origem::Servidor(_) => d.servidor.get().map(Some),
+        };
+        if *antes.borrow() == Some(maquina.clone()) {
+            return;
+        }
+        *antes.borrow_mut() = Some(maquina.clone());
+        untrack(|| {
+            leitor.borrow_mut().take();
+            d.cpu_da_maquina.set(None);
+            let Some(rotulo) = maquina else {
+                return;
+            };
+            let sessao = match rotulo {
+                None => None,
+                Some(rotulo) => {
+                    let Some((_, sessao)) = servidores(&t).into_iter().find(|(r, _)| *r == rotulo)
+                    else {
+                        return;
+                    };
+                    Some(sessao)
+                }
+            };
+            *leitor.borrow_mut() = Some(Corrente::nova(&t, sessao, d.pronto));
+        });
+    });
+
+    // O que o leitor entregou: a CPU da leitura mais nova.
+    effect(move || {
+        ler_contador(d.pronto);
+        untrack(|| {
+            let eventos = match correndo.borrow().as_ref() {
+                Some(c) => c.recolher(),
+                None => return,
+            };
+            for evento in eventos {
+                match evento {
+                    Evento::Leitura(Ok(leitura)) => d.cpu_da_maquina.set(Some(leitura.cpu())),
+                    Evento::Leitura(Err(_)) => d.cpu_da_maquina.set(None),
+                    Evento::Encerrado(_) => {}
+                }
+            }
+        });
+    });
 }
 
 /// A batida de verdade: uma thread que sobe o contador a cada [`RITMO`] enquanto `ativo()`.
@@ -259,19 +431,89 @@ fn linhas_da_tabela(
     linhas
 }
 
-/// O medidor da barra de título: os quadradinhos da CPU do app, com a CPU em % na dica. O clique
-/// abre a página Desempenho na janela `janela`. Some com `geral.medidor_cpu` desligado.
+/// O medidor da barra de título: os quadradinhos da CPU do app, deste computador ou de um
+/// servidor SSH, com a CPU em % na dica. O clique abre a página Desempenho na janela `janela`;
+/// o botão direito abre o menu da origem. Some com `geral.medidor_cpu` desligado.
 pub(super) fn medidor(tela: &Rc<Tela>, janela: Janela, d: Desempenho) -> impl View + use<> {
     let config = tela.config;
-    let atual = move || d.cpu.with(|s| s.last().copied().unwrap_or(0.0));
-    LevelMeter::new(move || atual() / 100.0)
+    let atual = move || match d.origem.get() {
+        Origem::App => Some(d.cpu.with(|s| s.last().copied().unwrap_or(0.0))),
+        _ => d.cpu_da_maquina.get(),
+    };
+    LevelMeter::new(move || atual().unwrap_or(0.0) / 100.0)
         .id("barra-de-titulo-cpu")
         .tooltip(move || {
-            let cpu = conta::cpu(atual());
-            t!("desempenho-medidor-dica", cpu = cpu.as_str())
+            let cpu = atual().map_or_else(|| "—".to_owned(), conta::cpu);
+            match d.origem.get() {
+                Origem::App => t!("desempenho-medidor-dica", cpu = cpu.as_str()),
+                Origem::Computador => {
+                    t!("desempenho-medidor-dica-computador", cpu = cpu.as_str())
+                }
+                Origem::Servidor(_) => {
+                    let nome = d.servidor.get().unwrap_or_default();
+                    t!(
+                        "desempenho-medidor-dica-servidor",
+                        nome = nome.as_str(),
+                        cpu = cpu.as_str()
+                    )
+                }
+            }
         })
         .visible(move || config.with(|c| c.geral.medidor_cpu))
         .on_click(move || janela.pagina.set(PAGINA.to_owned()))
+        .context_flyout(menu_do_medidor(tela, janela, d))
+}
+
+/// O menu do medidor: de onde vem o número (o app, este computador ou um dos servidores SSH
+/// conectados) e o item que abre a página. Os itens dos servidores ficam reservados e mostram
+/// as sessões da hora em que o menu abre.
+fn menu_do_medidor(tela: &Rc<Tela>, janela: Janela, d: Desempenho) -> MenuFlyout {
+    let aberto = signal(false);
+    let lista = {
+        let t = Rc::clone(tela);
+        move || {
+            aberto.get();
+            servidores(&t)
+                .into_iter()
+                .map(|(rotulo, _)| rotulo)
+                .collect::<Vec<_>>()
+        }
+    };
+    let mut menu = MenuFlyout::new()
+        .id("barra-de-titulo-cpu-menu")
+        .open(aberto)
+        .radio(
+            "barra-de-titulo-cpu-app",
+            t!("desempenho-este-app"),
+            d.origem,
+            Origem::App,
+        )
+        .radio(
+            "barra-de-titulo-cpu-computador",
+            t!("processos-este-computador"),
+            d.origem,
+            Origem::Computador,
+        )
+        .separator_visible({
+            let lista = lista.clone();
+            move || !lista().is_empty()
+        });
+    for n in 0..SERVIDORES_NO_MENU {
+        let (rotulo, existe) = (lista.clone(), lista.clone());
+        menu = menu
+            .radio(
+                format!("barra-de-titulo-cpu-servidor-{n}"),
+                move || rotulo().into_iter().nth(n).unwrap_or_default(),
+                d.origem,
+                Origem::Servidor(n),
+            )
+            .item_visible(move || existe().len() > n);
+    }
+    menu.separator().item(
+        "barra-de-titulo-cpu-abrir",
+        t!("desempenho-medidor-abrir"),
+        move || janela.pagina.set(PAGINA.to_owned()),
+    )
 }
 
 /// Uma curva dos painéis: o item da coluna da esquerda e o gráfico grande dela.
@@ -290,6 +532,21 @@ pub(super) struct Curva {
     pub(super) max: Rc<dyn Fn() -> f64>,
     /// O número de agora, embaixo do nome.
     pub(super) valor: Rc<dyn Fn() -> String>,
+    /// O que só o gráfico da CPU tem.
+    pub(super) detalhe: Option<Detalhe>,
+}
+
+/// O gráfico da CPU, como no Gerenciador de Tarefas: a linha do tempo de kernel por cima, o menu
+/// de contexto e a grade dos núcleos no lugar do gráfico grande.
+pub(super) struct Detalhe {
+    /// A segunda série, na mesma escala (vazia para esconder).
+    pub(super) secundaria: Rc<dyn Fn() -> Vec<f64>>,
+    /// O menu do clique direito, no gráfico (`"grafico"`) e na grade (`"grade"`): o argumento
+    /// separa os ids dos itens dos dois menus.
+    pub(super) menu: Rc<dyn Fn(&str) -> MenuFlyout>,
+    /// Quando a grade fica no lugar do gráfico.
+    pub(super) grade_a_mostra: Rc<dyn Fn() -> bool>,
+    pub(super) grade: Column,
 }
 
 /// Um item da coluna da esquerda: a série pequena, o nome e o número de agora. O clique põe o
@@ -370,15 +627,31 @@ pub(super) fn paineis<N: View + 'static>(
         .enumerate()
         .fold(Row::new().grow(1), |linha, (n, c)| {
             let max = c.max;
-            linha.child(
-                AreaChart::new(c.serie)
-                    .id(format!("{prefixo}-grafico-{}", c.id))
-                    .max(move || max())
-                    .capacity(c.pontos)
-                    .color(c.cor)
-                    .grow(1)
-                    .visible(move || escolhida.get() == n),
-            )
+            let grafico = AreaChart::new(c.serie)
+                .id(format!("{prefixo}-grafico-{}", c.id))
+                .max(move || max())
+                .capacity(c.pontos)
+                .color(c.cor)
+                .grow(1);
+            let Some(detalhe) = c.detalhe else {
+                return linha.child(grafico.visible(move || escolhida.get() == n));
+            };
+            let (secundaria, grade_a_mostra) = (detalhe.secundaria, detalhe.grade_a_mostra);
+            let ainda = Rc::clone(&grade_a_mostra);
+            linha
+                .child(
+                    grafico
+                        .secondary(move || secundaria())
+                        .context_flyout((detalhe.menu)("grafico"))
+                        .visible(move || escolhida.get() == n && !ainda()),
+                )
+                .child(
+                    detalhe
+                        .grade
+                        .grow(1)
+                        .context_flyout((detalhe.menu)("grade"))
+                        .visible(move || escolhida.get() == n && grade_a_mostra()),
+                )
         });
     let direita = Column::new()
         .grow(1)
@@ -438,6 +711,7 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
             pontos: PONTOS,
             max: Rc::new(|| 100.0),
             valor: Rc::new(move || conta::cpu(cpu_agora())),
+            detalhe: None,
         },
         Curva {
             id: "memoria",
@@ -448,6 +722,7 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
             pontos: PONTOS,
             max: Rc::new(teto_memoria),
             valor: Rc::new(memoria_agora),
+            detalhe: None,
         },
         Curva {
             id: "rede",
@@ -458,6 +733,7 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
             pontos: PONTOS,
             max: Rc::new(teto_rede),
             valor: Rc::new(rede_agora),
+            detalhe: None,
         },
     ];
     let abas = {
@@ -555,6 +831,11 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
                     processos::DISCO,
                     t!("processos-aba-disco"),
                     processos::aba_disco(tela, d.processos),
+                )
+                .tab(
+                    processos::REDE,
+                    t!("processos-aba-rede"),
+                    processos::aba_rede(tela, d.processos),
                 ),
         )
 }

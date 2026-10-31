@@ -109,10 +109,13 @@ fn por_na_arvore_cria_a_conexao_e_abrir_mostra_os_arquivos_e_entra_nos_recentes(
 
     m.app.click("navegacao-terminais");
     m.app.double_click(&format!("arvore-{}", c.id));
-    // As linhas do DataGrid nascem um quadro depois das chaves: espera a linha da pasta.
+    // As linhas do DataGrid nascem um quadro depois das chaves: espera a linha da pasta. O
+    // espaço da nuvem chega depois da listagem e empurra o painel para baixo; espera ele também,
+    // senão o clique duplo cai no cabeçalho da grade.
     esperar(&mut m.app, "a listagem do remoto", |a| {
         a.tree().find("a1-remoto-docs").is_some()
             && a.grid("a1-remoto").keys().contains(&"notas.txt")
+            && a.visible("a1-rclone-espaco")
     });
     assert_eq!(m.app.tab_titles("arquivos-abas"), ["Meu drive"]);
     m.app.double_click("a1-remoto-docs");

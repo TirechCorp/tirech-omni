@@ -104,8 +104,12 @@ config-geral-atalho_no_menu = Atalho no menu de aplicativos
     .palavras = desktop dock lanchador icone launcher menu aplicativos
 
 config-geral-medidor_cpu = Medidor de CPU na barra de título
-    .descricao = Mostra quanto do processador o { -app } usa. Clicar nele abre a página Desempenho, com o peso de cada terminal.
+    .descricao = Mostra o uso do processador. Clicar nele abre a página Desempenho, com o peso de cada terminal; o botão direito escolhe de onde vem o número.
     .palavras = cpu processador desempenho uso consumo medidor grafico gerenciador de tarefas
+
+config-geral-origem_medidor = Origem do medidor de CPU
+    .descricao = O quanto o { -app } usa ou o processador inteiro deste computador. O servidor de uma conexão SSH aberta se escolhe no menu do medidor (botão direito) e vale até a sessão fechar.
+    .palavras = cpu processador computador maquina servidor ssh medidor origem media uso
 
 config-geral-recentes_max = Recentes guardados
     .descricao = Quantas conexões a lista de recentes guarda, sem contar as fixadas.
@@ -995,6 +999,10 @@ opcao-validade-link-sete-dias = 7 dias
 # AbrirEspaco
 opcao-abrir-espaco-nova-janela = Nova janela
 opcao-abrir-espaco-janela-ativa = Janela ativa
+
+# OrigemDoMedidor
+opcao-origem-do-medidor-app = Este app
+opcao-origem-do-medidor-computador = Este computador
 
 # AoFechar
 opcao-ao-fechar-perguntar = Perguntar

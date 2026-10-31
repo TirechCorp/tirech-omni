@@ -13,6 +13,19 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   processos e os botões Encerrar e Forçar encerramento, também no menu do botão direito. Em
   cima, os gráficos do último minuto, como na aba Este app: a CPU e a memória da máquina, ou a
   leitura e a escrita no disco.
+- A memória disponível e o total da máquina embaixo dos gráficos da aba Processos, no Linux, no
+  Windows, no macOS e no servidor SSH.
+- O tempo de kernel em vermelho no gráfico da CPU e um gráfico por núcleo, pelo clique direito
+  no gráfico (Mudar gráfico para > Processadores lógicos), como no Gerenciador de Tarefas. Os
+  gráficos se arrumam na área do gráfico grande; acima de 32 núcleos, viram um mapa de calor,
+  um ladrilho por núcleo com a dica do uso (512 núcleos cabem).
+- A aba Rede no Desempenho: o recebido e o enviado no último minuto e uma tabela com cada
+  interface, física ou virtual, com as taxas, os totais e o histórico.
+- As operações do disco na aba Disco: a curva Operações no gráfico, as leituras e as escritas
+  por segundo embaixo e uma tabela com cada disco, físico ou virtual, com o histórico. No
+  Windows, também as operações por segundo de cada processo.
+- O botão direito no medidor de CPU da barra de título escolhe de onde vem o número: este app,
+  este computador ou o servidor de uma conexão SSH aberta.
 - Pacote para o macOS: o `tirech-omni-macos.dmg`, universal (Apple Silicon e Intel), com o
   `Tirech Omni.app` e as ferramentas de linha de comando dentro dele, gerado pelo
   `empacotar-mac.sh` num Mac.

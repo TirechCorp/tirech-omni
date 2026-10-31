@@ -172,7 +172,10 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   muda junto quando a conexão ou a pasta mudam.
 - **Desempenho (CPU, memória e o peso de cada terminal)**: na barra de título, ao lado do botão
   do tema, um medidor de quadradinhos, do amarelo-claro ao vermelho-escuro, mostra quanto da CPU
-  do computador o app inteiro usa agora (a dica diz o número). O interruptor **Medidor de CPU na
+  do computador o app inteiro usa agora (a dica diz o número). O botão direito no medidor escolhe
+  de onde vem o número: **Este app**, **Este computador** (o processador inteiro) ou o servidor
+  de uma conexão SSH aberta, que vale até a sessão fechar; a escolha entre os dois primeiros fica
+  em **Origem do medidor de CPU**, em Configurações › Geral. O interruptor **Medidor de CPU na
   barra de título**, em Configurações › Geral, o esconde. O clique nele, ou Exibir ▸
   **Desempenho**, abre a página Desempenho, como a do Gerenciador de Tarefas: à esquerda CPU,
   Memória e Rede com a miniatura de cada uma; à direita o gráfico do último minuto do escolhido,

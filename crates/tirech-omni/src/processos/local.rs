@@ -13,7 +13,7 @@ use std::time::Instant;
 #[cfg(target_os = "macos")]
 use super::Estado;
 #[cfg(any(windows, target_os = "macos"))]
-use super::Processo;
+use super::{Disco, Interface, Processo, TemposDeCpu};
 use super::{FonteDeProcessos, Foto};
 use crate::t;
 
@@ -90,15 +90,63 @@ impl FonteLocal {
                     cpu: uso.as_ref().map(|u| u.cpu),
                     memoria: uso.as_ref().map(|u| u.memory),
                     disco: uso.as_ref().map(|u| (u.read_bytes, u.written_bytes)),
+                    operacoes: uso
+                        .as_ref()
+                        .map(|u| (u.read_operations, u.write_operations)),
                 }
             })
             .collect();
         self.detalhes.retain(|chave, _| vistos.contains(chave));
+        let memoria = tomni_ui_win32::memory_status().ok();
+        let cpus = tomni_ui_win32::cpu_times()
+            .map(|lista| {
+                lista
+                    .into_iter()
+                    .map(|c| TemposDeCpu {
+                        usuario: c.user,
+                        sistema: c.kernel,
+                        ocioso: c.idle,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let interfaces = tomni_ui_win32::network_interfaces()
+            .map(|lista| {
+                lista
+                    .into_iter()
+                    .filter(|i| i.up)
+                    .map(|i| Interface {
+                        nome: i.name,
+                        recebidos: i.received_bytes,
+                        enviados: i.sent_bytes,
+                        fisica: i.physical,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let discos = tomni_ui_win32::disk_counters()
+            .map(|lista| {
+                lista
+                    .into_iter()
+                    .map(|d| Disco {
+                        nome: t!("processos-disco-n", n = d.index),
+                        leituras: d.read_count,
+                        escritas: d.write_count,
+                        lidos: d.read_bytes,
+                        escritos: d.written_bytes,
+                        fisico: true,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(Foto {
             relogio: self.inicio.elapsed(),
             nucleos: std::thread::available_parallelism().map_or(1, usize::from),
-            memoria_total: None,
-            memoria_disponivel: None,
+            cpus,
+            memoria_total: memoria.map(|m| m.total),
+            memoria_disponivel: memoria.map(|m| m.available),
+            interfaces,
+            discos,
             processos,
         })
     }
@@ -152,14 +200,60 @@ impl FonteLocal {
                 cpu: info.usage.as_ref().map(|u| u.cpu),
                 memoria: info.usage.as_ref().map(|u| u.memory),
                 disco: info.disk.map(|d| (d.read_bytes, d.written_bytes)),
+                operacoes: None,
             });
         }
         self.detalhes.retain(|chave, _| vistos.contains(chave));
+        let memoria = tomni_ui_macos::memory_status().ok();
+        let cpus = tomni_ui_macos::cpu_times()
+            .map(|lista| {
+                lista
+                    .into_iter()
+                    .map(|c| TemposDeCpu {
+                        usuario: c.user,
+                        sistema: c.kernel,
+                        ocioso: c.idle,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let interfaces = tomni_ui_macos::network_interfaces()
+            .map(|lista| {
+                lista
+                    .into_iter()
+                    .filter(|i| i.up)
+                    .map(|i| Interface {
+                        nome: i.name,
+                        recebidos: i.received_bytes,
+                        enviados: i.sent_bytes,
+                        fisica: i.physical,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let discos = tomni_ui_macos::disk_counters()
+            .map(|lista| {
+                lista
+                    .into_iter()
+                    .map(|d| Disco {
+                        nome: d.name,
+                        leituras: d.read_count,
+                        escritas: d.write_count,
+                        lidos: d.read_bytes,
+                        escritos: d.written_bytes,
+                        fisico: d.physical,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(Foto {
             relogio: self.inicio.elapsed(),
             nucleos: std::thread::available_parallelism().map_or(1, usize::from),
-            memoria_total: None,
-            memoria_disponivel: None,
+            cpus,
+            memoria_total: memoria.map(|m| m.total),
+            memoria_disponivel: memoria.map(|m| m.available),
+            interfaces,
+            discos,
             processos,
         })
     }

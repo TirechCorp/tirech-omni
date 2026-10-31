@@ -409,6 +409,18 @@ escolha! {
 }
 
 escolha! {
+    /// De onde vem o número do medidor de CPU da barra de título (`geral.origem_medidor`). Um
+    /// servidor SSH se escolhe só no menu do medidor e não fica gravado.
+    OrigemDoMedidor {
+        /// O quanto o próprio app usa.
+        #[default]
+        App => tk!("opcao-origem-do-medidor-app"),
+        /// O processador inteiro deste computador.
+        Computador => tk!("opcao-origem-do-medidor-computador"),
+    }
+}
+
+escolha! {
     /// O assistente que o Ctrl+Alt+A abre (`ia.preferido`, M46).
     AssistentePreferido {
         /// O Claude Code.
@@ -574,6 +586,8 @@ categoria! {
         atalho_no_menu: bool = true,
         /// O medidor de CPU na barra de título, que abre a página Desempenho.
         medidor_cpu: bool = true,
+        /// De onde vem o número do medidor: o app ou este computador.
+        origem_medidor: OrigemDoMedidor = OrigemDoMedidor::App,
         /// O aviso "este sistema não mostra ícones na bandeja" já foi visto.
         aviso_sem_bandeja: bool = false,
         /// Quantos recentes guardar, sem contar os fixados (de 5 a 100).

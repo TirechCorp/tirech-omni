@@ -24,8 +24,8 @@ use crate::configuracoes::{
     AbrirAbaAuto, AbrirAbaIa, AbrirEm, AbrirEspaco, AbrirIa, AoFechar, AssistentePreferido,
     BotaoDireito, Campainha, ChaveNova, ColarArquivos, Configuracoes, ConflitoCfg,
     ConversaAoControlar, Cursor, EnviarEditado, Esquema, Idioma, MetodoIa, ModoComparar, ModoNotas,
-    ModoReconectar, PaginaInicial, RECENTES_MAX, RECENTES_MIN, Tema, TipoChave, TmuxAoFechar,
-    ValidadeLink, X11Padrao,
+    ModoReconectar, OrigemDoMedidor, PaginaInicial, RECENTES_MAX, RECENTES_MIN, Tema, TipoChave,
+    TmuxAoFechar, ValidadeLink, X11Padrao,
 };
 use crate::i18n;
 use crate::modelo::{FtpCodificacao, FtpModo, FtpSeguranca, FtpTls, S3Estilo};
@@ -806,6 +806,11 @@ fn secao_geral(p: &Pagina) -> Expander {
             )
             .child(p.interruptor("geral.atalho_no_menu", campo!(p, geral.atalho_no_menu)))
             .child(p.interruptor("geral.medidor_cpu", campo!(p, geral.medidor_cpu)))
+            .child(p.escolha(
+                "geral.origem_medidor",
+                opcao_de!(p, OrigemDoMedidor::TODAS, geral.origem_medidor),
+                OrigemDoMedidor::nomes(),
+            ))
             .child(p.numero(
                 "geral.recentes_max",
                 numero_de!(p, RECENTES_MIN, RECENTES_MAX, geral.recentes_max),

@@ -30,6 +30,8 @@ tomni-ui-zerotier = { path = "../tomni-ui/crates/zerotier" }
 tomni-ui-netstack = { path = "../tomni-ui/crates/netstack" }
 # O pipe com dono e o pid de quem conecta (só no Windows): o canal entre a ponte MCP e o app.
 tomni-ui-win32 = { path = "../tomni-ui/crates/win32" }
+# A CPU e a memória dos processos no macOS (a página Desempenho).
+tomni-ui-macos = { path = "../tomni-ui/crates/macos" }
 
 # Externos, nas mesmas versões da biblioteca (o Cargo.lock veio de lá). Todos dentro do deny.toml.
 serde = { version = "1.0.229", features = ["derive"] }

@@ -2,10 +2,10 @@
 //! "Abrir em ›", "Mover para uma janela nova" e o modo cluster têm Arquivo, Exibir, Janela,
 //! Ferramentas e Ajuda, com os mesmos ids, ícones, atalhos e teclas de acesso.
 //!
-//! As ações de sessão agem na janela do menu, e o Exibir mostra e esconde as Conexões e as
-//! Propriedades dela. As que abrem algo que só existe na principal (os diálogos fora da árvore,
-//! as páginas) trazem a principal para a frente, também da bandeja, e agem lá
-//! ([`Tela::na_principal`]).
+//! As ações de sessão agem na janela do menu, as páginas (Cofre, Notas, Desempenho, Sobre)
+//! abrem na navegação dela, e o Exibir mostra e esconde os painéis da página que ela mostra. As
+//! que abrem algo que só existe na principal (os diálogos fora da árvore) trazem a principal para
+//! a frente, também da bandeja, e agem lá ([`Tela::na_principal`]).
 
 use std::rc::Rc;
 
@@ -14,7 +14,9 @@ use tomni_ui::prelude::*;
 use tomni_ui::terminal::LogMode;
 
 use super::duplicar::Destino;
-use super::{Lugar, Tela, acao, com_ia, com_mcp, ia, importacao, janelas, mcp_sessoes, wsl};
+use super::{
+    Lugar, PaineisDaJanela, Tela, acao, com_ia, com_mcp, ia, importacao, janelas, mcp_sessoes, wsl,
+};
 use crate::abrir::{abrir_log_cifrado, com_sufixo_cifrado};
 use crate::atalhos;
 use crate::janelas::Janela;
@@ -24,7 +26,7 @@ use crate::tela_configuracoes::ligar;
 
 impl Tela {
     /// Leva a janela principal para a frente (mostrando o app se ele está na bandeja) e roda `f`
-    /// com a tela. Para o que só existe na principal: as páginas e os diálogos fora da árvore. Na
+    /// com a tela. Para nova conexão e novo grupo, que escolhem o item na árvore da principal. Na
     /// própria principal só dá o foco.
     pub(super) fn na_principal(self: &Rc<Self>, f: impl FnOnce(&Rc<Self>)) {
         if self.escondido.get_untracked() {
@@ -34,11 +36,24 @@ impl Tela {
         }
         f(self);
     }
+
+    /// Roda `f` com o app à mostra: se ele está na bandeja, a principal volta antes. Para os
+    /// diálogos gerais, que abrem na última janela ativa ([`Tela::dialogos_na_janela`]).
+    pub(super) fn a_mostra(self: &Rc<Self>, f: impl FnOnce(&Rc<Self>)) {
+        if self.escondido.get_untracked() {
+            self.mostrar();
+        }
+        f(self);
+    }
 }
 
-/// A barra de menus da janela `janela`. `paineis` é o controlador das Conexões e das Propriedades
-/// dela (o da principal ou o da secundária); o chat e as portas só existem na principal.
-pub(super) fn barra_de_menus(tela: &Rc<Tela>, janela: Janela, paineis: &DockController) -> MenuBar {
+/// A barra de menus da janela `janela`. `paineis` são os controladores dos painéis das páginas
+/// dela (os da principal ou os da secundária); o chat e as portas só existem na principal.
+pub(super) fn barra_de_menus(
+    tela: &Rc<Tela>,
+    janela: Janela,
+    paineis: &PaineisDaJanela,
+) -> MenuBar {
     let principal = janela.handle == tela.janelas.principal().handle;
     MenuBar::new()
         .id("menus")
@@ -53,7 +68,7 @@ pub(super) fn barra_de_menus(tela: &Rc<Tela>, janela: Janela, paineis: &DockCont
         .access_key('N')
         .menu(t!("casca-ferramentas"), menu_ferramentas(tela, janela))
         .access_key('F')
-        .menu(t!("casca-ajuda"), menu_ajuda(tela))
+        .menu(t!("casca-ajuda"), menu_ajuda(tela, janela))
         .access_key('J')
 }
 
@@ -90,7 +105,7 @@ fn menu_arquivo(tela: &Rc<Tela>) -> MenuFlyout {
         .item(
             "remotos-rclone-menu",
             t!("casca-remotos-do-rclone"),
-            acao(tela, |t| t.na_principal(|t| t.abrir_remotos_do_rclone())),
+            acao(tela, |t| t.abrir_remotos_do_rclone()),
         )
         .icon(Symbol::Cloud)
         .separator();
@@ -102,7 +117,7 @@ fn menu_arquivo(tela: &Rc<Tela>) -> MenuFlyout {
         menu.item(
             "instalar-no-computador",
             t!("casca-instalar-no-computador"),
-            acao(tela, |t| t.na_principal(|t| t.abrir_instalar(false))),
+            acao(tela, |t| t.a_mostra(|t| t.abrir_instalar(false))),
         )
         .icon(Symbol::Apps)
         .separator()
@@ -171,14 +186,14 @@ fn menu_ferramentas(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
         .item(
             "scripts-menu",
             t!("casca-rodar-script"),
-            acao(tela, |t| t.na_principal(|t| t.abrir_scripts_da_selecao())),
+            acao(tela, |t| t.abrir_scripts_da_selecao()),
         )
         .icon(Symbol::Code)
         .shortcut(atalhos::atalho(tela.config, "scripts"))
         .item(
             "links-menu",
             t!("links-menu"),
-            acao(tela, |t| t.na_principal(|t| t.abrir_lancador_de_links())),
+            acao(tela, |t| t.a_mostra(|t| t.abrir_lancador_de_links())),
         )
         .icon(Symbol::Globe)
         .shortcut(atalhos::atalho(tela.config, "links"))
@@ -197,7 +212,7 @@ fn menu_ferramentas(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
         .item(
             "copiar-chave-menu",
             t!("casca-copiar-a-chave-para-o-servidor"),
-            acao(tela, |t| t.na_principal(|t| t.abrir_copiar_chave(None))),
+            acao(tela, |t| t.a_mostra(|t| t.abrir_copiar_chave(None))),
         )
         .icon(Symbol::Send)
         .separator()
@@ -205,18 +220,14 @@ fn menu_ferramentas(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
         .item(
             "abrir-cofre",
             t!("casca-cofre-de-senhas"),
-            acao(tela, |t| {
-                t.na_principal(|t| t.pagina.set("cofre".to_owned()))
-            }),
+            acao(tela, move |_| janela.pagina.set("cofre".to_owned())),
         )
         .icon(Symbol::Key)
         // O Ctrl+Shift+J também fica na casca.
         .item(
             "abrir-notas",
             t!("casca-notas"),
-            acao(tela, |t| {
-                t.na_principal(|t| t.pagina.set("notas".to_owned()))
-            }),
+            acao(tela, move |_| janela.pagina.set("notas".to_owned())),
         )
         .icon(Symbol::Notepad)
         .separator()
@@ -307,32 +318,30 @@ fn menu_ferramentas(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
         .item_visible(com_mcp(tela.config))
 }
 
-fn menu_ajuda(tela: &Rc<Tela>) -> MenuFlyout {
+fn menu_ajuda(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
     MenuFlyout::new()
         .id("ajuda")
         .item(
             "atalhos",
             t!("casca-atalhos-de-teclado"),
-            acao(tela, |t| t.na_principal(|t| t.atalhos_aberto.set(true))),
+            acao(tela, |t| t.a_mostra(|t| t.atalhos_aberto.set(true))),
         )
         .icon(Symbol::Keyboard)
         .item(
             "sobre",
             t!("casca-sobre"),
-            acao(tela, |t| {
-                t.na_principal(|t| t.pagina.set("sobre".to_owned()))
-            }),
+            acao(tela, move |_| janela.pagina.set("sobre".to_owned())),
         )
         .icon(Symbol::Info)
 }
 
-/// O menu Exibir de uma janela. Conexões e Propriedades existem em todas as janelas de
-/// terminais, cada uma com os seus (`paineis`); o chat e as portas, só na principal: nas outras
-/// janelas os itens deles aparecem desabilitados.
+/// O menu Exibir de uma janela. Os painéis das páginas existem em todas as janelas, cada uma com
+/// os seus (`paineis`), e os itens seguem a página que a janela mostra; o chat e as portas, só na
+/// principal: nas outras janelas os itens deles aparecem desabilitados.
 fn menu_exibir(
     tela: &Rc<Tela>,
     janela: Janela,
-    paineis: &DockController,
+    paineis: &PaineisDaJanela,
     principal: bool,
 ) -> MenuFlyout {
     let envio = janela.envio;
@@ -369,8 +378,8 @@ fn menu_exibir(
         .item(
             "desempenho",
             t!("casca-desempenho"),
-            acao(tela, |t| {
-                t.na_principal(|t| t.pagina.set(super::desempenho::PAGINA.to_owned()))
+            acao(tela, move |_| {
+                janela.pagina.set(super::desempenho::PAGINA.to_owned());
             }),
         )
         .icon(Symbol::DataArea)
@@ -380,22 +389,20 @@ fn menu_exibir(
             t!("casca-enviar-o-que-se-digita-para"),
             envio.submenu(),
         );
-    // As páginas só existem na principal: nas outras janelas valem os painéis da página
-    // Terminais; o chat e as portas aparecem, desabilitados (o menu é igual em todas).
-    let pagina = tela.pagina;
-    let em = move |nome: &'static str| move || !principal || pagina.get() == nome;
+    // Os itens seguem a página da janela; o chat e as portas aparecem, desabilitados, fora da
+    // principal (o menu é igual em todas).
+    let pagina = janela.pagina;
+    let em = move |nome: &'static str| move || pagina.get() == nome;
     let em_alguma = move || {
-        !principal
-            || pagina.with(|p| {
-                [paineis::TERMINAIS, paineis::NOTAS, paineis::ARQUIVOS].contains(&p.as_str())
-            })
+        pagina
+            .with(|p| [paineis::TERMINAIS, paineis::NOTAS, paineis::ARQUIVOS].contains(&p.as_str()))
     };
     menu = menu
         .separator_visible(em_alguma)
         .toggle(
             "painel-conexoes",
             t!("casca-painel-conexoes"),
-            paineis.shown("conexoes"),
+            paineis.terminais.shown("conexoes"),
         )
         .icon(Symbol::Server)
         .shortcut(atalhos::atalho(tela.config, "painel_conexoes"))
@@ -403,7 +410,7 @@ fn menu_exibir(
         .toggle(
             "painel-propriedades",
             t!("casca-painel-propriedades"),
-            paineis.shown("propriedades"),
+            paineis.terminais.shown("propriedades"),
         )
         .icon(Symbol::Info)
         .shortcut(atalhos::atalho(tela.config, "painel_propriedades"))
@@ -442,21 +449,19 @@ fn menu_exibir(
         .toggle(
             "painel-notas-lista",
             t!("casca-painel-notas"),
-            tela.paineis_notas.controle.shown("lista"),
+            paineis.notas.controle.shown("lista"),
         )
         .icon(Symbol::Notepad)
         .shortcut(atalhos::atalho(tela.config, "painel_notas"))
         .item_visible(em(paineis::NOTAS))
-        .item_enabled(principal)
         .toggle(
             "painel-fila",
             t!("casca-painel-fila"),
-            tela.paineis_arquivos.controle.shown("fila"),
+            paineis.arquivos.controle.shown("fila"),
         )
         .icon(Symbol::ArrowSync)
         .shortcut(atalhos::atalho(tela.config, "painel_fila"))
-        .item_visible(em(paineis::ARQUIVOS))
-        .item_enabled(principal);
+        .item_visible(em(paineis::ARQUIVOS));
     menu
 }
 
@@ -513,7 +518,7 @@ fn menu_cluster(tela: &Rc<Tela>) -> MenuFlyout {
             "cluster-menu",
             t!("casca-cluster-normal"),
             acao(tela, |t| {
-                t.na_principal(|t| t.abrir_dialogo_do_cluster_da_selecao(false))
+                t.a_mostra(|t| t.abrir_dialogo_do_cluster_da_selecao(false))
             }),
         )
         .icon(Symbol::Grid)
@@ -522,7 +527,7 @@ fn menu_cluster(tela: &Rc<Tela>) -> MenuFlyout {
             "cluster-ia-menu",
             t!("casca-cluster-com-ia"),
             acao(tela, |t| {
-                t.na_principal(|t| t.abrir_dialogo_do_cluster_da_selecao(true))
+                t.a_mostra(|t| t.abrir_dialogo_do_cluster_da_selecao(true))
             }),
         )
         .icon(Symbol::Sparkle)

@@ -5380,6 +5380,7 @@ dependencies = [
  "tomni-ui",
  "tomni-ui-ai",
  "tomni-ui-files",
+ "tomni-ui-macos",
  "tomni-ui-nebula",
  "tomni-ui-netstack",
  "tomni-ui-openvpn",
@@ -5587,6 +5588,13 @@ dependencies = [
  "slotmap",
  "taffy",
  "tomni-ui-core",
+]
+
+[[package]]
+name = "tomni-ui-macos"
+version = "0.1.0"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

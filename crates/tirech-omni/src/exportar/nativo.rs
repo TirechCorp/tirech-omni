@@ -46,7 +46,8 @@ fn soltar_do_cofre(arvore: &mut Tree) {
         }
     });
     cada_pasta(&mut arvore.nodes, &mut |g| {
-        g.comandos.religar_senhas(|_| None)
+        g.comandos.religar_senhas(|_| None);
+        g.chave_do_cofre = None;
     });
     for perfil in &mut arvore.redes {
         if let Some(proxy) = perfil.proxy.as_mut() {
@@ -88,7 +89,12 @@ fn itens_usados(arvore: &mut Tree, cofre: &Cofre) -> Vec<u64> {
         }
     });
     cada_pasta(&mut arvore.nodes, &mut |g| {
-        ids.extend(g.comandos.ids_do_cofre())
+        ids.extend(g.comandos.ids_do_cofre());
+        if let Some(uid) = &g.chave_do_cofre
+            && let Some(item) = cofre.itens().iter().find(|i| &i.uid == uid)
+        {
+            ids.push(item.id);
+        }
     });
     for perfil in &arvore.redes {
         ids.extend(perfil.proxy.as_ref().and_then(|p| p.credencial));
@@ -127,6 +133,7 @@ pub fn exportar(arvore: &Tree, cofre: Option<&Cofre>, opcoes: Opcoes, destino: &
     if let Some(cofre) = cofre {
         if !opcoes.chaves {
             cada_conexao(&mut arvore.nodes, &mut |c| c.chave_do_cofre = None);
+            cada_pasta(&mut arvore.nodes, &mut |g| g.chave_do_cofre = None);
         }
         let ids = itens_usados(&mut arvore, cofre);
         let vault = cofre.pasta_do_cofre().join(anexos::PASTA);

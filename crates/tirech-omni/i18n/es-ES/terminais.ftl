@@ -106,6 +106,9 @@ tuneis-ajuda-dinamico = Un proxy SOCKS5 aquí: configura el navegador para usar 
 tuneis-ajuda-socket = Con un puerto, el socket se convierte en ese puerto aquí; sin puerto, en un socket Unix de aquí (la ruta en blanco es automática).
 tuneis-destino-visto-da-maquina = Destino (host:puerto, visto desde este equipo)
 tuneis-destino-visto-do-servidor = Destino (host:puerto, visto desde el servidor)
+tuneis-destino-visto-da-rede = Destino (host:puerto, visto desde la red de la conexión)
+tuneis-ajuda-local-shell = El puerto de aquí lleva al destino por la red de la conexión: el perfil, o directo.
+tuneis-ajuda-dinamico-shell = Un proxy SOCKS5 y HTTP aquí: los programas que lo usan salen por la red de la conexión.
 tuneis-adicionar-um-tunel = Agregar un túnel
 tuneis-tuneis-de = Túneles de { $nome }
 tuneis-nao-subiu-local = El túnel local { $porta } no se inició: { $motivo }
@@ -311,6 +314,8 @@ baixar-baixando-de = Descargando de { $conexao }
 baixar-andou = { $caminho } · { $feito } de { $total }
 baixar-feito-titulo = Archivo descargado
 baixar-feito = { $caminho } se guardó en { $destino }.
+baixar-abrir-pasta = Abrir la carpeta
+baixar-abrir-pasta-erro = No se pudo abrir { $pasta }: { $motivo }
 baixar-erro-titulo = Descargar el archivo marcado
 baixar-erro = No se pudo descargar { $caminho }: { $motivo }
 baixar-e-pasta = { $caminho } es una carpeta. Marca el nombre de un archivo.
@@ -348,6 +353,10 @@ retentar-minutos = { $n } min
 retentar-horas = { $n } h
 retentar-herdar-de = Heredar ({ $nome })
 retentar-herdar-configuracoes = Heredar (Configuración)
+ocioso-linha = Cerrar sin uso tras
+ocioso-linha-descricao = Cierra la pestaña de esta conexión tras este tiempo sin nada escrito, pegado o enviado por un asistente. Lo que llega del servidor no cuenta como uso. La sesión persistente (tmux o screen) sigue en el servidor. Heredar sigue la carpeta y, sin carpeta que elija, Configuración › Conexiones, donde viene desactivado.
+ocioso-linha-descricao-pasta = Para las conexiones de esta carpeta que no eligieron otra cosa: tras cuánto tiempo sin uso la pestaña se cierra sola.
+ocioso-fechou = La pestaña { $aba } se cerró tras { $tempo } sin uso.
 
 ## Sesiones persistentes abiertas en el servidor
 
@@ -375,3 +384,19 @@ links-menu = Enlaces…
 links-titulo = Enlaces
 links-explicacao = Los enlaces del árbol. Con un perfil de red, el enlace se abre en un navegador solo del perfil, que sale por la red del cliente; sin perfil, en el navegador predeterminado.
 links-nenhum-link = Ningún enlace en el árbol. Cree una conexión de tipo Enlace.
+
+## Autocompletar (Ctrl+Espacio)
+
+autocompletar-sem-terminal = Abra un terminal para usar el autocompletado.
+autocompletar-filtro = Filtrar los comandos
+autocompletar-coluna-comando = Comando
+autocompletar-coluna-origem = Origen
+autocompletar-vazio = Ningún comando para sugerir
+autocompletar-dica = Enter pone el comando en la línea del terminal, sin ejecutarlo. ↓ baja a la lista; Esc cierra.
+autocompletar-origem-tunel = Túnel { $escuta } → { $destino }
+autocompletar-origem-dinamico = Túnel dinámico { $escuta }
+autocompletar-origem-da-aba = { $origem }, de la pestaña { $aba }
+autocompletar-origem-shell = Historial de { $shell }
+autocompletar-origem-escolhidos = Usado en esta conexión
+autocompletar-origem-envio = Barra de envío
+autocompletar-origem-ao-conectar = Comandos al conectar

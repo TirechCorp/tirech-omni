@@ -4,9 +4,13 @@
 //! ([`permissao_efetiva`]) sobe pelas pastas como a rede ([`crate::redes::rede_herdada`]). Cada
 //! ferramenta pede [`Exigencia::Ver`] ou [`Exigencia::Mudar`] ([`exigencia`]) e [`decidir`] cruza
 //! as duas coisas com a lista de bloqueio.
+//!
+//! Abrir uma aba nova tem uma escolha à parte ([`AbrirAbaIa`]), que sobe pelas pastas até
+//! `ia.mcp_abrir` ([`abrir_aba_efetiva`]) e aperta a decisão ([`decidir_abertura`]).
 
 use serde::{Deserialize, Serialize};
 
+use crate::configuracoes::AbrirAbaIa;
 use crate::modelo::{Node, Tree};
 
 /// O que um assistente pode fazer numa conexão pelo MCP.
@@ -155,6 +159,44 @@ pub fn permissao_herdada(tree: &Tree, no: u64) -> PermissaoIa {
         }
     }
     PermissaoIa::Desligada
+}
+
+/// A escolha de abrir abas novas que vale para a conexão `conexao`: a dela, a da pasta mais
+/// próxima que escolheu uma ou, sem nenhuma, `padrao` (o `ia.mcp_abrir`).
+pub fn abrir_aba_efetiva(tree: &Tree, conexao: u64, padrao: AbrirAbaIa) -> AbrirAbaIa {
+    match tree.connection(conexao).and_then(|c| c.mcp_abrir) {
+        Some(escolha) => escolha,
+        None => abrir_aba_herdada(tree, conexao, padrao),
+    }
+}
+
+/// A escolha de abrir abas que o nó `no` herdaria de cima: a da pasta mais próxima acima dele
+/// que escolheu uma ou `padrao`. É o que a opção "Herdar (…)" mostra.
+pub fn abrir_aba_herdada(tree: &Tree, no: u64, padrao: AbrirAbaIa) -> AbrirAbaIa {
+    tree.ancestors(no)
+        .into_iter()
+        .rev()
+        .find_map(|pasta| match tree.find(pasta) {
+            Some(Node::Group(g)) => g.mcp_abrir,
+            _ => None,
+        })
+        .unwrap_or(padrao)
+}
+
+/// A recusa de uma aba nova numa conexão em "Bloquear", para o assistente ler.
+pub const ABRIR_ABA_BLOQUEADA: &str = "Esta conexão não deixa assistentes abrirem abas novas. \
+     Peça à pessoa para abrir a aba e use a que ela abrir (listar_abas).";
+
+/// A decisão de um pedido que abre uma aba nova: a da permissão (`decisao`) apertada pela
+/// escolha `abrir`. Devolve também se o pedido pergunta sempre (sem valer o "resto desta
+/// sessão" aprovado). Pura.
+pub fn decidir_abertura(decisao: Decisao, abrir: AbrirAbaIa) -> (Decisao, bool) {
+    match (decisao, abrir) {
+        (recusa @ Decisao::Recusar(_), _) => (recusa, false),
+        (_, AbrirAbaIa::Bloquear) => (Decisao::Recusar(ABRIR_ABA_BLOQUEADA.into()), false),
+        (_, AbrirAbaIa::Perguntar) => (Decisao::Perguntar, true),
+        (decisao, AbrirAbaIa::Permitir) => (decisao, false),
+    }
 }
 
 /// A tabela da permissão: o que fazer com um pedido de `exigencia` numa conexão com `perm`,
@@ -336,6 +378,93 @@ mod tests {
                 .unwrap()
                 .contains(r#""mcp":"so_ler""#)
         );
+    }
+
+    #[test]
+    fn abrir_aba_aperta_a_decisao() {
+        use Decisao::{Perguntar, Permitir};
+        let recusa = Decisao::Recusar(NAO_LIBERADA.into());
+        // A recusa da permissão fica, seja qual for a escolha.
+        for abrir in AbrirAbaIa::TODAS.iter().copied() {
+            assert_eq!(
+                decidir_abertura(recusa.clone(), abrir),
+                (recusa.clone(), false)
+            );
+        }
+        assert_eq!(
+            decidir_abertura(Permitir, AbrirAbaIa::Permitir),
+            (Permitir, false)
+        );
+        assert_eq!(
+            decidir_abertura(Perguntar, AbrirAbaIa::Permitir),
+            (Perguntar, false)
+        );
+        // Perguntar vale mesmo em Livre, e sempre.
+        assert_eq!(
+            decidir_abertura(Permitir, AbrirAbaIa::Perguntar),
+            (Perguntar, true)
+        );
+        assert_eq!(
+            decidir_abertura(Perguntar, AbrirAbaIa::Perguntar),
+            (Perguntar, true)
+        );
+        for decisao in [Permitir, Perguntar] {
+            let (bloqueada, sempre) = decidir_abertura(decisao, AbrirAbaIa::Bloquear);
+            assert!(!sempre);
+            assert!(
+                matches!(&bloqueada, Decisao::Recusar(m) if m.contains("listar_abas")),
+                "{bloqueada:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn abrir_aba_herda_da_pasta_e_das_configuracoes() {
+        let mut tree = Tree::default();
+        let fora = tree.add_group(None, "Fora");
+        let dentro = tree.add_group(Some(fora), "Dentro");
+        let c = tree.add_connection(Some(dentro), Connection::new("c", Kind::Ssh));
+        let padrao = AbrirAbaIa::Perguntar;
+        // Sem escolha em lugar nenhum: as Configurações.
+        assert_eq!(abrir_aba_efetiva(&tree, c, padrao), AbrirAbaIa::Perguntar);
+        assert_eq!(
+            abrir_aba_efetiva(&tree, c, AbrirAbaIa::Permitir),
+            AbrirAbaIa::Permitir
+        );
+        let mut escolher = |id: u64, abrir: Option<AbrirAbaIa>| match tree.find_mut(id) {
+            Some(Node::Group(g)) => g.mcp_abrir = abrir,
+            Some(Node::Connection(c)) => c.mcp_abrir = abrir,
+            None => panic!("sem o nó"),
+        };
+        escolher(fora, Some(AbrirAbaIa::Bloquear));
+        escolher(dentro, Some(AbrirAbaIa::Permitir));
+        escolher(c, Some(AbrirAbaIa::Bloquear));
+        // A conexão vence as pastas; a pasta de dentro vence a de fora.
+        assert_eq!(abrir_aba_efetiva(&tree, c, padrao), AbrirAbaIa::Bloquear);
+        assert_eq!(abrir_aba_herdada(&tree, c, padrao), AbrirAbaIa::Permitir);
+        assert_eq!(
+            abrir_aba_herdada(&tree, dentro, padrao),
+            AbrirAbaIa::Bloquear
+        );
+        assert_eq!(
+            abrir_aba_herdada(&tree, fora, padrao),
+            AbrirAbaIa::Perguntar
+        );
+        // Uma conexão que não existe segue as Configurações.
+        assert_eq!(abrir_aba_efetiva(&tree, 999, padrao), AbrirAbaIa::Perguntar);
+    }
+
+    #[test]
+    fn abrir_aba_herdar_nao_e_gravado() {
+        let mut c = Connection::new("web", Kind::Ssh);
+        assert!(!serde_json::to_string(&c).unwrap().contains("mcp_abrir"));
+        c.mcp_abrir = Some(AbrirAbaIa::Bloquear);
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(json.contains(r#""mcp_abrir":"bloquear""#), "{json}");
+        let volta: Connection = serde_json::from_str(&json).unwrap();
+        assert_eq!(volta.mcp_abrir, Some(AbrirAbaIa::Bloquear));
+        let antiga: crate::modelo::Group = serde_json::from_str(r#"{"name":"G"}"#).unwrap();
+        assert_eq!(antiga.mcp_abrir, None);
     }
 
     #[test]

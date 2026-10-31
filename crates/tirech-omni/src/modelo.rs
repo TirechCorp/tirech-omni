@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::campos::Campo;
-use crate::configuracoes::{ColarArquivos, Configuracoes, S3Cfg};
+use crate::configuracoes::{AbrirAbaIa, ColarArquivos, Configuracoes, S3Cfg};
 use crate::mcp::permissao::PermissaoIa;
 use crate::redes::{PerfilRede, Rede};
 use crate::t;
@@ -787,6 +787,28 @@ impl Retentar {
     }
 }
 
+/// Depois de quanto tempo sem uso a aba fecha sozinha. Herda da pasta e, sem pasta que decida,
+/// vale `conexoes.ocioso_mins` (0, o padrão, não fecha).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ocioso {
+    /// Vale a da pasta de cima (e, sem nenhuma, as Configurações).
+    #[default]
+    Herdar,
+    /// Não fecha.
+    Desligado,
+    /// Fecha depois destes minutos sem nada digitado, colado ou mandado pela aba, por você ou
+    /// por um assistente (0 é `Desligado`).
+    Minutos(u32),
+}
+
+impl Ocioso {
+    /// Para o `skip_serializing_if`: o padrão não é gravado.
+    pub fn is_herdar(&self) -> bool {
+        *self == Ocioso::Herdar
+    }
+}
+
 /// O programa que guarda a sessão persistente no servidor.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1226,6 +1248,10 @@ pub struct Connection {
     /// O que um assistente pode fazer nesta conexão pelo MCP (M51): herda da pasta.
     #[serde(default, skip_serializing_if = "PermissaoIa::is_herdar")]
     pub mcp: PermissaoIa,
+    /// Se um assistente pode abrir abas novas desta conexão pelo MCP: `None` herda da pasta
+    /// (e, sem pasta que escolha, de `ia.mcp_abrir`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_abrir: Option<AbrirAbaIa>,
     /// O assistente de IA da conexão (M52): o id de um provedor do `ia.json`; `None` usa o padrão.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub perfil_ia: Option<u64>,
@@ -1244,6 +1270,9 @@ pub struct Connection {
     /// Depois das tentativas de reconectar sozinho, outra rodada; herda da pasta.
     #[serde(default, skip_serializing_if = "Retentar::is_herdar")]
     pub retentar: Retentar,
+    /// Fechar a aba depois de um tempo sem uso; herda da pasta.
+    #[serde(default, skip_serializing_if = "Ocioso::is_herdar")]
+    pub ocioso: Ocioso,
     /// SSH: a sessão persistente em que a aba abre. Não vai para o arquivo: o app põe na cópia
     /// da conexão que abre a aba (`crate::tmux`).
     #[serde(skip)]
@@ -1341,12 +1370,14 @@ impl Connection {
             url: String::new(),
             rede: Rede::Herdar,
             mcp: PermissaoIa::Herdar,
+            mcp_abrir: None,
             perfil_ia: None,
             x11: ModoX11::Padrao,
             comandos: ComandosAoConectar::default(),
             persistente: SessaoPersistente::Herdar,
             mouse: MouseDoTerminal::Herdar,
             retentar: Retentar::Herdar,
+            ocioso: Ocioso::Herdar,
             sessao_persistente: None,
             colar_arquivos: None,
             pasta_colar: String::new(),
@@ -1471,6 +1502,10 @@ pub struct Group {
     /// dentro e herda.
     #[serde(default, skip_serializing_if = "PermissaoIa::is_herdar")]
     pub mcp: PermissaoIa,
+    /// Se um assistente pode abrir abas novas das conexões do grupo pelo MCP: vale para o que
+    /// está dentro e herda; `None` herda de cima.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_abrir: Option<AbrirAbaIa>,
     /// Os comandos ao conectar do grupo (M50): valem para o que está dentro e herda.
     #[serde(default, skip_serializing_if = "ComandosAoConectar::e_padrao")]
     pub comandos: ComandosAoConectar,
@@ -1483,10 +1518,25 @@ pub struct Group {
     /// A nova rodada de reconexão do grupo: vale para o que está dentro e herda.
     #[serde(default, skip_serializing_if = "Retentar::is_herdar")]
     pub retentar: Retentar,
+    /// O tempo sem uso que fecha as abas do grupo: vale para o que está dentro e herda.
+    #[serde(default, skip_serializing_if = "Ocioso::is_herdar")]
+    pub ocioso: Ocioso,
     /// O modo da credencial das conexões SSH e SFTP do grupo (o agente SSH, por exemplo): vale
     /// para o que está dentro e herda.
     #[serde(default, skip_serializing_if = "ModoCredencial::is_herdar")]
     pub credencial_modo: ModoCredencial,
+    /// A chave privada em arquivo das conexões SSH e SFTP do grupo que não têm chave própria
+    /// (gravada com `~/` quando está na pasta pessoal): vale para o que está dentro e herda.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        with = "crate::armazenamento::caminho_opcional_com_til"
+    )]
+    pub key_file: Option<PathBuf>,
+    /// A chave privada do cofre (o `uid` do item) das conexões do grupo que não têm chave
+    /// própria; vale no lugar de `key_file`, como na conexão.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chave_do_cofre: Option<String>,
 }
 
 /// Um item da árvore.
@@ -1576,11 +1626,15 @@ impl Tree {
             children: Vec::new(),
             rede: Rede::Herdar,
             mcp: PermissaoIa::Herdar,
+            mcp_abrir: None,
             comandos: ComandosAoConectar::default(),
             persistente: SessaoPersistente::Herdar,
             mouse: MouseDoTerminal::Herdar,
             retentar: Retentar::Herdar,
+            ocioso: Ocioso::Herdar,
             credencial_modo: ModoCredencial::Herdar,
+            key_file: None,
+            chave_do_cofre: None,
         };
         self.children_mut(parent).push(Node::Group(group));
         id
@@ -1730,10 +1784,18 @@ impl Tree {
     }
 
     /// Uma cópia da conexão `id` pronta para abrir: o `Herdar` do modo da credencial vira o
-    /// modo que vale pela pasta (ver [`crate::credencial::modo_efetivo`]).
+    /// modo que vale pela pasta (ver [`crate::credencial::modo_efetivo`]), e a conexão sem
+    /// chave própria recebe a da pasta (ver [`crate::credencial::chave_herdada`]).
     pub fn conexao_para_abrir(&self, id: u64) -> Option<Connection> {
         let mut c = self.connection(id)?.clone();
         c.credencial_modo = crate::credencial::modo_efetivo(self, id);
+        if c.key_file.is_none()
+            && c.chave_do_cofre.is_none()
+            && let Some(pasta) = crate::credencial::chave_herdada(self, id)
+        {
+            c.key_file = pasta.key_file.clone();
+            c.chave_do_cofre = pasta.chave_do_cofre.clone();
+        }
         Some(c)
     }
 
@@ -2142,6 +2204,36 @@ mod tests {
             serde_json::to_string(&c)
                 .unwrap()
                 .contains(r#""retentar":{"minutos":15}"#)
+        );
+    }
+
+    #[test]
+    fn o_tempo_sem_uso_so_vai_para_o_arquivo_quando_escolhido() {
+        let mut c = Connection::new("web", Kind::Ssh);
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(!json.contains("ocioso"), "{json}");
+        let antigo: Connection = serde_json::from_str(r#"{ "name": "web" }"#).unwrap();
+        assert_eq!(antigo.ocioso, Ocioso::Herdar);
+        let mut tree = Tree::default();
+        let pasta = tree.add_group(None, "Clientes");
+        let Some(Node::Group(g)) = tree.find(pasta) else {
+            panic!("sem a pasta");
+        };
+        let mut g = g.clone();
+        for escolha in [Ocioso::Desligado, Ocioso::Minutos(10)] {
+            c.ocioso = escolha;
+            g.ocioso = escolha;
+            let json = serde_json::to_string(&c).unwrap();
+            let volta: Connection = serde_json::from_str(&json).unwrap();
+            assert_eq!(volta.ocioso, escolha, "{json}");
+            let json = serde_json::to_string(&g).unwrap();
+            let volta: Group = serde_json::from_str(&json).unwrap();
+            assert_eq!(volta.ocioso, escolha, "{json}");
+        }
+        assert!(
+            serde_json::to_string(&c)
+                .unwrap()
+                .contains(r#""ocioso":{"minutos":10}"#)
         );
     }
 

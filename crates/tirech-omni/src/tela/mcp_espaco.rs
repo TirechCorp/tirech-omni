@@ -197,18 +197,45 @@ impl Tela {
             );
         }
         self.mcp.espacos.borrow_mut().remove(&espaco.nome);
-        let da_pessoa = self
-            .aba_da_conexao(conexao.id)
-            .map(|(_, s)| s)
-            .filter(|s| !s.closed() && s.ssh_channels().is_some());
-        match da_pessoa {
+        match self.aba_ssh_da_conexao(conexao.id) {
             Some(aba) => self.abrir_o_remoto(t, aba, espaco, Box::new(fazer)),
-            None => self.abrir_a_aba_do_espaco(
-                t,
-                conexao,
-                Box::new(move |tela, t, aba| tela.abrir_o_remoto(t, aba, espaco, Box::new(fazer))),
-            ),
+            None => {
+                if let Err(erro) = self.pode_abrir_aba(conexao.id, plano.abre_aba) {
+                    return self.erro_mcp(&t, erro);
+                }
+                self.abrir_a_aba_do_espaco(
+                    t,
+                    conexao,
+                    Box::new(move |tela, t, aba| {
+                        tela.abrir_o_remoto(t, aba, espaco, Box::new(fazer))
+                    }),
+                );
+            }
         }
+    }
+
+    /// Uma aba SSH de pé da conexão `id`, que o espaço pode usar sem abrir outra.
+    fn aba_ssh_da_conexao(&self, id: u64) -> Option<Session> {
+        self.aba_da_conexao(id)
+            .map(|(_, s)| s)
+            .filter(|s| !s.closed() && s.ssh_channels().is_some())
+    }
+
+    /// Se usar o espaço `espaco` vai abrir uma aba nova da conexão `conexao`: não há a sessão do
+    /// espaço de pé nem uma aba SSH da conexão. Não mexe em nada (é para decidir antes).
+    pub(super) fn espaco_abre_aba(&self, espaco: &EspacoIa, conexao: u64) -> bool {
+        let de_pe = self
+            .mcp
+            .espacos
+            .borrow()
+            .get(&espaco.nome)
+            .is_some_and(|s| {
+                s.conexao == espaco.conexao
+                    && s.raiz == espaco.raiz
+                    && !s.aba.closed()
+                    && self.sessao_por_chave(&s.aba.key_str()).is_some()
+            });
+        !de_pe && self.aba_ssh_da_conexao(conexao).is_none()
     }
 
     /// Abre o SFTP pela conexão da aba e confere a raiz, numa thread.

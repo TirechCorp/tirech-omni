@@ -210,7 +210,7 @@ impl Tela {
             exportar_item,
             cofre_item: Rc::new(move |id: u64| {
                 escolher_item.set(Some(id));
-                cofre_item.pagina.set("cofre".to_owned());
+                cofre_item.ir_para("cofre");
             }),
             destravar: Rc::new(move || destravar.desbloquear.set(true)),
             conexao: Rc::new(move || conexao.nome_da_conexao_ssh()),
@@ -230,9 +230,10 @@ impl Tela {
     }
 }
 
-/// Os diálogos de chaves da casca. Também deixa em `tela.copiar_chave` a função que abre o de
-/// copiar, para os menus.
-pub(super) fn dialogos_de_chaves(tela: &Rc<Tela>) -> impl View {
+/// Os diálogos de chaves da casca: liga as filas e os efeitos uma vez e devolve a função que
+/// monta os diálogos numa janela (cada janela de terminais tem os seus). Também deixa em
+/// `tela.copiar_chave` a função que abre o de copiar, para os menus.
+pub(super) fn dialogos_de_chaves(tela: &Rc<Tela>) -> impl Fn() -> Column + use<> {
     // Quando o cofre abre, as chaves salvas que esperavam a passphrase dele são carregadas.
     {
         let (t, feito) = (Rc::clone(tela), Cell::new(false));
@@ -247,14 +248,21 @@ pub(super) fn dialogos_de_chaves(tela: &Rc<Tela>) -> impl View {
             });
         });
     }
-    Column::new()
-        .child(dialogo_passphrase(tela))
-        .child(dialogo_uso(tela))
-        .child(dialogo_copiar(tela))
+    let (passphrase, uso, copiar) = (
+        dialogo_passphrase(tela),
+        dialogo_uso(tela),
+        dialogo_copiar(tela),
+    );
+    move || {
+        Column::new()
+            .child(passphrase())
+            .child(uso())
+            .child(copiar())
+    }
 }
 
 /// A passphrase de uma chave salva no `agente.json`, uma por vez, na ordem da fila.
-fn dialogo_passphrase(tela: &Rc<Tela>) -> impl View {
+fn dialogo_passphrase(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     let ferr = Rc::clone(&tela.ferramentas);
     let aberto = signal(false);
     let passphrase = signal(String::new());
@@ -296,70 +304,73 @@ fn dialogo_passphrase(tela: &Rc<Tela>) -> impl View {
         });
     }
 
-    let arquivo = {
-        let ferr = Rc::clone(&ferr);
-        move || {
-            ferr.cargas.with(|c| {
-                c.first()
-                    .map(|carga| carga.arquivo.display().to_string())
-                    .unwrap_or_default()
-            })
-        }
-    };
-    let nome = {
-        let arquivo = arquivo.clone();
-        move || crate::ferramentas::nome_do(Path::new(&arquivo()))
-    };
-
-    let confirmar = {
-        let (ferr, confirmou, refazer) =
-            (Rc::clone(&ferr), Rc::clone(&confirmou), Rc::clone(&refazer));
-        move || {
-            confirmou.set(true);
-            let certa = ferr.concluir_carga(&passphrase.get_untracked(), salvar.get_untracked());
-            errou.set(!certa);
-            refazer.set(!certa);
-            if !certa {
-                // Errou: o campo volta vazio para digitar de novo.
-                passphrase.set(String::new());
+    move || {
+        let arquivo = {
+            let ferr = Rc::clone(&ferr);
+            move || {
+                ferr.cargas.with(|c| {
+                    c.first()
+                        .map(|carga| carga.arquivo.display().to_string())
+                        .unwrap_or_default()
+                })
             }
-        }
-    };
+        };
+        let nome = {
+            let arquivo = arquivo.clone();
+            move || crate::ferramentas::nome_do(Path::new(&arquivo()))
+        };
 
-    ContentDialog::new(move || t!("chaves-passphrase-de", nome = nome()), aberto)
-        .id("agente-passphrase")
-        .content(
-            Column::new()
-                .gap(8)
-                .child(
-                    Text::new(arquivo)
-                        .id("agente-passphrase-arquivo")
-                        .secondary()
-                        .wrap(),
-                )
-                .child(
-                    Edit::bind(passphrase)
-                        .id("agente-passphrase-campo")
-                        .password()
-                        .placeholder("Passphrase"),
-                )
-                .child(
-                    CheckBox::bind(salvar, t!("comum-salvar-a-passphrase-no-cofre"))
-                        .id("agente-passphrase-salvar"),
-                )
-                .child(
-                    Text::new(t!("chave-passphrase-incorreta"))
-                        .id("agente-passphrase-erro")
-                        .caption()
-                        .visible(move || errou.get()),
-                ),
-        )
-        .primary(t!("chave-carregar"), confirmar)
-        .close(t!("comum-agora-nao"))
+        let confirmar = {
+            let (ferr, confirmou, refazer) =
+                (Rc::clone(&ferr), Rc::clone(&confirmou), Rc::clone(&refazer));
+            move || {
+                confirmou.set(true);
+                let certa =
+                    ferr.concluir_carga(&passphrase.get_untracked(), salvar.get_untracked());
+                errou.set(!certa);
+                refazer.set(!certa);
+                if !certa {
+                    // Errou: o campo volta vazio para digitar de novo.
+                    passphrase.set(String::new());
+                }
+            }
+        };
+
+        ContentDialog::new(move || t!("chaves-passphrase-de", nome = nome()), aberto)
+            .id("agente-passphrase")
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(
+                        Text::new(arquivo)
+                            .id("agente-passphrase-arquivo")
+                            .secondary()
+                            .wrap(),
+                    )
+                    .child(
+                        Edit::bind(passphrase)
+                            .id("agente-passphrase-campo")
+                            .password()
+                            .placeholder("Passphrase"),
+                    )
+                    .child(
+                        CheckBox::bind(salvar, t!("comum-salvar-a-passphrase-no-cofre"))
+                            .id("agente-passphrase-salvar"),
+                    )
+                    .child(
+                        Text::new(t!("chave-passphrase-incorreta"))
+                            .id("agente-passphrase-erro")
+                            .caption()
+                            .visible(move || errou.get()),
+                    ),
+            )
+            .primary(t!("chave-carregar"), confirmar)
+            .close(t!("comum-agora-nao"))
+    }
 }
 
 /// "Permitir que um programa use a chave?": o agente espera até 60 s por esta resposta.
-fn dialogo_uso(tela: &Rc<Tela>) -> impl View {
+fn dialogo_uso(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     let agente = Rc::clone(&tela.ferramentas.agente);
     let aberto = signal(false);
     let lembrar = signal(false);
@@ -395,95 +406,97 @@ fn dialogo_uso(tela: &Rc<Tela>) -> impl View {
         });
     }
 
-    let texto = {
-        let agente = Rc::clone(&agente);
-        move |f: fn(&crate::agente::PedidoDeUso) -> String| {
+    move || {
+        let texto = {
             let agente = Rc::clone(&agente);
-            move || agente.pedidos().first().map(|p| f(p)).unwrap_or_default()
-        }
-    };
-
-    let permitir = {
-        let (agente, respondeu) = (Rc::clone(&agente), Rc::clone(&respondeu));
-        move || {
-            respondeu.set(true);
-            if let Some(pedido) = agente.pedidos_agora().first() {
-                agente.responder(pedido, true, lembrar.get_untracked());
+            move |f: fn(&crate::agente::PedidoDeUso) -> String| {
+                let agente = Rc::clone(&agente);
+                move || agente.pedidos().first().map(|p| f(p)).unwrap_or_default()
             }
-        }
-    };
-    let negar = {
-        let (agente, respondeu) = (Rc::clone(&agente), Rc::clone(&respondeu));
-        move || {
-            respondeu.set(true);
-            if let Some(pedido) = agente.pedidos_agora().first() {
-                agente.responder(pedido, false, false);
-            }
-        }
-    };
+        };
 
-    ContentDialog::new(t!("chave-usar-a-chave"), aberto)
-        .id("agente-uso-dialogo")
-        .content(
-            Column::new()
-                .gap(8)
-                .child(
-                    Text::new(texto(|p| p.programa.clone()))
-                        .id("agente-uso-programa")
-                        .body_strong()
-                        .wrap(),
-                )
-                .child(
-                    Text::new(t!("chave-quer-assinar-com-uma-chave-do"))
+        let permitir = {
+            let (agente, respondeu) = (Rc::clone(&agente), Rc::clone(&respondeu));
+            move || {
+                respondeu.set(true);
+                if let Some(pedido) = agente.pedidos_agora().first() {
+                    agente.responder(pedido, true, lembrar.get_untracked());
+                }
+            }
+        };
+        let negar = {
+            let (agente, respondeu) = (Rc::clone(&agente), Rc::clone(&respondeu));
+            move || {
+                respondeu.set(true);
+                if let Some(pedido) = agente.pedidos_agora().first() {
+                    agente.responder(pedido, false, false);
+                }
+            }
+        };
+
+        ContentDialog::new(t!("chave-usar-a-chave"), aberto)
+            .id("agente-uso-dialogo")
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(
+                        Text::new(texto(|p| p.programa.clone()))
+                            .id("agente-uso-programa")
+                            .body_strong()
+                            .wrap(),
+                    )
+                    .child(
+                        Text::new(t!("chave-quer-assinar-com-uma-chave-do"))
+                            .secondary()
+                            .wrap(),
+                    )
+                    .child(
+                        Text::new(texto(|p| p.comentario.clone()))
+                            .id("agente-uso-chave")
+                            .body_strong()
+                            .wrap(),
+                    )
+                    .child(
+                        Text::new(texto(|p| {
+                            p.destino
+                                .as_ref()
+                                .map(|d| t!("chaves-uso-para-destino", destino = d.as_str()))
+                                .unwrap_or_default()
+                        }))
+                        .id("agente-uso-destino")
                         .secondary()
-                        .wrap(),
-                )
-                .child(
-                    Text::new(texto(|p| p.comentario.clone()))
-                        .id("agente-uso-chave")
-                        .body_strong()
-                        .wrap(),
-                )
-                .child(
-                    Text::new(texto(|p| {
-                        p.destino
-                            .as_ref()
-                            .map(|d| t!("chaves-uso-para-destino", destino = d.as_str()))
-                            .unwrap_or_default()
-                    }))
-                    .id("agente-uso-destino")
-                    .secondary()
-                    .wrap()
-                    .visible({
-                        let agente = Rc::clone(&agente);
-                        move || {
-                            agente
-                                .pedidos()
-                                .first()
-                                .is_some_and(|p| p.destino.is_some())
-                        }
-                    }),
-                )
-                .child(
-                    Text::new(texto(|p| p.fingerprint.clone()))
-                        .id("agente-uso-fingerprint")
-                        .caption()
-                        .secondary()
-                        .wrap(),
-                )
-                .child(
-                    CheckBox::bind(lembrar, t!("chave-nao-perguntar-de-novo-para-este"))
-                        .id("agente-uso-lembrar"),
-                ),
-        )
-        .primary(t!("chave-permitir"), permitir)
-        .secondary(t!("chave-negar"), negar)
-        .close(t!("comum-fechar"))
+                        .wrap()
+                        .visible({
+                            let agente = Rc::clone(&agente);
+                            move || {
+                                agente
+                                    .pedidos()
+                                    .first()
+                                    .is_some_and(|p| p.destino.is_some())
+                            }
+                        }),
+                    )
+                    .child(
+                        Text::new(texto(|p| p.fingerprint.clone()))
+                            .id("agente-uso-fingerprint")
+                            .caption()
+                            .secondary()
+                            .wrap(),
+                    )
+                    .child(
+                        CheckBox::bind(lembrar, t!("chave-nao-perguntar-de-novo-para-este"))
+                            .id("agente-uso-lembrar"),
+                    ),
+            )
+            .primary(t!("chave-permitir"), permitir)
+            .secondary(t!("chave-negar"), negar)
+            .close(t!("comum-fechar"))
+    }
 }
 
 /// "Copiar a chave para o servidor": escolhe a conexão SSH e a chave pública e roda o
 /// `ssh-copy-id` numa thread. Deixa a função que abre o diálogo em `tela.copiar_chave`.
-fn dialogo_copiar(tela: &Rc<Tela>) -> impl View {
+fn dialogo_copiar(tela: &Rc<Tela>) -> impl Fn() -> Column + use<> {
     let aberto = signal(false);
     let rotulo_chave = signal(String::new());
     let rotulo_conexao = signal(String::new());
@@ -591,55 +604,6 @@ fn dialogo_copiar(tela: &Rc<Tela>) -> impl View {
     };
     *tela.copiar_chave.borrow_mut() = Some(Rc::clone(&abrir));
 
-    let instalar = {
-        let (t, chaves, conexoes, saida) = (
-            Rc::clone(tela),
-            Rc::clone(&opcoes_chave),
-            Rc::clone(&opcoes_conexao),
-            Arc::clone(&saida),
-        );
-        move || {
-            let chave = chaves
-                .borrow()
-                .iter()
-                .find(|o| o.rotulo == rotulo_chave.get_untracked())
-                .cloned();
-            let id = conexoes
-                .borrow()
-                .iter()
-                .find(|(r, _)| *r == rotulo_conexao.get_untracked())
-                .map(|(_, id)| *id);
-            let (Some(chave), Some(conexao)) = (
-                chave,
-                id.and_then(|id| t.tree.with_untracked(|tr| tr.conexao_para_abrir(id))),
-            ) else {
-                return;
-            };
-            let mut senhas = t.senhas_do_cofre(&conexao);
-            let digitada = senha.get_untracked();
-            if !digitada.is_empty() {
-                senhas.conexao = Some(digitada);
-            }
-            let efetiva = t.conexao_efetiva(&conexao);
-            let instalador = t.opener.instalador(&efetiva, senhas);
-            t.avisar(
-                InfoBarSeverity::Informational,
-                t!("chaves-instalando-em", conexao = conexao.name.as_str()),
-            );
-            let (forcada, saida) = (forcar.get_untracked(), Arc::clone(&saida));
-            std::thread::spawn(move || {
-                let resultado = instalador(chave.publica, forcada);
-                *saida.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instalada {
-                    conexao: conexao.id,
-                    nome: conexao.name,
-                    privada: chave.privada,
-                    resultado,
-                });
-                acordar(pronto);
-            });
-        }
-    };
-
     // A thread terminou: avisa e, se a chave é de um par em arquivo e a conexão ainda não tem
     // chave, oferece usá-la.
     {
@@ -686,75 +650,128 @@ fn dialogo_copiar(tela: &Rc<Tela>) -> impl View {
         });
     }
 
-    let (chaves_visao, conexoes_visao) = (Rc::clone(&opcoes_chave), Rc::clone(&opcoes_conexao));
-    let dialogo = ContentDialog::new(t!("chave-copiar-a-chave-para-o-servidor"), aberto)
-        .id("copiar-chave-dialogo")
-        .content(
-            Column::new()
-                .gap(8)
-                .child(Text::new(t!("chave-conexao")).caption())
-                // As listas mudam entre uma abertura e outra: os seletores nascem com o diálogo.
-                .child(Show::when(aberto, move || {
-                    let nomes: Vec<String> = conexoes_visao
-                        .borrow()
-                        .iter()
-                        .map(|(r, _)| r.clone())
-                        .collect();
-                    ComboBox::bind(rotulo_conexao, nomes).id("copiar-chave-conexao")
-                }))
-                .child(Text::new(t!("chave-chave-publica")).caption())
-                .child(Show::when(aberto, move || {
-                    let nomes: Vec<String> = chaves_visao
-                        .borrow()
-                        .iter()
-                        .map(|o| o.rotulo.clone())
-                        .collect();
-                    ComboBox::bind(rotulo_chave, nomes).id("copiar-chave-chave")
-                }))
-                .child(Text::new(t!("chave-senha-do-servidor")).caption())
-                .child(
-                    Edit::bind(senha)
-                        .id("copiar-chave-senha")
-                        .password()
-                        .placeholder(t!("chave-senha-do-servidor")),
-                )
-                .child(
-                    CheckBox::bind(forcar, t!("chave-forcar-instalar-mesmo-que-ja-esteja"))
-                        .id("copiar-chave-forcar"),
-                ),
-        )
-        .primary(t!("chave-instalar"), instalar)
-        .close(t!("comum-cancelar"));
-
-    let usar_sim = {
-        let (t, a_usar) = (Rc::clone(tela), Rc::clone(&a_usar));
-        move || {
-            if let Some((id, _, privada)) = a_usar.borrow_mut().take() {
-                t.definir_chave_da_conexao(id, &privada);
+    let tela = Rc::clone(tela);
+    move || {
+        let tela = &tela;
+        let instalar = {
+            let (t, chaves, conexoes, saida) = (
+                Rc::clone(tela),
+                Rc::clone(&opcoes_chave),
+                Rc::clone(&opcoes_conexao),
+                Arc::clone(&saida),
+            );
+            move || {
+                let chave = chaves
+                    .borrow()
+                    .iter()
+                    .find(|o| o.rotulo == rotulo_chave.get_untracked())
+                    .cloned();
+                let id = conexoes
+                    .borrow()
+                    .iter()
+                    .find(|(r, _)| *r == rotulo_conexao.get_untracked())
+                    .map(|(_, id)| *id);
+                let (Some(chave), Some(conexao)) = (
+                    chave,
+                    id.and_then(|id| t.tree.with_untracked(|tr| tr.conexao_para_abrir(id))),
+                ) else {
+                    return;
+                };
+                let mut senhas = t.senhas_do_cofre(&conexao);
+                let digitada = senha.get_untracked();
+                if !digitada.is_empty() {
+                    senhas.conexao = Some(digitada);
+                }
+                let efetiva = t.conexao_efetiva(&conexao);
+                let instalador = t.opener.instalador(&efetiva, senhas);
                 t.avisar(
-                    InfoBarSeverity::Success,
-                    t!(
-                        "chaves-conexao-agora-usa-a-chave",
-                        chave = privada.display().to_string()
-                    ),
+                    InfoBarSeverity::Informational,
+                    t!("chaves-instalando-em", conexao = conexao.name.as_str()),
                 );
+                let (forcada, saida) = (forcar.get_untracked(), Arc::clone(&saida));
+                std::thread::spawn(move || {
+                    let resultado = instalador(chave.publica, forcada);
+                    *saida.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instalada {
+                        conexao: conexao.id,
+                        nome: conexao.name,
+                        privada: chave.privada,
+                        resultado,
+                    });
+                    acordar(pronto);
+                });
             }
-        }
-    };
-    let dialogo_usar = ContentDialog::new(t!("chave-usar-esta-chave-na-conexao"), usar_aberto)
-        .id("copiar-chave-usar")
-        .content(
-            Text::new(move || {
-                t!(
-                    "chaves-conexao-sem-arquivo-de-chave",
-                    conexao = nome_a_usar.get()
-                )
-            })
-            .id("copiar-chave-usar-texto")
-            .wrap(),
-        )
-        .primary(t!("chave-usar-a-chave-2"), usar_sim)
-        .close(t!("comum-agora-nao"));
+        };
 
-    Column::new().child(dialogo).child(dialogo_usar)
+        let (chaves_visao, conexoes_visao) = (Rc::clone(&opcoes_chave), Rc::clone(&opcoes_conexao));
+        let dialogo = ContentDialog::new(t!("chave-copiar-a-chave-para-o-servidor"), aberto)
+            .id("copiar-chave-dialogo")
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(Text::new(t!("chave-conexao")).caption())
+                    // As listas mudam entre uma abertura e outra: os seletores nascem com o diálogo.
+                    .child(Show::when(aberto, move || {
+                        let nomes: Vec<String> = conexoes_visao
+                            .borrow()
+                            .iter()
+                            .map(|(r, _)| r.clone())
+                            .collect();
+                        ComboBox::bind(rotulo_conexao, nomes).id("copiar-chave-conexao")
+                    }))
+                    .child(Text::new(t!("chave-chave-publica")).caption())
+                    .child(Show::when(aberto, move || {
+                        let nomes: Vec<String> = chaves_visao
+                            .borrow()
+                            .iter()
+                            .map(|o| o.rotulo.clone())
+                            .collect();
+                        ComboBox::bind(rotulo_chave, nomes).id("copiar-chave-chave")
+                    }))
+                    .child(Text::new(t!("chave-senha-do-servidor")).caption())
+                    .child(
+                        Edit::bind(senha)
+                            .id("copiar-chave-senha")
+                            .password()
+                            .placeholder(t!("chave-senha-do-servidor")),
+                    )
+                    .child(
+                        CheckBox::bind(forcar, t!("chave-forcar-instalar-mesmo-que-ja-esteja"))
+                            .id("copiar-chave-forcar"),
+                    ),
+            )
+            .primary(t!("chave-instalar"), instalar)
+            .close(t!("comum-cancelar"));
+
+        let usar_sim = {
+            let (t, a_usar) = (Rc::clone(tela), Rc::clone(&a_usar));
+            move || {
+                if let Some((id, _, privada)) = a_usar.borrow_mut().take() {
+                    t.definir_chave_da_conexao(id, &privada);
+                    t.avisar(
+                        InfoBarSeverity::Success,
+                        t!(
+                            "chaves-conexao-agora-usa-a-chave",
+                            chave = privada.display().to_string()
+                        ),
+                    );
+                }
+            }
+        };
+        let dialogo_usar = ContentDialog::new(t!("chave-usar-esta-chave-na-conexao"), usar_aberto)
+            .id("copiar-chave-usar")
+            .content(
+                Text::new(move || {
+                    t!(
+                        "chaves-conexao-sem-arquivo-de-chave",
+                        conexao = nome_a_usar.get()
+                    )
+                })
+                .id("copiar-chave-usar-texto")
+                .wrap(),
+            )
+            .primary(t!("chave-usar-a-chave-2"), usar_sim)
+            .close(t!("comum-agora-nao"));
+
+        Column::new().child(dialogo).child(dialogo_usar)
+    }
 }

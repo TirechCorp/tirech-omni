@@ -21,11 +21,11 @@ use crate::busca::normalizar;
 use crate::cofre::{Cofre, CofreCompartilhado};
 use crate::configuracoes::catalogo::{self, Tipo, id_do_valor};
 use crate::configuracoes::{
-    AbrirEm, AbrirEspaco, AbrirIa, AoFechar, AssistentePreferido, BotaoDireito, Campainha,
-    ChaveNova, ColarArquivos, Configuracoes, ConflitoCfg, ConversaAoControlar, Cursor,
-    EnviarEditado, Esquema, Idioma, MetodoIa, ModoComparar, ModoNotas, ModoReconectar,
-    PaginaInicial, RECENTES_MAX, RECENTES_MIN, Tema, TipoChave, TmuxAoFechar, ValidadeLink,
-    X11Padrao,
+    AbrirAbaAuto, AbrirAbaIa, AbrirEm, AbrirEspaco, AbrirIa, AoFechar, AssistentePreferido,
+    BotaoDireito, Campainha, ChaveNova, ColarArquivos, Configuracoes, ConflitoCfg,
+    ConversaAoControlar, Cursor, EnviarEditado, Esquema, Idioma, MetodoIa, ModoComparar, ModoNotas,
+    ModoReconectar, PaginaInicial, RECENTES_MAX, RECENTES_MIN, Tema, TipoChave, TmuxAoFechar,
+    ValidadeLink, X11Padrao,
 };
 use crate::i18n;
 use crate::modelo::{FtpCodificacao, FtpModo, FtpSeguranca, FtpTls, S3Estilo};
@@ -1255,6 +1255,12 @@ fn secao_conexoes(p: &Pagina) -> Expander {
                         1440.0,
                     )),
             )
+            .child(p.numero(
+                "conexoes.ocioso_mins",
+                numero_de!(p, 0, 1440, conexoes.ocioso_mins),
+                0.0,
+                1440.0,
+            ))
             .child(p.escolha(
                 "conexoes.abrir_em",
                 opcao_de!(p, AbrirEm::TODAS, conexoes.abrir_em),
@@ -2246,6 +2252,16 @@ fn secao_mcp(p: &Pagina) -> Expander {
                     .wrap()
                     .visible(p.achou("ia.mcp_ligado")),
             )
+            .child(p.escolha(
+                "ia.mcp_abrir",
+                opcao_de!(p, AbrirAbaIa::TODAS, ia.mcp_abrir),
+                AbrirAbaIa::nomes(),
+            ))
+            .child(p.escolha(
+                "ia.mcp_abrir_auto",
+                opcao_de!(p, AbrirAbaAuto::TODAS, ia.mcp_abrir_auto),
+                AbrirAbaAuto::nomes(),
+            ))
             .child(p.acao("acao.mcp_como", Symbol::Sparkle, como))
             .child(p.acao("acao.mcp_espaco_novo", Symbol::Add, novo))
             .child(lista_de_espacos(p))

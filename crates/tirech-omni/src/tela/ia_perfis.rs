@@ -415,7 +415,7 @@ fn atualizar_modelos(
 }
 
 /// A página "Assistentes de IA".
-pub(super) fn pagina(tela: &Rc<Tela>) -> impl View {
+pub(super) fn pagina(tela: &Rc<Tela>) -> impl View + use<> {
     let estado = &tela.assistente;
     let (perfis, escolhido, escolher) = (estado.perfis, estado.escolhido, estado.escolher_aberto);
     let cofre = tela.cofre.clone();

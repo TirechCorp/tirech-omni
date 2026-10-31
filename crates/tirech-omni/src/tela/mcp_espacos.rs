@@ -251,8 +251,9 @@ impl Tela {
     }
 }
 
-/// O diálogo do espaço de trabalho (`mcp-espaco-dialogo`).
-pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View + use<> {
+/// O diálogo do espaço de trabalho (`mcp-espaco-dialogo`). O efeito que reabre a caixa liga uma
+/// vez, e a função devolvida monta a caixa em cada janela.
+pub(super) fn dialogos(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     let s = &tela.mcp.espaco;
     let (aberto, nome, conexao, raiz, erro, versao) =
         (s.aberto, s.nome, s.conexao, s.raiz, s.erro, s.versao);
@@ -271,86 +272,90 @@ pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View + use<> {
             });
         });
     }
-    let opcoes = {
-        let tela = Rc::clone(tela);
-        // A lista nasce com a caixa e se refaz ao liberar uma conexão.
-        For::each(
-            move || vec![versao.get()],
-            |v| *v,
-            move |_| {
-                let rotulos: Vec<String> = tela
-                    .mcp
-                    .espaco
-                    .conexoes
-                    .borrow()
-                    .iter()
-                    .map(|(rotulo, _)| rotulo.clone())
-                    .collect();
-                ComboBox::bind(conexao, rotulos).id("mcp-espaco-conexao")
-            },
-        )
-    };
-    let (desligada, liberar) = (Rc::clone(tela), Rc::clone(tela));
-    let salvar = Rc::clone(tela);
-    ContentDialog::new(
-        {
+    let tela = Rc::clone(tela);
+    move || {
+        let tela = &tela;
+        let opcoes = {
             let tela = Rc::clone(tela);
-            move || {
-                if tela.mcp.espaco.editando.borrow().is_some() && aberto.get() {
-                    t!("mcp-espaco-titulo-editar")
-                } else {
-                    t!("mcp-espaco-titulo-novo")
+            // A lista nasce com a caixa e se refaz ao liberar uma conexão.
+            For::each(
+                move || vec![versao.get()],
+                |v| *v,
+                move |_| {
+                    let rotulos: Vec<String> = tela
+                        .mcp
+                        .espaco
+                        .conexoes
+                        .borrow()
+                        .iter()
+                        .map(|(rotulo, _)| rotulo.clone())
+                        .collect();
+                    ComboBox::bind(conexao, rotulos).id("mcp-espaco-conexao")
+                },
+            )
+        };
+        let (desligada, liberar) = (Rc::clone(tela), Rc::clone(tela));
+        let salvar = Rc::clone(tela);
+        ContentDialog::new(
+            {
+                let tela = Rc::clone(tela);
+                move || {
+                    if tela.mcp.espaco.editando.borrow().is_some() && aberto.get() {
+                        t!("mcp-espaco-titulo-editar")
+                    } else {
+                        t!("mcp-espaco-titulo-novo")
+                    }
                 }
-            }
-        },
-        aberto,
-    )
-    .id("mcp-espaco-dialogo")
-    .content(
-        Column::new()
-            .gap(8)
-            .width(440)
-            .child(Text::new(t!("mcp-espaco-explicacao")).secondary().wrap())
-            .child(Text::new(t!("mcp-espaco-nome")).caption())
-            .child(
-                Edit::bind(nome)
-                    .id("mcp-espaco-nome")
-                    .placeholder(t!("mcp-espaco-nome-dica")),
-            )
-            .child(Text::new(t!("mcp-espaco-conexao")).caption())
-            .child(opcoes)
-            .child(
-                Column::new()
-                    .gap(4)
-                    .visible(move || desligada.conexao_do_espaco_desligada())
-                    .child(
-                        Text::new(t!("mcp-espaco-liberar"))
-                            .id("mcp-espaco-liberar-texto")
-                            .secondary()
-                            .wrap(),
-                    )
-                    .child(
-                        Row::new().child(
-                            Button::new(t!("mcp-espaco-liberar-botao"))
-                                .id("mcp-espaco-liberar")
-                                .on_click(move || liberar.liberar_conexao_do_espaco()),
+            },
+            aberto,
+        )
+        .id("mcp-espaco-dialogo")
+        .content(
+            Column::new()
+                .gap(8)
+                .width(440)
+                .child(Text::new(t!("mcp-espaco-explicacao")).secondary().wrap())
+                .child(Text::new(t!("mcp-espaco-nome")).caption())
+                .child(
+                    Edit::bind(nome)
+                        .id("mcp-espaco-nome")
+                        .placeholder(t!("mcp-espaco-nome-dica")),
+                )
+                .child(Text::new(t!("mcp-espaco-conexao")).caption())
+                .child(opcoes)
+                .child(
+                    Column::new()
+                        .gap(4)
+                        .visible(move || desligada.conexao_do_espaco_desligada())
+                        .child(
+                            Text::new(t!("mcp-espaco-liberar"))
+                                .id("mcp-espaco-liberar-texto")
+                                .secondary()
+                                .wrap(),
+                        )
+                        .child(
+                            Row::new().child(
+                                Button::new(t!("mcp-espaco-liberar-botao"))
+                                    .id("mcp-espaco-liberar")
+                                    .on_click(move || liberar.liberar_conexao_do_espaco()),
+                            ),
                         ),
-                    ),
-            )
-            .child(Text::new(t!("mcp-espaco-raiz")).caption())
-            .child(
-                Edit::bind(raiz)
-                    .id("mcp-espaco-raiz")
-                    .placeholder(t!("mcp-espaco-raiz-dica")),
-            )
-            .child(
-                Text::new(move || erro.get())
-                    .id("mcp-espaco-erro")
-                    .caption()
-                    .wrap()
-                    .visible(move || !erro.get().is_empty()),
-            ),
-    )
-    .primary(t!("comum-salvar"), move || salvar.salvar_espaco_ia())
-    .close(t!("comum-cancelar"))
+                )
+                .child(Text::new(t!("mcp-espaco-raiz")).caption())
+                .child(
+                    Edit::bind(raiz)
+                        .id("mcp-espaco-raiz")
+                        .placeholder(t!("mcp-espaco-raiz-dica")),
+                )
+                .child(
+                    Text::new(move || erro.get())
+                        .id("mcp-espaco-erro")
+                        .caption()
+                        .wrap()
+                        .visible(move || !erro.get().is_empty()),
+                ),
+        )
+        .primary(t!("comum-salvar"), move || salvar.salvar_espaco_ia())
+        .close(t!("comum-cancelar"))
+    }
 }

@@ -165,6 +165,9 @@ mcp-aprovar-contexto = { $assistente } en { $conexao } ({ $destino })
 mcp-aprovar-invisiveis = El texto tiene caracteres de control o invisibles, que el campo muestra como marcas.
 mcp-aprovar-perigo = Atención: este comando { $motivo }.
 mcp-aprovar-sessao = Permitir el resto de esta sesión en esta pestaña
+mcp-aprovar-abre-aba = Para ello, abre una pestaña nueva de la conexión.
+mcp-aprovar-abrir-auto = Abrir las pestañas nuevas de esta sesión sin preguntar, durante { $tempo }
+mcp-aprovar-abrir-auto-sempre = Abrir las pestañas nuevas de esta sesión sin preguntar, hasta que termine
 mcp-aprovar-motivo-dica = Si lo rechazas, dile el motivo a la IA (opcional)
 mcp-recusar = Rechazar
 mcp-permitir = Permitir
@@ -269,6 +272,11 @@ mcp-perm-desligada = Desactivada
 mcp-perm-so-ler = Solo lectura
 mcp-perm-aprovar = Aprobar
 mcp-perm-livre = Libre
+mcp-abrir-linha = Abrir pestañas nuevas
+mcp-abrir-linha-descricao = Si un asistente puede abrir una pestaña nueva de esta conexión por MCP (abrir la conexión, iniciar un túnel sin pestaña abierta o usar un espacio de trabajo). Permitir sigue el permiso de arriba; Preguntar pide tu aprobación en cada pestaña nueva, incluso en Libre; Bloquear deja que el asistente use solo las pestañas que tú abras. Reconectar una pestaña que se cayó no cuenta.
+mcp-abrir-linha-descricao-pasta = Si un asistente puede abrir pestañas nuevas de las conexiones de esta carpeta que no eligieron otra cosa. Heredar sigue la carpeta de arriba y, sin carpeta que elija, Configuración › Asistentes (MCP).
+mcp-abrir-herdar-de = Heredar ({ $escolha })
+mcp-abrir-aba-fechou = La pestaña que iba a usar el pedido se cerró, y abrir una pestaña nueva de esta conexión necesita la aprobación de la persona. Pídelo de nuevo.
 mcp-arvore-menu = Asistentes (MCP)
 
 # El espacio de trabajo (fase 6): el diálogo, la lista y el panel de archivos.

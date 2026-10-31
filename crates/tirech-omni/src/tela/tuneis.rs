@@ -15,7 +15,7 @@ use crate::abrir::forward_do_tunel;
 use crate::arquivos::formato;
 use crate::espacos::id_da_chave;
 use crate::links::DestinoDoLink;
-use crate::modelo::{SOCKET_DO_LIBVIRT, TipoTunel, Tunel, dividir_destino};
+use crate::modelo::{Kind, SOCKET_DO_LIBVIRT, TipoTunel, Tunel, dividir_destino};
 use crate::t;
 
 /// A chave da linha do X11 na lista dos túneis ativos.
@@ -669,13 +669,16 @@ impl Tela {
     }
 }
 
-/// O texto de ajuda do formulário: o que falta, ou o que o tipo escolhido faz.
-fn ajuda_do_formulario(est: &EstadoTuneis) -> String {
+/// O texto de ajuda do formulário: o que falta, ou o que o tipo escolhido faz. No `shell`
+/// local, o túnel sai pela rede da conexão ([`crate::shell_na_rede`]).
+fn ajuda_do_formulario(est: &EstadoTuneis, shell: bool) -> String {
     let tunel = est.tunel_do_formulario();
     if let Some(problema) = tunel.problema() {
         return problema;
     }
     match tunel.tipo {
+        TipoTunel::Local if shell => t!("tuneis-ajuda-local-shell"),
+        TipoTunel::Dinamico if shell => t!("tuneis-ajuda-dinamico-shell"),
         TipoTunel::Local => t!("tuneis-ajuda-local"),
         TipoTunel::Remoto => t!("tuneis-ajuda-remoto"),
         TipoTunel::Dinamico => t!("tuneis-ajuda-dinamico"),
@@ -748,6 +751,13 @@ fn formulario_do_editor(tela: &Rc<Tela>) -> Column {
         .iter()
         .map(|t| t.nome().to_owned())
         .collect();
+    // O shell local só tem os túneis que escutam aqui: o remoto e o socket precisam do servidor.
+    let tipos_do_shell: Vec<String> = [TipoTunel::Local, TipoTunel::Dinamico]
+        .iter()
+        .map(|t| t.nome().to_owned())
+        .collect();
+    let tipo_da_conexao = tela.campos.tipo;
+    let shell = move || tipo_da_conexao.get() == Kind::Local.nome();
     let (t_salvar, t_voltar, t_ajuda, t_pode) = (
         Rc::clone(tela),
         Rc::clone(tela),
@@ -763,12 +773,23 @@ fn formulario_do_editor(tela: &Rc<Tela>) -> Column {
     let usa_socket = move || tipo_do_nome(&tipo.get()) == TipoTunel::SocketUnix;
     let remoto = move || tipo_do_nome(&tipo.get()) == TipoTunel::Remoto;
     let local = move || tipo_do_nome(&tipo.get()) == TipoTunel::Local;
+    // O relé e o "Abrir no navegador" vêm da lista dos túneis ativos, que é do SSH.
+    let web = move || local() && !shell();
     let pode_salvar = move || t_pode.tuneis.tunel_do_formulario().problema().is_none();
     Column::new()
         .id("tuneis-editor-form")
         .gap(8)
         .child(Text::new(t!("tuneis-tipo")).caption())
-        .child(ComboBox::bind(est.tipo, tipos).id("tunel-tipo"))
+        .child(
+            ComboBox::bind(est.tipo, tipos)
+                .id("tunel-tipo")
+                .visible(move || !shell()),
+        )
+        .child(
+            ComboBox::bind(est.tipo, tipos_do_shell)
+                .id("tunel-tipo-shell")
+                .visible(shell),
+        )
         .child(Text::new(t!("tuneis-porta")).caption())
         .child(
             NumberBox::bind(est.porta)
@@ -782,6 +803,8 @@ fn formulario_do_editor(tela: &Rc<Tela>) -> Column {
             Text::new(move || {
                 if remoto() {
                     t!("tuneis-destino-visto-da-maquina")
+                } else if shell() {
+                    t!("tuneis-destino-visto-da-rede")
                 } else {
                     t!("tuneis-destino-visto-do-servidor")
                 }
@@ -829,18 +852,18 @@ fn formulario_do_editor(tela: &Rc<Tela>) -> Column {
         .child(
             Text::new(t!("tuneis-caminho-no-navegador"))
                 .caption()
-                .visible(local),
+                .visible(web),
         )
         .child(
             Edit::bind(est.caminho_web)
                 .id("tunel-caminho-web")
                 .placeholder("/phpmyadmin/")
-                .visible(local),
+                .visible(web),
         )
         .child(
             Expander::new(t!("tuneis-opcoes-web"), est.opcoes_web)
                 .id("tunel-opcoes-web")
-                .visible(local)
+                .visible(web)
                 .content(
                     Column::new()
                         .gap(8)
@@ -862,7 +885,7 @@ fn formulario_do_editor(tela: &Rc<Tela>) -> Column {
                 .visible(move || na_sessao.get()),
         )
         .child(
-            Text::new(move || ajuda_do_formulario(&t_ajuda.tuneis))
+            Text::new(move || ajuda_do_formulario(&t_ajuda.tuneis, shell()))
                 .id("tunel-ajuda")
                 .caption()
                 .wrap(),

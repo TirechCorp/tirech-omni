@@ -173,7 +173,7 @@ impl Tela {
         if let Some(id) = id {
             self.assistente.escolhido.set(Some(id.to_string()));
         }
-        self.pagina.set("ia".to_owned());
+        self.ir_para("ia");
     }
 
     /// O primeiro uso: sem nenhum provedor, abre o diálogo para escolher um. Devolve se havia

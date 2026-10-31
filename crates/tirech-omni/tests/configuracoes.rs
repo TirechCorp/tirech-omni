@@ -11,10 +11,10 @@ mod comum;
 use tirech_omni::armazenamento::Armazenamento;
 use tirech_omni::configuracoes::catalogo::{self, Tipo, id_do_card, id_do_valor};
 use tirech_omni::configuracoes::{
-    AbrirEm, AbrirEspaco, AbrirIa, AoFechar, AssistentePreferido, BotaoDireito, Campainha,
-    ChaveNova, ColarArquivos, Configuracoes, ConflitoCfg, ConversaAoControlar, Cursor,
-    EnviarEditado, Esquema, Idioma, MetodoIa, ModoComparar, ModoNotas, ModoReconectar,
-    PaginaInicial, Tema, TipoChave, TmuxAoFechar, ValidadeLink, X11Padrao,
+    AbrirAbaAuto, AbrirAbaIa, AbrirEm, AbrirEspaco, AbrirIa, AoFechar, AssistentePreferido,
+    BotaoDireito, Campainha, ChaveNova, ColarArquivos, Configuracoes, ConflitoCfg,
+    ConversaAoControlar, Cursor, EnviarEditado, Esquema, Idioma, MetodoIa, ModoComparar, ModoNotas,
+    ModoReconectar, PaginaInicial, Tema, TipoChave, TmuxAoFechar, ValidadeLink, X11Padrao,
 };
 use tirech_omni::modelo::{FtpCodificacao, FtpModo, FtpSeguranca, FtpTls, S3Estilo};
 use tomni_ui::Key;
@@ -564,6 +564,12 @@ efeito_numero!(
     conexoes.reconectar.retentar_mins
 );
 efeito_numero!(
+    efeito_conexoes__ocioso_mins,
+    "conexoes.ocioso_mins",
+    10.0,
+    conexoes.ocioso_mins
+);
+efeito_numero!(
     efeito_cofre__limpar_area_transferencia_secs,
     "cofre.limpar_area_transferencia_secs",
     30.0,
@@ -1010,6 +1016,19 @@ fn efeito_ia__mcp_ligado() {
     assert!(gravada(&pasta).ia.mcp_ligado);
     assert!(!aparece(&mut m.app, "mcp-aviso"));
 }
+
+efeito_escolha!(
+    efeito_ia__mcp_abrir,
+    "ia.mcp_abrir",
+    AbrirAbaIa::TODAS,
+    ia.mcp_abrir
+);
+efeito_escolha!(
+    efeito_ia__mcp_abrir_auto,
+    "ia.mcp_abrir_auto",
+    AbrirAbaAuto::TODAS,
+    ia.mcp_abrir_auto
+);
 
 #[test]
 fn efeito_ia__mcp_ligado_cancelando_o_aviso_nao_liga() {

@@ -67,7 +67,7 @@ use crate::t;
 use crate::tailscale::{MotorTailscale, MotoresTailscale};
 use crate::tela_agente::pagina_agente;
 use crate::tela_chaves::pagina_chaves;
-use crate::tela_cofre::{Portabilidade, dialogo_desbloquear_com, pagina_cofre_completa};
+use crate::tela_cofre::{Portabilidade, montar_desbloquear, pagina_cofre_completa};
 use crate::tela_configuracoes::{Contexto, pagina_configuracoes};
 use crate::tela_notas::{AoFechar, ContextoNotas, EstadoNotas, pagina_notas};
 use crate::tmux;
@@ -79,6 +79,7 @@ mod abas_caidas;
 mod abrir_em;
 mod arquivos;
 mod assistente;
+mod autocompletar;
 mod baixar;
 mod bandeja;
 mod chaves;
@@ -106,6 +107,7 @@ mod lancador_links;
 mod links;
 mod logs_cifrados;
 mod mcp;
+mod mcp_abrir;
 mod mcp_aprovacao;
 mod mcp_arquivos;
 mod mcp_como;
@@ -119,9 +121,11 @@ mod mcp_terminal;
 mod menus;
 mod mouse;
 mod notas_conexao;
+mod ocioso;
 mod openvpn_perguntas;
 mod pagina_logs;
 mod portas;
+mod processos;
 mod programas;
 mod rclone;
 mod rclone_form;
@@ -564,6 +568,9 @@ struct Campos {
     /// O texto da linha "Assistentes (MCP)" da conexão ou do grupo escolhido (`Herdar
     /// (…)`, `Desligada`, `Só ler`, `Aprovar` ou `Livre`).
     mcp: Signal<String>,
+    /// O texto da linha "Abrir abas novas" da conexão ou do grupo escolhido (`Herdar (…)`,
+    /// `Permitir`, `Perguntar` ou `Bloquear`).
+    mcp_abrir: Signal<String>,
     /// O texto da linha "Sessão persistente" da conexão ou do grupo escolhido (`Herdar (…)`,
     /// `Nenhuma`, `tmux` ou `screen`).
     persistente: Signal<String>,
@@ -573,8 +580,14 @@ struct Campos {
     /// O texto da linha "Tentar de novo após" da conexão ou do grupo escolhido (`Herdar (…)`,
     /// `Desligado` ou um tempo).
     retentar: Signal<String>,
+    ocioso: Signal<String>,
     /// O texto da linha "Credencial" da pasta escolhida (`Herdar (…)` ou um modo).
     credencial_da_pasta: Signal<String>,
+    /// O texto da linha "Chave do cofre" da pasta escolhida (`Herdar (…)`, `Nenhuma` ou
+    /// `"título [id]"`).
+    chave_cofre_da_pasta: Signal<String>,
+    /// O caminho da linha "Chave privada" da pasta escolhida.
+    chave_da_pasta: Signal<String>,
     /// O texto da linha "Encaminhar X11" (`Padrão (<modo>)`, `Desligado`, `Não confiável` ou
     /// `Confiável`).
     x11: Signal<String>,
@@ -648,10 +661,14 @@ impl Campos {
             rede: signal(herdar()),
             perfil_ia: signal(String::new()),
             mcp: signal(String::new()),
+            mcp_abrir: signal(String::new()),
             persistente: signal(String::new()),
             mouse: signal(String::new()),
             retentar: signal(String::new()),
+            ocioso: signal(String::new()),
             credencial_da_pasta: signal(String::new()),
+            chave_cofre_da_pasta: signal(String::new()),
+            chave_da_pasta: signal(String::new()),
             x11: signal(ModoX11::Padrao.nome().to_owned()),
             tuneis: signal(Vec::new()),
             so_tuneis: signal(false),
@@ -957,6 +974,40 @@ fn escolher_na_arvore(
     true
 }
 
+/// Os painéis das páginas de uma janela, para as páginas e o menu Exibir. Os da principal são
+/// os da tela, que vão para o `estado.json`; cada secundária tem os seus, que nascem no arranjo
+/// em que os da principal estão e não se gravam.
+#[derive(Clone)]
+struct PaineisDaJanela {
+    /// As Conexões e as Propriedades em volta dos terminais (na principal, também o chat e as
+    /// portas).
+    terminais: DockController,
+    /// A lista da página Notas.
+    notas: PaineisDaPagina,
+    /// A fila da página Arquivos.
+    arquivos: PaineisDaPagina,
+}
+
+impl PaineisDaJanela {
+    /// Os da janela principal.
+    fn da_principal(tela: &Tela) -> Self {
+        Self {
+            terminais: tela.paineis_terminais.controle.clone(),
+            notas: tela.paineis_notas.clone(),
+            arquivos: tela.paineis_arquivos.clone(),
+        }
+    }
+
+    /// Os de uma janela secundária, com o controlador `terminais` dela.
+    fn de_uma_secundaria(tela: &Tela, terminais: DockController) -> Self {
+        Self {
+            terminais,
+            notas: PaineisDaPagina::novo(tela.paineis_notas.layout.get_untracked()),
+            arquivos: PaineisDaPagina::novo(tela.paineis_arquivos.layout.get_untracked()),
+        }
+    }
+}
+
 /// O que a tela guarda e usa nos botões, menus e efeitos.
 struct Tela {
     armazenamento: Armazenamento,
@@ -1030,6 +1081,10 @@ struct Tela {
     refazer_desbloqueio: Rc<Cell<bool>>,
     /// Abre o diálogo "Copiar a chave para o servidor" (a chave privada já escolhida, se vier).
     copiar_chave: RefCell<Option<AbrirCopiar>>,
+    /// Monta os diálogos gerais (senha, chave do servidor, cofre, cluster, …) numa janela. O
+    /// estado e os efeitos deles nascem uma vez; cada janela de terminais monta as caixas e só a
+    /// última ativa as mostra ([`dialogos_gerais`]).
+    dialogos_gerais: RefCell<Option<Rc<dyn Fn() -> Column>>>,
     /// O "Fechar todas as janelas?" está na tela: as secundárias deixam a principal perguntar.
     fechar_tudo: Signal<bool>,
     /// O "Fechar o Tirech Omni?" (deixar na bandeja ou fechar) está na tela.
@@ -1089,6 +1144,16 @@ struct Tela {
     pedido_de_nota: Signal<Option<u64>>,
     /// O que grava a nota pendente da página Notas, para a janela fechar sem perder texto.
     gravar_nota: AoFechar,
+    /// O mesmo, das páginas Notas das janelas secundárias.
+    gravar_notas_das_secundarias: RefCell<Vec<(WindowHandle, AoFechar)>>,
+    /// As medidas da página Desempenho e do medidor, ligadas na primeira vez que uma janela as
+    /// pede.
+    medidas: Cell<Option<desempenho::Desempenho>>,
+    /// O leitor das abas Processos e Disco do Desempenho, enquanto uma delas está à mostra.
+    processos_correndo: RefCell<Option<processos::Corrente>>,
+    /// As páginas que vivem numa janela por vez ([`PAGINAS_DE_UMA_JANELA`]) e a janela de cada
+    /// uma.
+    donas: [(&'static str, Signal<WindowHandle>); 3],
     /// O que espera o cofre ser desbloqueado (abrir ou criar a nota de uma conexão).
     depois_de_desbloquear: RefCell<Option<DepoisDoDesbloqueio>>,
     /// Ligar os logs cifrados abriu o diálogo de senha mestra: se ele fecha com o cofre trancado,
@@ -1181,12 +1246,16 @@ struct Tela {
     programas: programas::EstadoProgramas,
     /// Os provedores de IA (o `ia.json`) e o que a página deles escolheu.
     assistente: assistente::EstadoAssistente,
+    /// O autocompletar do terminal (Ctrl+Espaço).
+    autocompletar: autocompletar::EstadoAutocompletar,
     /// O canal entre as cópias do app na mesma pasta de dados.
     instancias: instancias::Estado,
     /// O servidor MCP dos assistentes de código (M51).
     mcp: mcp::EstadoMcp,
     /// O painel de portas do servidor (M58).
     portas: portas::EstadoPortas,
+    /// A vigia das abas sem uso.
+    ociosas: ocioso::EstadoOcioso,
 }
 
 impl Tela {
@@ -1350,8 +1419,8 @@ impl Tela {
 
     /// Os cartões do Início: os recentes de conexões que ainda existem, com o nome e o
     /// detalhe de agora (um renomear aparece na hora). A volta ao Início refaz o "há 5 min".
-    fn cartoes(&self) -> Vec<Cartao> {
-        let _ = self.pagina.get();
+    fn cartoes(&self, pagina: Signal<String>) -> Vec<Cartao> {
+        let _ = pagina.get();
         let agora = recentes::agora();
         let lista = self.recentes.with(|r| r.lista().to_vec());
         let (mut fixadas, mut soltas) = (0, 0);
@@ -1439,7 +1508,7 @@ impl Tela {
     fn mostrar_na_arvore(&self, id: u64) {
         self.filtro.set(String::new());
         escolher_na_arvore(self.tree, self.abertos, self.selecionado, id);
-        self.pagina.set("terminais".to_owned());
+        self.ir_para("terminais");
     }
 
     /// O clique numa aba com "Mostrar a conexão da aba na árvore" ligado: mostra a conexão dela
@@ -1653,9 +1722,11 @@ impl Tela {
             let _ = self.campos.perfil_ia.get();
             self.guardar_rede_do_grupo();
             self.guardar_mcp_do_grupo();
+            self.guardar_mcp_abrir_do_grupo();
             self.guardar_persistente_do_grupo();
             self.guardar_mouse_do_grupo();
             self.guardar_retentar_do_grupo();
+            self.guardar_ocioso_do_grupo();
             self.guardar_credencial_do_grupo();
             self.guardar_comandos_do_grupo();
             return;
@@ -1667,9 +1738,11 @@ impl Tela {
         nova.rede = self.rede_do_texto(atual.id, atual.rede, &self.campos.rede.get());
         nova.perfil_ia = self.perfil_ia_do_texto(atual.perfil_ia, &self.campos.perfil_ia.get());
         nova.mcp = self.mcp_do_texto(atual.id, atual.mcp, &self.campos.mcp.get());
+        nova.mcp_abrir = self.mcp_abrir_da_linha();
         nova.persistente = tmux::do_rotulo(&self.campos.persistente.get());
         nova.mouse = crate::mouse::do_rotulo(&self.campos.mouse.get());
         nova.retentar = crate::retentar::do_rotulo(&self.campos.retentar.get(), atual.retentar);
+        nova.ocioso = crate::ocioso::do_rotulo(&self.campos.ocioso.get(), atual.ocioso);
         // Trocar o tipo (ou a segurança do FTP) troca a porta, se ela estava no padrão de antes.
         if (nova.kind != atual.kind || nova.ftp_security != atual.ftp_security)
             && atual.port == atual.porta_padrao()
@@ -1876,12 +1949,9 @@ impl Tela {
     }
 
     /// A rede do perfil por onde a conexão sai, com o usuário e a senha do proxy e do salto que
-    /// o cofre guarda. `None`: sai direto (sem perfil, ou um tipo que o perfil não alcança: o
-    /// shell local).
+    /// o cofre guarda. `None`: sai direto. No shell local, a rede vale para as variáveis de proxy
+    /// e os túneis ([`crate::shell_na_rede`]).
     fn rede_resolvida(&self, c: &Connection) -> Option<RedeResolvida> {
-        if c.kind == Kind::Local {
-            return None;
-        }
         let perfil = self
             .tree
             .with_untracked(|t| rede_efetiva(t, c.id).cloned())?;
@@ -2280,9 +2350,11 @@ impl Tela {
         self.sincronizar_rede();
         self.sincronizar_perfil_ia();
         self.sincronizar_mcp();
+        self.sincronizar_mcp_abrir();
         self.sincronizar_persistente();
         self.sincronizar_mouse();
         self.sincronizar_retentar();
+        self.sincronizar_ocioso();
         self.sincronizar_comandos_do_grupo();
         self.sincronizar_x11();
         self.sincronizar_colar();
@@ -2348,11 +2420,59 @@ impl Tela {
         }
     }
 
-    /// Vai para a página Terminais se as abas novas caem na janela principal (as das outras
-    /// janelas aparecem lá, e a principal fica onde está).
+    /// Vai para a página Terminais na janela das abas novas (a última ativa).
     fn mostrar_terminais(&self) {
-        if self.janela_ativa().handle == self.janelas.principal().handle {
-            self.pagina.set("terminais".to_owned());
+        self.ir_para(paineis::TERMINAIS);
+    }
+
+    /// Leva a janela ativa (a última com o foco ou, se ela já fechou, a principal) para a página
+    /// `nome` da navegação dela.
+    fn ir_para(&self, nome: &str) {
+        self.janela_ativa().pagina.set(nome.to_owned());
+    }
+
+    /// A janela que tem a página `nome`, uma de [`PAGINAS_DE_UMA_JANELA`].
+    fn dona(&self, nome: &str) -> Signal<WindowHandle> {
+        self.donas
+            .iter()
+            .find(|(pagina, _)| *pagina == nome)
+            .map(|(_, dona)| *dona)
+            .expect("uma das páginas de uma janela só")
+    }
+
+    /// As medidas do Desempenho, as mesmas em todas as janelas.
+    fn medidas(self: &Rc<Self>) -> desempenho::Desempenho {
+        if let Some(medidas) = self.medidas.get() {
+            return medidas;
+        }
+        let medidas = desempenho::ligar(self);
+        self.medidas.set(Some(medidas));
+        medidas
+    }
+
+    /// Grava a nota que espera a pausa do salvamento automático nas páginas Notas: a de todas as
+    /// janelas ou, com `so_da`, só a daquela secundária.
+    fn gravar_notas(&self, so_da: Option<WindowHandle>) {
+        // As das janelas que já fecharam saem da lista.
+        self.gravar_notas_das_secundarias
+            .borrow_mut()
+            .retain(|(h, _)| self.janelas.achar(*h).is_some());
+        let mut vagas = Vec::new();
+        if so_da.is_none() {
+            vagas.push(Rc::clone(&self.gravar_nota));
+        }
+        vagas.extend(
+            self.gravar_notas_das_secundarias
+                .borrow()
+                .iter()
+                .filter(|(h, _)| so_da.is_none_or(|so| so == *h))
+                .map(|(_, vaga)| Rc::clone(vaga)),
+        );
+        for vaga in vagas {
+            let gravar = vaga.borrow().clone();
+            if let Some(gravar) = gravar {
+                gravar();
+            }
         }
     }
 
@@ -2852,7 +2972,6 @@ impl Tela {
         self.salvar_nova_pasta.set(String::new());
         self.salvar_erro.set(String::new());
         self.depois_de_salvar.set(Depois::Nada);
-        self.janelas.principal().handle.focus();
         self.salvar_aberto.set(true);
     }
 
@@ -3003,7 +3122,7 @@ impl Tela {
         self.abrir_ate_a_pasta(&pai);
         self.filtro.set(String::new());
         self.selecionado.set(Some(chave.chave()));
-        self.pagina.set("terminais".to_owned());
+        self.ir_para("terminais");
     }
 
     /// Abre o espaço de `caminho`, resolvendo as abas pelas conexões de agora. Conexões que
@@ -3363,7 +3482,7 @@ impl Tela {
             InfoBarSeverity::Warning
         };
         self.avisar(severidade, mensagem);
-        self.pagina.set("terminais".to_owned());
+        self.ir_para("terminais");
     }
 
     fn importar_texto(&self, texto: &str) {
@@ -3399,7 +3518,7 @@ impl Tela {
             InfoBarSeverity::Warning
         };
         self.avisar(severidade, mensagem);
-        self.pagina.set("terminais".to_owned());
+        self.ir_para("terminais");
     }
 }
 
@@ -3438,7 +3557,7 @@ fn itens_da_arvore(nodes: &[Node]) -> Vec<TreeItem> {
             Node::Connection(c) => {
                 // O globo marca a conexão com um perfil de rede próprio. O rótulo já leva o nome, o
                 // usuário e o host; a descrição e o servidor de salto entram no filtro por aqui.
-                let icone = if c.kind != Kind::Local && matches!(c.rede, Rede::Perfil(_)) {
+                let icone = if matches!(c.rede, Rede::Perfil(_)) {
                     Symbol::Globe
                 } else {
                     icone_do_tipo(c.kind)
@@ -4062,6 +4181,11 @@ fn area_de_terminais(tela: &Rc<Tela>, janela: Janela, principal: bool) -> Column
         .child(mcp_aprovacao::faixa_ativa(tela, janela))
         .child(mcp_aprovacao::dialogo(tela, janela))
         .child(ia_comando::flyout(tela, janela))
+        .child(autocompletar::flyout(tela, janela))
+        .accelerator(atalhos::atalho(tela.config, "autocompletar"), {
+            let t = Rc::clone(tela);
+            move || t.abrir_autocompletar(janela)
+        })
         .accelerator(atalhos::atalho(tela.config, "ia_comando"), {
             let t = Rc::clone(tela);
             move || t.abrir_comando_ia(janela)
@@ -4291,10 +4415,11 @@ fn subtitulo_da_janela(
     }
 }
 
-/// A tela de uma janela secundária: a barra de título, a mesma barra de menus da principal, os
-/// painéis de terminais e, encaixados, as Conexões e as Propriedades. A árvore, a seleção e o
-/// filtro são os mesmos da principal; o arranjo dos painéis é de cada janela (`Janela.paineis`),
-/// com o menu Exibir dela. A navegação, o chat e as portas só existem na principal.
+/// A tela de uma janela secundária: a barra de título com a busca, e a mesma navegação da
+/// principal, com a página que a janela escolher. A página Terminais dela tem a barra de menus,
+/// os painéis de terminais e, encaixados, as Conexões e as Propriedades. A árvore, a seleção, o
+/// filtro, o cofre e as notas são os mesmos da principal; o arranjo dos painéis é de cada janela
+/// (`Janela.paineis`), com o menu Exibir dela. O chat e as portas só existem na principal.
 fn janela_secundaria(
     tela: &Rc<Tela>,
     janela: Janela,
@@ -4316,29 +4441,29 @@ fn janela_secundaria(
         let t = Rc::clone(tela);
         let liberada = Rc::clone(&liberada);
         on_close_requested(move || {
-            if t.liberado.get()
+            let fecha = t.liberado.get()
                 || t.fechar_tudo.get_untracked()
                 || t.fechar_ou_bandeja.get_untracked()
                 || t.escondido.get_untracked()
                 || liberada.get()
                 || !t.config.with_untracked(|c| c.geral.confirmar_fechar)
-            {
-                return true;
+                || janela
+                    .layout
+                    .try_with_untracked(|l| l.sessions().is_empty())
+                    .unwrap_or(true);
+            if fecha {
+                t.gravar_notas(Some(handle));
+            } else {
+                fechar_aberto.set(true);
             }
-            let vazia = janela
-                .layout
-                .try_with_untracked(|l| l.sessions().is_empty())
-                .unwrap_or(true);
-            if vazia {
-                return true;
-            }
-            fechar_aberto.set(true);
-            false
+            fecha
         });
     }
 
     let controle = DockController::new();
-    let menus = menus::barra_de_menus(tela, janela, &controle);
+    let paineis = PaineisDaJanela::de_uma_secundaria(tela, controle.clone());
+    let nav = NavegacaoDaJanela::de_uma_secundaria(tela, janela, paineis.clone());
+    let menus = menus::barra_de_menus(tela, janela, &paineis);
     let cabecalho = Row::new()
         .gap(8)
         .align(Align::Center)
@@ -4351,6 +4476,7 @@ fn janela_secundaria(
     let titulo = titulo_da_janela(tela.janelas.clone(), handle, titulo_fixo);
     let dialogo = {
         let mover = Rc::clone(tela);
+        let gravar = Rc::clone(tela);
         let liberada_mover = Rc::clone(&liberada);
         let liberada_fechar = Rc::clone(&liberada);
         ContentDialog::new(
@@ -4366,6 +4492,7 @@ fn janela_secundaria(
         .id("fechar-janela-dialogo")
         .content(Text::new(t!("casca-mova-as-sessoes-para-a-janela")).wrap())
         .primary(t!("casca-mover-para-a-janela-principal"), move || {
+            mover.gravar_notas(Some(handle));
             let principal = mover.janelas.principal();
             for sessao in janela.layout.with_untracked(|l| l.sessions()) {
                 mover.mover_sessao(sessao, principal);
@@ -4374,6 +4501,7 @@ fn janela_secundaria(
             handle.close();
         })
         .secondary(t!("casca-fechar-as-sessoes"), move || {
+            gravar.gravar_notas(Some(handle));
             for sessao in janela.layout.with_untracked(|l| l.sessions()) {
                 janela.layout.update(|l| {
                     l.remove(sessao);
@@ -4386,19 +4514,36 @@ fn janela_secundaria(
         .close(t!("comum-cancelar"))
     };
 
+    let terminais = Column::new()
+        .grow(1)
+        .child(cabecalho)
+        .child(paineis_da_secundaria(tela, janela, &controle));
+    let busca = campo_de_busca(tela, &nav);
+    let medidor = desempenho::medidor(tela, janela, tela.medidas());
+    let navegacao = navegacao(tela, &nav, terminais);
+
     Form::new(titulo.clone())
         .density(Density::Compact)
         .title_bar(
             TitleBar::new(NOME_DO_APP)
                 .icon_image(icone::PEQUENO)
                 .title_badge(marca::selo())
-                .subtitle(subtitulo),
+                .subtitle(subtitulo)
+                .content(busca)
+                .right_header(
+                    Row::new()
+                        .gap(4)
+                        .align(Align::Center)
+                        .child(medidor)
+                        .child(tema::botao_de_tema(tela.config)),
+                ),
         )
         .child(
-            Column::new()
-                .child(cabecalho)
-                .child(paineis_da_secundaria(tela, janela, &controle))
+            atalhos_das_paginas(tela, janela.pagina, Column::new())
+                .child(navegacao)
                 .child(dialogos_da_arvore(tela, handle))
+                .child(dialogos_gerais(tela, handle))
+                .child(dialogos_de_arquivos(tela, handle))
                 .child(dialogo),
         )
 }
@@ -4455,8 +4600,9 @@ pub fn janela_terminais() -> impl View {
 
 /// A página Terminais: os menus, a árvore, as propriedades e os terminais em abas e em grade.
 /// Devolve a página e, à parte, os diálogos, que precisam valer em qualquer página da
-/// navegação (um pedido de senha ou de chave pode chegar com o Início na frente).
-fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
+/// navegação (um pedido de senha ou de chave pode chegar com o Início na frente) e em qualquer
+/// janela: a função monta as caixas, e o estado delas nasce uma vez.
+fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, impl Fn() -> Column + use<>) {
     let tela = Rc::clone(tela);
     let cofre = tela.cofre.clone();
     let Tela {
@@ -4716,7 +4862,8 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
         });
     }
     // --- Menus ---
-    let barra_menus = menus::barra_de_menus(&tela, principal, &tela.paineis_terminais.controle);
+    let barra_menus =
+        menus::barra_de_menus(&tela, principal, &PaineisDaJanela::da_principal(&tela));
 
     let botoes_envio = envio.botoes();
 
@@ -4809,249 +4956,6 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
             .min_size(260.0),
         );
 
-    // --- Diálogos ---
-    let dialogo_salvar_espaco = {
-        let t = Rc::clone(&tela);
-        let espacos = tela.espacos.clone();
-        let Tela {
-            salvar_aberto,
-            salvar_nome,
-            salvar_pasta,
-            salvar_nova_pasta,
-            salvar_erro,
-            salvar_resumo,
-            ..
-        } = *tela;
-        ContentDialog::new(t!("casca-salvar-como-espaco-de-trabalho"), salvar_aberto)
-            .id("salvar-espaco-dialogo")
-            .content(
-                Column::new()
-                    .gap(8)
-                    .child(
-                        Text::new(move || salvar_resumo.get())
-                            .id("espaco-resumo")
-                            .secondary(),
-                    )
-                    .child(Text::new(t!("casca-nome")).caption())
-                    .child(
-                        Edit::bind(salvar_nome)
-                            .id("espaco-nome")
-                            .placeholder(t!("casca-nome-do-espaco")),
-                    )
-                    .child(Text::new(t!("comum-pasta")).caption())
-                    // As pastas mudam entre uma abertura e outra: o seletor nasce com o diálogo.
-                    .child(Show::when(salvar_aberto, move || {
-                        ComboBox::bind(salvar_pasta, opcoes_de_pasta(&espacos)).id("espaco-pasta")
-                    }))
-                    .child(
-                        Edit::bind(salvar_nova_pasta)
-                            .id("espaco-pasta-nova")
-                            .placeholder(t!("casca-nome-da-pasta-nova"))
-                            .visible(move || salvar_pasta.get() == nova_pasta_opcao()),
-                    )
-                    .child(
-                        Text::new(move || salvar_erro.get())
-                            .id("espaco-erro")
-                            .caption()
-                            .wrap()
-                            .visible(move || !salvar_erro.get().is_empty()),
-                    ),
-            )
-            .primary(t!("comum-salvar"), move || t.confirmar_salvar_espaco())
-            .close(t!("comum-cancelar"))
-    };
-
-    let dialogo_substituir_espaco = {
-        let t = Rc::clone(&tela);
-        let nome = Rc::clone(&tela);
-        ContentDialog::new(t!("casca-substituir-o-espaco"), tela.substituir_aberto)
-            .id("substituir-espaco-dialogo")
-            .content(
-                Text::new(move || match nome.a_substituir.borrow().as_ref() {
-                    Some((pasta, nome)) => t!(
-                        "casca-espaco-ja-existe",
-                        nome = nome.as_str(),
-                        pasta = if pasta.is_empty() {
-                            raiz_dos_espacos()
-                        } else {
-                            pasta.clone()
-                        }
-                    ),
-                    None => String::new(),
-                })
-                .wrap(),
-            )
-            .primary(t!("comum-substituir"), move || {
-                t.confirmar_substituir_espaco()
-            })
-            .close(t!("comum-cancelar"))
-    };
-
-    // O pedido que o diálogo de senha mostra: o primeiro da fila.
-    let pedido_atual = move || pendentes.with(|p| p.first().copied());
-    let conexao_do_pedido =
-        move || pedido_atual().and_then(|p| tree.with(|t| t.conexao_para_abrir(p.id)));
-    let dialogo_senha = ContentDialog::new(
-        move || match (pedido_atual(), conexao_do_pedido()) {
-            (Some(p), Some(c)) if p.recusa == Recusa::Salto => t!(
-                "casca-senha-do-salto",
-                host = c.jump.map(|j| j.host).unwrap_or_default()
-            ),
-            (_, Some(c)) => t!("casca-senha-de", nome = c.name),
-            _ => t!("casca-senha-de-vazio"),
-        },
-        senha_aberta,
-    )
-    .id("senha-dialogo")
-    .content(
-        Column::new()
-            .gap(8)
-            .child(
-                Text::new(move || match (pedido_atual(), conexao_do_pedido()) {
-                    (Some(p), Some(c)) if p.recusa == Recusa::Salto => {
-                        let j = c.jump.unwrap_or(Jump {
-                            host: String::new(),
-                            port: 22,
-                            user: String::new(),
-                            credencial: None,
-                        });
-                        if j.user.is_empty() {
-                            j.host
-                        } else {
-                            format!("{}@{}", j.user, j.host)
-                        }
-                    }
-                    (_, Some(c)) if !c.user.is_empty() => format!("{}@{}", c.user, c.host),
-                    (_, Some(c)) => c.host,
-                    _ => String::new(),
-                })
-                .id("senha-destino")
-                .secondary(),
-            )
-            .child(
-                Text::new(move || match (pedido_atual(), conexao_do_pedido()) {
-                    // Sem senha salva do lado recusado, quem o servidor recusou foi o agente (e
-                    // as chaves): no "Agente SSH, senão a senha" e no salto sem credencial.
-                    (Some(p), Some(c)) if p.recusa == Recusa::Salto => {
-                        if c.jump.and_then(|j| j.credencial).is_some() {
-                            t!("casca-a-senha-salva-foi-recusada-pelo")
-                        } else {
-                            t!("casca-o-agente-foi-recusado")
-                        }
-                    }
-                    (_, Some(c)) if c.modo_da_credencial() == ModoCredencial::AgenteOuSenha => {
-                        t!("casca-o-agente-foi-recusado")
-                    }
-                    _ => t!("casca-a-senha-salva-foi-recusada-pelo"),
-                })
-                .id("senha-recusada")
-                .caption()
-                .wrap()
-                .visible(move || pedido_atual().is_some_and(|p| p.recusa != Recusa::Nao)),
-            )
-            .child(
-                Edit::bind(senha_texto)
-                    .id("senha-campo")
-                    .password()
-                    .placeholder(t!("casca-senha")),
-            )
-            .child({
-                let cofre = cofre.clone();
-                CheckBox::bind(senha_salvar, t!("casca-salvar-a-senha"))
-                    .id("senha-salvar")
-                    .disabled(move || cofre.ler(|c| c.bloqueado()))
-            })
-            .child({
-                let cofre = cofre.clone();
-                Text::new(move || {
-                    if cofre.ler(|c| c.bloqueado()) {
-                        t!("casca-desbloqueie-para-salvar-senha")
-                    } else {
-                        t!("casca-salva-no-cofre-ou-agente")
-                    }
-                })
-                .id("senha-ajuda")
-                .caption()
-                .secondary()
-                .wrap()
-            }),
-    )
-    .primary(t!("comum-conectar"), move || {
-        *senha_confirmada.borrow_mut() =
-            Some((senha_texto.get_untracked(), senha_salvar.get_untracked()));
-    })
-    .close(t!("comum-cancelar"));
-
-    let dialogo_cofre_bloqueado =
-        dialogo_desbloquear_com(cofre.clone(), desbloquear_aberto, refazer_desbloqueio);
-
-    let dialogo_chave_nova = ContentDialog::new(t!("casca-confiar-neste-servidor"), chave_nova)
-        .id("chave-dialogo")
-        .content(conteudo_da_chave(fila, false))
-        .primary(t!("casca-confiar-e-conectar"), {
-            let confirmada = Rc::clone(&chave_confirmada);
-            move || confirmada.set(true)
-        })
-        .close(t!("comum-cancelar"));
-
-    let dialogo_chave_mudou =
-        ContentDialog::new(t!("casca-a-chave-do-servidor-mudou"), chave_mudou)
-            .id("chave-mudou-dialogo")
-            .content(conteudo_da_chave(fila, true))
-            .close(t!("comum-fechar"));
-
-    let dialogo_certificado =
-        ContentDialog::new(t!("casca-certificado-nao-confiavel"), certificado_aberto)
-            .id("certificado-dialogo")
-            .content(conteudo_do_certificado(fila))
-            .primary(t!("casca-confiar-e-continuar"), {
-                let confirmada = Rc::clone(&chave_confirmada);
-                move || confirmada.set(true)
-            })
-            .close(t!("comum-cancelar"));
-
-    let dialogo_atalhos = ContentDialog::new(t!("casca-atalhos-de-teclado"), atalhos)
-        .id("atalhos-dialogo")
-        .content(
-            Column::new()
-                .gap(4)
-                .child(Text::new(t!("casca-ctrl-shift-n-nova-conexao")))
-                .child(Text::new(t!("casca-ctrl-shift-g-novo-grupo")))
-                .child(Text::new(t!("casca-ctrl-shift-t-abrir-um-shell")))
-                .child(Text::new(t!("casca-ctrl-shift-k-abrir-o-cofre")))
-                .child(Text::new(t!("casca-ctrl-shift-j-abrir-as-notas")))
-                .child(Text::new(t!("casca-ctrl-alt-1-2-3-layout")))
-                .child(Text::new(t!("casca-ctrl-alt-n-nova-janela")))
-                .child(Text::new(t!("casca-enter-ou-clique-duplo-abrir-a")))
-                .child(Text::new(t!("casca-f2-renomear-delete-apagar")))
-                .child(Text::new(t!("casca-alt-shift-d-duplicar-o-painel")))
-                .child(Text::new(t!("casca-alt-setas-mudar-de-painel")))
-                .child(Text::new(t!("casca-ctrl-shift-w-fechar-o-painel")))
-                .child(Text::new(t!("casca-f6-sair-do-terminal"))),
-        )
-        .close(t!("comum-fechar"));
-
-    let dialogo_fechar_tudo = {
-        let t = Rc::clone(&tela);
-        ContentDialog::new(t!("casca-fechar-todas-as-janelas"), tela.fechar_tudo)
-            .id("fechar-tudo-dialogo")
-            .content(
-                Text::new(move || {
-                    let n = t.janelas.quantas();
-                    t!("casca-ha-n-janelas-abertas", n = n as i64)
-                })
-                .wrap(),
-            )
-            .primary(t!("casca-fechar-tudo"), {
-                let t = Rc::clone(&tela);
-                move || {
-                    t.liberado.set(true);
-                    WindowHandle::main().close();
-                }
-            })
-            .close(t!("comum-cancelar"))
-    };
-
     let cabecalho = Row::new()
         .gap(8)
         .align(Align::Center)
@@ -5060,31 +4964,301 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, Column) {
         .child(ia::botao(&tela, tela.janelas.principal()))
         .child(botoes_envio);
     let pagina = Column::new().grow(1).child(cabecalho).child(area);
-    let dialogos = Column::new()
-        .child(dialogos_da_arvore(&tela, principal.handle))
-        .child(bandeja::dialogo_fechar_ou_bandeja(&tela))
-        .child(dialogo_fechar_tudo)
-        .child(abas_caidas::dialogo(&tela))
-        .child(sessao_tmux::dialogo(&tela))
-        .child(controlar::dialogo(&tela))
-        .child(openvpn_perguntas::dialogo(&tela))
-        .child(cluster::dialogo(&tela))
-        .child(scripts::dialogo_novo(&tela))
-        .child(lancador_links::dialogo(&tela))
-        .child(dialogo_salvar_espaco)
-        .child(dialogo_substituir_espaco)
-        .child(dialogo_senha)
-        .child(dialogo_cofre_bloqueado)
-        .child(dialogo_chave_nova)
-        .child(dialogo_chave_mudou)
-        .child(dialogo_certificado)
-        .child(dialogo_atalhos)
-        .child(tuneis::dialogo_dos_ativos(&tela))
-        .child(portas::dialogo(&tela))
-        .child(ia::dialogo_instalar(&tela))
-        .child(ia::dialogo_pasta(&tela))
-        .child(instalar::dialogos(&tela));
+
+    // --- Diálogos ---
+    // O estado e os efeitos dos diálogos ligam aqui, uma vez; a função devolvida monta as caixas
+    // em cada janela.
+    let desbloquear = montar_desbloquear(
+        "cofre-desbloquear",
+        cofre.clone(),
+        desbloquear_aberto,
+        refazer_desbloqueio,
+    );
+    let openvpn = openvpn_perguntas::dialogo(&tela);
+    let cluster = cluster::dialogo(&tela);
+    let links = lancador_links::dialogo(&tela);
+    let instalar = instalar::dialogos(&tela);
+    let dialogos = move || {
+        let tela = Rc::clone(&tela);
+        let senha_confirmada = Rc::clone(&senha_confirmada);
+        let dialogo_salvar_espaco = {
+            let t = Rc::clone(&tela);
+            let espacos = tela.espacos.clone();
+            let Tela {
+                salvar_aberto,
+                salvar_nome,
+                salvar_pasta,
+                salvar_nova_pasta,
+                salvar_erro,
+                salvar_resumo,
+                ..
+            } = *tela;
+            ContentDialog::new(t!("casca-salvar-como-espaco-de-trabalho"), salvar_aberto)
+                .id("salvar-espaco-dialogo")
+                .content(
+                    Column::new()
+                        .gap(8)
+                        .child(
+                            Text::new(move || salvar_resumo.get())
+                                .id("espaco-resumo")
+                                .secondary(),
+                        )
+                        .child(Text::new(t!("casca-nome")).caption())
+                        .child(
+                            Edit::bind(salvar_nome)
+                                .id("espaco-nome")
+                                .placeholder(t!("casca-nome-do-espaco")),
+                        )
+                        .child(Text::new(t!("comum-pasta")).caption())
+                        // As pastas mudam entre uma abertura e outra: o seletor nasce com o diálogo.
+                        .child(Show::when(salvar_aberto, move || {
+                            ComboBox::bind(salvar_pasta, opcoes_de_pasta(&espacos))
+                                .id("espaco-pasta")
+                        }))
+                        .child(
+                            Edit::bind(salvar_nova_pasta)
+                                .id("espaco-pasta-nova")
+                                .placeholder(t!("casca-nome-da-pasta-nova"))
+                                .visible(move || salvar_pasta.get() == nova_pasta_opcao()),
+                        )
+                        .child(
+                            Text::new(move || salvar_erro.get())
+                                .id("espaco-erro")
+                                .caption()
+                                .wrap()
+                                .visible(move || !salvar_erro.get().is_empty()),
+                        ),
+                )
+                .primary(t!("comum-salvar"), move || t.confirmar_salvar_espaco())
+                .close(t!("comum-cancelar"))
+        };
+
+        let dialogo_substituir_espaco = {
+            let t = Rc::clone(&tela);
+            let nome = Rc::clone(&tela);
+            ContentDialog::new(t!("casca-substituir-o-espaco"), tela.substituir_aberto)
+                .id("substituir-espaco-dialogo")
+                .content(
+                    Text::new(move || match nome.a_substituir.borrow().as_ref() {
+                        Some((pasta, nome)) => t!(
+                            "casca-espaco-ja-existe",
+                            nome = nome.as_str(),
+                            pasta = if pasta.is_empty() {
+                                raiz_dos_espacos()
+                            } else {
+                                pasta.clone()
+                            }
+                        ),
+                        None => String::new(),
+                    })
+                    .wrap(),
+                )
+                .primary(t!("comum-substituir"), move || {
+                    t.confirmar_substituir_espaco()
+                })
+                .close(t!("comum-cancelar"))
+        };
+
+        // O pedido que o diálogo de senha mostra: o primeiro da fila.
+        let pedido_atual = move || pendentes.with(|p| p.first().copied());
+        let conexao_do_pedido =
+            move || pedido_atual().and_then(|p| tree.with(|t| t.conexao_para_abrir(p.id)));
+        let dialogo_senha = ContentDialog::new(
+            move || match (pedido_atual(), conexao_do_pedido()) {
+                (Some(p), Some(c)) if p.recusa == Recusa::Salto => t!(
+                    "casca-senha-do-salto",
+                    host = c.jump.map(|j| j.host).unwrap_or_default()
+                ),
+                (_, Some(c)) => t!("casca-senha-de", nome = c.name),
+                _ => t!("casca-senha-de-vazio"),
+            },
+            senha_aberta,
+        )
+        .id("senha-dialogo")
+        .content(
+            Column::new()
+                .gap(8)
+                .child(
+                    Text::new(move || match (pedido_atual(), conexao_do_pedido()) {
+                        (Some(p), Some(c)) if p.recusa == Recusa::Salto => {
+                            let j = c.jump.unwrap_or(Jump {
+                                host: String::new(),
+                                port: 22,
+                                user: String::new(),
+                                credencial: None,
+                            });
+                            if j.user.is_empty() {
+                                j.host
+                            } else {
+                                format!("{}@{}", j.user, j.host)
+                            }
+                        }
+                        (_, Some(c)) if !c.user.is_empty() => format!("{}@{}", c.user, c.host),
+                        (_, Some(c)) => c.host,
+                        _ => String::new(),
+                    })
+                    .id("senha-destino")
+                    .secondary(),
+                )
+                .child(
+                    Text::new(move || match (pedido_atual(), conexao_do_pedido()) {
+                        // Sem senha salva do lado recusado, quem o servidor recusou foi o agente (e
+                        // as chaves): no "Agente SSH, senão a senha" e no salto sem credencial.
+                        (Some(p), Some(c)) if p.recusa == Recusa::Salto => {
+                            if c.jump.and_then(|j| j.credencial).is_some() {
+                                t!("casca-a-senha-salva-foi-recusada-pelo")
+                            } else {
+                                t!("casca-o-agente-foi-recusado")
+                            }
+                        }
+                        (_, Some(c)) if c.modo_da_credencial() == ModoCredencial::AgenteOuSenha => {
+                            t!("casca-o-agente-foi-recusado")
+                        }
+                        _ => t!("casca-a-senha-salva-foi-recusada-pelo"),
+                    })
+                    .id("senha-recusada")
+                    .caption()
+                    .wrap()
+                    .visible(move || pedido_atual().is_some_and(|p| p.recusa != Recusa::Nao)),
+                )
+                .child(
+                    Edit::bind(senha_texto)
+                        .id("senha-campo")
+                        .password()
+                        .placeholder(t!("casca-senha")),
+                )
+                .child({
+                    let cofre = cofre.clone();
+                    CheckBox::bind(senha_salvar, t!("casca-salvar-a-senha"))
+                        .id("senha-salvar")
+                        .disabled(move || cofre.ler(|c| c.bloqueado()))
+                })
+                .child({
+                    let cofre = cofre.clone();
+                    Text::new(move || {
+                        if cofre.ler(|c| c.bloqueado()) {
+                            t!("casca-desbloqueie-para-salvar-senha")
+                        } else {
+                            t!("casca-salva-no-cofre-ou-agente")
+                        }
+                    })
+                    .id("senha-ajuda")
+                    .caption()
+                    .secondary()
+                    .wrap()
+                }),
+        )
+        .primary(t!("comum-conectar"), move || {
+            *senha_confirmada.borrow_mut() =
+                Some((senha_texto.get_untracked(), senha_salvar.get_untracked()));
+        })
+        .close(t!("comum-cancelar"));
+
+        let dialogo_cofre_bloqueado = desbloquear();
+
+        let dialogo_chave_nova = ContentDialog::new(t!("casca-confiar-neste-servidor"), chave_nova)
+            .id("chave-dialogo")
+            .content(conteudo_da_chave(fila, false))
+            .primary(t!("casca-confiar-e-conectar"), {
+                let confirmada = Rc::clone(&chave_confirmada);
+                move || confirmada.set(true)
+            })
+            .close(t!("comum-cancelar"));
+
+        let dialogo_chave_mudou =
+            ContentDialog::new(t!("casca-a-chave-do-servidor-mudou"), chave_mudou)
+                .id("chave-mudou-dialogo")
+                .content(conteudo_da_chave(fila, true))
+                .close(t!("comum-fechar"));
+
+        let dialogo_certificado =
+            ContentDialog::new(t!("casca-certificado-nao-confiavel"), certificado_aberto)
+                .id("certificado-dialogo")
+                .content(conteudo_do_certificado(fila))
+                .primary(t!("casca-confiar-e-continuar"), {
+                    let confirmada = Rc::clone(&chave_confirmada);
+                    move || confirmada.set(true)
+                })
+                .close(t!("comum-cancelar"));
+
+        let dialogo_atalhos = ContentDialog::new(t!("casca-atalhos-de-teclado"), atalhos)
+            .id("atalhos-dialogo")
+            .content(
+                Column::new()
+                    .gap(4)
+                    .child(Text::new(t!("casca-ctrl-shift-n-nova-conexao")))
+                    .child(Text::new(t!("casca-ctrl-shift-g-novo-grupo")))
+                    .child(Text::new(t!("casca-ctrl-shift-t-abrir-um-shell")))
+                    .child(Text::new(t!("casca-ctrl-shift-k-abrir-o-cofre")))
+                    .child(Text::new(t!("casca-ctrl-shift-j-abrir-as-notas")))
+                    .child(Text::new(t!("casca-ctrl-alt-1-2-3-layout")))
+                    .child(Text::new(t!("casca-ctrl-alt-n-nova-janela")))
+                    .child(Text::new(t!("casca-enter-ou-clique-duplo-abrir-a")))
+                    .child(Text::new(t!("casca-f2-renomear-delete-apagar")))
+                    .child(Text::new(t!("casca-alt-shift-d-duplicar-o-painel")))
+                    .child(Text::new(t!("casca-alt-setas-mudar-de-painel")))
+                    .child(Text::new(t!("casca-ctrl-shift-w-fechar-o-painel")))
+                    .child(Text::new(t!("casca-f6-sair-do-terminal"))),
+            )
+            .close(t!("comum-fechar"));
+
+        Column::new()
+            .child(abas_caidas::dialogo(&tela))
+            .child(sessao_tmux::dialogo(&tela))
+            .child(controlar::dialogo(&tela))
+            .child(openvpn())
+            .child(cluster())
+            .child(scripts::dialogo_novo(&tela))
+            .child(links())
+            .child(dialogo_salvar_espaco)
+            .child(dialogo_substituir_espaco)
+            .child(dialogo_senha)
+            .child(dialogo_cofre_bloqueado)
+            .child(dialogo_chave_nova)
+            .child(dialogo_chave_mudou)
+            .child(dialogo_certificado)
+            .child(dialogo_atalhos)
+            .child(tuneis::dialogo_dos_ativos(&tela))
+            .child(portas::dialogo(&tela))
+            .child(ia::dialogo_instalar(&tela))
+            .child(ia::dialogo_pasta(&tela))
+            .child(instalar())
+    };
     (pagina, dialogos)
+}
+
+/// "Fechar todas as janelas?": nasce do fechar da principal e fica só nela.
+fn dialogo_fechar_tudo(tela: &Rc<Tela>) -> ContentDialog {
+    let t = Rc::clone(tela);
+    let fechar = Rc::clone(tela);
+    ContentDialog::new(t!("casca-fechar-todas-as-janelas"), tela.fechar_tudo)
+        .id("fechar-tudo-dialogo")
+        .content(
+            Text::new(move || {
+                let n = t.janelas.quantas();
+                t!("casca-ha-n-janelas-abertas", n = n as i64)
+            })
+            .wrap(),
+        )
+        .primary(t!("casca-fechar-tudo"), move || {
+            fechar.liberado.set(true);
+            WindowHandle::main().close();
+        })
+        .close(t!("comum-cancelar"))
+}
+
+/// Os diálogos gerais do app (senha, chave do servidor, cofre, cluster, instalar, …) na janela
+/// `handle`. Cada janela de terminais monta os seus, e só os da última janela ativa aparecem,
+/// como os da árvore: a confirmação abre na janela em que a pessoa estava.
+fn dialogos_gerais(tela: &Rc<Tela>, handle: WindowHandle) -> Column {
+    let aqui = {
+        let t = Rc::clone(tela);
+        move || t.dialogos_na_janela(handle)
+    };
+    let montar = tela.dialogos_gerais.borrow().clone();
+    Column::new()
+        .visible(aqui)
+        .child(montar.map_or_else(Column::new, |montar| montar()))
 }
 
 /// Os diálogos que a árvore e as Propriedades abrem: apagar, túneis, comandos, executar e as
@@ -5296,6 +5470,10 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                         .tree
                         .with_untracked(|tr| tr.connection(id).map(|c| c.kind == Kind::Ssh))
                         == Some(true);
+                    let tem_tuneis = t.tree.with_untracked(|tr| {
+                        tr.connection(id)
+                            .is_some_and(|c| CampoDaGrade::Encaminhamento.vale(c.kind))
+                    });
                     let aceita_sessao = t
                         .tree
                         .with_untracked(|tr| tr.connection(id).is_some_and(tmux::aceita_sessao));
@@ -5391,7 +5569,7 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                                 let t = Rc::clone(&t);
                                 move || {
                                     let previas = t.previas_do_cluster(id);
-                                    t.na_principal(|t| t.abrir_dialogo_do_cluster(&previas, false));
+                                    t.a_mostra(|t| t.abrir_dialogo_do_cluster(&previas, false));
                                 }
                             },
                         )
@@ -5407,7 +5585,7 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                                 let t = Rc::clone(&t);
                                 move || {
                                     let previas = t.previas_do_cluster(id);
-                                    t.na_principal(|t| t.abrir_dialogo_do_cluster(&previas, true));
+                                    t.a_mostra(|t| t.abrir_dialogo_do_cluster(&previas, true));
                                 }
                             },
                         )
@@ -5418,7 +5596,7 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                         })
                         .item(format!("menu-{chave}-script"), t!("casca-rodar-script"), {
                             let t = Rc::clone(&t);
-                            move || t.na_principal(|t| t.abrir_scripts(&t.previas_de_scripts(id)))
+                            move || t.abrir_scripts(&t.previas_de_scripts(id))
                         })
                         .icon(Symbol::Code)
                         .item_visible({
@@ -5438,7 +5616,7 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                             t!("casca-abrir-arquivos-sftp"),
                             {
                                 let t = Rc::clone(&t);
-                                move || t.na_principal(|t| t.abrir_arquivos(id))
+                                move || t.abrir_arquivos(id)
                             },
                         )
                         .icon(Symbol::Folder)
@@ -5496,7 +5674,7 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                             move || t.abrir_tuneis_de(&chave)
                         })
                         .icon(Symbol::Link)
-                        .item_visible(eh_ssh)
+                        .item_visible(tem_tuneis)
                         .item(format!("menu-{chave}-sessoes"), t!("sessoes-menu"), {
                             let t = Rc::clone(&t);
                             move || t.abrir_sessoes_do_servidor(id)
@@ -5541,7 +5719,7 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                                 let t = Rc::clone(&t);
                                 move || {
                                     t.selecionado.set(Some(chave_copiar.clone()));
-                                    t.na_principal(|t| t.abrir_copiar_chave(None));
+                                    t.a_mostra(|t| t.abrir_copiar_chave(None));
                                 }
                             },
                         )
@@ -5703,13 +5881,13 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         .description(t!("casca-a-senha-do-item-da-credencial"))
         .choice_from(t!("casca-chave-do-cofre"), move || campos.chave_cofre, {
             let cofre = cofre.clone();
-            move || opcoes_de_chave_do_cofre(&cofre)
+            move || credencial::opcoes_de_chave_da_selecao(&cofre, tree, selecionado)
         })
         .disabled({
             let cofre = cofre.clone();
             move || cofre.ler(|c| c.bloqueado())
         })
-        .default(sem_chave_do_cofre())
+        .default_with(move || credencial::sem_chave_da_selecao(tree, selecionado))
         .hidden(esconde(CampoDaGrade::ChaveSsh))
         .description(t!("casca-uma-chave-ssh-guardada-no-cofre"))
         .file(t!("casca-chave-privada"), move || campos.chave)
@@ -5739,6 +5917,13 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         )
         .hidden(move || !ligada_mcp() || esconde(CampoDaGrade::Mcp)())
         .description(t!("mcp-linha-descricao"))
+        .choice_from(
+            t!("mcp-abrir-linha"),
+            move || campos.mcp_abrir,
+            move || mcp_abrir::opcoes_da_selecao(tree, selecionado, config),
+        )
+        .hidden(move || !ligada_mcp() || esconde(CampoDaGrade::Mcp)())
+        .description(t!("mcp-abrir-linha-descricao"))
         .category("S3")
         .hidden(esconde(CampoDaGrade::S3))
         .choice(
@@ -5875,6 +6060,13 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         )
         .hidden(esconde(CampoDaGrade::Reconectar))
         .description(t!("retentar-linha-descricao"))
+        .choice_from(
+            t!("ocioso-linha"),
+            move || campos.ocioso,
+            move || ocioso::opcoes_da_selecao(tree, selecionado),
+        )
+        .hidden(esconde(CampoDaGrade::Ocioso))
+        .description(t!("ocioso-linha-descricao"))
         .text(t!("casca-programa"), move || campos.local_programa)
         .hidden(esconde(CampoDaGrade::Programa))
         .description(t!("casca-o-programa-que-o-terminal-desta"))
@@ -5966,6 +6158,7 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
             move || opcoes_de_x11(config.with(|c| c.x11.padrao)),
         )
         .default(ModoX11::Padrao.nome())
+        .hidden(esconde(CampoDaGrade::EncaminhamentoSsh))
         .description(t!("casca-mostra-aqui-as-janelas-dos-programas"))
         .button(t!("casca-tuneis-linha"), move || resumo_tuneis, {
             let t = Rc::clone(&tela);
@@ -5973,10 +6166,12 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         })
         .description(t!("casca-portas-que-o-ssh-encaminha-local"))
         .check(t!("casca-so-tuneis-sem-shell"), move || campos.so_tuneis)
+        .hidden(esconde(CampoDaGrade::EncaminhamentoSsh))
         .description(t!("casca-a-conexao-so-segura-os-tuneis"))
         .check(t!("casca-parar-se-tunel-falhar"), move || {
             campos.parar_se_falhar
         })
+        .hidden(esconde(CampoDaGrade::EncaminhamentoSsh))
         .description(t!("casca-como-o-exitonforwardfailure-se-uma-porta"))
         .category(t!("casca-jump-server"))
         .hidden(esconde(CampoDaGrade::Salto))
@@ -6014,8 +6209,8 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         .visible(move || !sem_conexao());
 
     // Um grupo só tem a rede, os comandos, a permissão dos assistentes, a sessão persistente, o
-    // mouse no terminal, a rodada nova de reconexão e o modo da credencial: valem para tudo o
-    // que está dentro dele.
+    // mouse no terminal, a rodada nova de reconexão, o modo da credencial e a chave privada:
+    // valem para tudo o que está dentro dele.
     let propriedades_do_grupo = PropertyGrid::new()
         .id("props-grupo")
         .grow(1)
@@ -6034,6 +6229,12 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
             move || mcp_propriedades::opcoes_da_selecao(tree, selecionado),
         )
         .description(t!("mcp-linha-descricao-pasta"))
+        .choice_from(
+            t!("mcp-abrir-linha"),
+            move || campos.mcp_abrir,
+            move || mcp_abrir::opcoes_da_selecao(tree, selecionado, config),
+        )
+        .description(t!("mcp-abrir-linha-descricao-pasta"))
         .category(t!("casca-sessao"))
         .choice_from(
             t!("tmux-linha"),
@@ -6054,11 +6255,33 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         )
         .description(t!("retentar-linha-descricao-pasta"))
         .choice_from(
+            t!("ocioso-linha"),
+            move || campos.ocioso,
+            move || ocioso::opcoes_da_selecao(tree, selecionado),
+        )
+        .description(t!("ocioso-linha-descricao-pasta"))
+        .choice_from(
             t!("comum-credencial"),
             move || campos.credencial_da_pasta,
             move || credencial::opcoes_da_selecao(tree, selecionado),
         )
         .description(t!("comum-credencial-descricao-pasta"))
+        .choice_from(
+            t!("casca-chave-do-cofre"),
+            move || campos.chave_cofre_da_pasta,
+            {
+                let cofre = cofre.clone();
+                move || credencial::opcoes_de_chave_da_selecao(&cofre, tree, selecionado)
+            },
+        )
+        .disabled({
+            let cofre = cofre.clone();
+            move || cofre.ler(|c| c.bloqueado())
+        })
+        .default_with(move || credencial::sem_chave_da_selecao(tree, selecionado))
+        .description(t!("comum-chave-do-cofre-descricao-pasta"))
+        .file(t!("casca-chave-privada"), move || campos.chave_da_pasta)
+        .description(t!("comum-chave-privada-descricao-pasta"))
         .category(t!("comandos-categoria"))
         .button(t!("comandos-linha"), move || resumo_comandos, {
             let t = Rc::clone(&tela);
@@ -6097,7 +6320,7 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
 /// O repositório do Tomni UI, a lib da interface. O do app vem do `Cargo.toml`.
 const REPOSITORIO_DA_LIB: &str = "https://github.com/TirechCorp/tomni-ui";
 
-fn pagina_sobre(tela: &Rc<Tela>) -> impl View {
+fn pagina_sobre(tela: &Rc<Tela>) -> impl View + use<> {
     let link = |id: &str, texto: String, url: &'static str| {
         let tela = Rc::clone(tela);
         Button::new(texto).id(id).hyperlink().on_click(move || {
@@ -6214,9 +6437,11 @@ fn nova_tela(
         grade: signal((1, 1)),
         envio: Envio::novo(),
         ia_comando: signal(false),
+        autocompletar: signal(false),
         colar_dialogo: signal(false),
         mcp_aprovar: signal(false),
         paineis: paineis_terminais.layout,
+        pagina,
     };
     let espacos = match configuracoes.janelas.pasta_espacos.trim() {
         "" => Espacos::new(armazenamento.pasta()),
@@ -6283,6 +6508,7 @@ fn nova_tela(
         desbloquear,
         refazer_desbloqueio: Rc::new(Cell::new(false)),
         copiar_chave: RefCell::new(None),
+        dialogos_gerais: RefCell::new(None),
         fechar_tudo: signal(false),
         fechar_ou_bandeja: signal(false),
         nao_perguntar: signal(false),
@@ -6326,6 +6552,10 @@ fn nova_tela(
         )),
         pedido_de_nota: signal(None),
         gravar_nota: Rc::new(RefCell::new(None)),
+        gravar_notas_das_secundarias: RefCell::default(),
+        medidas: Cell::new(None),
+        processos_correndo: RefCell::new(None),
+        donas: PAGINAS_DE_UMA_JANELA.map(|nome| (nome, signal(principal.handle))),
         depois_de_desbloquear: RefCell::new(None),
         logs_esperando_o_cofre: Cell::new(false),
         logs_pagina: pagina_logs::Estado::novo(),
@@ -6369,9 +6599,11 @@ fn nova_tela(
         editor_comandos: comandos_editor::EstadoEditorComandos::novo(),
         programas: programas::EstadoProgramas::novo(),
         assistente: assistente::EstadoAssistente::novo(ia_lido),
+        autocompletar: autocompletar::EstadoAutocompletar::novo(),
         instancias: instancias::Estado::novo(),
         mcp: mcp::EstadoMcp::novo(),
         portas: portas::EstadoPortas::novo(),
+        ociosas: ocioso::EstadoOcioso::novo(),
     });
     let abridor_de_login = Arc::clone(&tela.ferramentas.ambiente().abridor_de_login);
     tela.motores_tailscale
@@ -6383,6 +6615,7 @@ fn nova_tela(
     tela.ligar_mcp();
     tela.ligar_instancias();
     tela.ligar_portas();
+    tela.ligar_ociosas();
     tela.podar_recentes();
     tela.ferramentas.iniciar();
     (tela, fila, tinha_abas)
@@ -6436,13 +6669,8 @@ pub fn tela_com_ferramentas(
     tela.vigiar_redes();
     tela.vigiar_assistentes();
     let pagina = tela.pagina;
-    let cofre = tela.cofre.clone();
     let aviso = tela.aviso;
-    let (terminais, dialogos) = pagina_terminais(&tela, fila);
-
-    // O painel fica só com os ícones em Terminais, para a área de trabalho ter a largura; nas
-    // outras páginas segue a largura da janela.
-    let modo_do_painel = move || (pagina.get() == "terminais").then_some(NavigationMode::Compact);
+    let (terminais, dialogos_terminais) = pagina_terminais(&tela, fila);
 
     let barra_aviso = move |id: &str, severidade: InfoBarSeverity| {
         InfoBar::new(severidade)
@@ -6452,43 +6680,450 @@ pub fn tela_com_ferramentas(
             .on_close(move || aviso.set(None))
     };
 
-    let escolher_item: Signal<Option<u64>> = signal(None);
-    let exportar_item: Signal<Option<u64>> = signal(None);
+    let nav = NavegacaoDaJanela::da_principal(&tela);
+    let dialogos_arquivos = dialogos_de_arquivos(&tela, nav.janela.handle);
+    {
+        let dialogos_chaves = chaves::dialogos_de_chaves(&tela);
+        let (como, espacos) = (mcp_como::dialogos(&tela), mcp_espacos::dialogos(&tela));
+        let portatil = cofre_portatil::dialogos(&tela);
+        let importacao = importacao::dialogos(&tela);
+        let t = Rc::clone(&tela);
+        *tela.dialogos_gerais.borrow_mut() = Some(Rc::new(move || {
+            Column::new()
+                .child(dialogos_terminais())
+                .child(dialogos_chaves())
+                .child(rclone::dialogos(&t))
+                .child(assistente::dialogos(&t))
+                .child(como())
+                .child(espacos())
+                .child(portatil())
+                .child(importacao())
+        }));
+    }
+    wsl::ligar(&tela);
+    instalar::ligar(&tela);
+    ia::ligar(&tela);
+    duplicar::ligar(&tela);
+    sessao_tmux::ligar(&tela);
+    sessoes_servidor::ligar(&tela);
+    let medidas = tela.medidas();
+    let navegacao = navegacao(&tela, &nav, terminais);
+    let busca = campo_de_busca(&tela, &nav);
 
-    let pagina_das_notas = pagina_notas(ContextoNotas {
-        cofre: tela.cofre.clone(),
-        config: tela.config,
-        alarmes: tela.alarmes.clone(),
-        estado: tela.notas,
-        pedido: tela.pedido_de_nota,
-        abridor: Rc::clone(&tela.ferramentas.ambiente().abridor),
-        espera: tela.ferramentas.ambiente().espera_da_nota,
-        ao_fechar: Rc::clone(&tela.gravar_nota),
-        paineis: tela.paineis_notas.clone(),
+    // Com outras janelas abertas, a principal se diz principal, no título do sistema (o que a
+    // lista de janelas e o Alt+Tab mostram) e na barra. A plataforma lê o título a cada quadro,
+    // fora de um efeito: essa leitura não rastreia. O subtítulo rastreia, para a barra refazer o
+    // layout quando ele aparece ou some.
+    let titulo = {
+        let janelas = tela.janelas.clone();
+        move || {
+            if janelas.quantas_agora() > 1 {
+                t!("casca-titulo-da-principal")
+            } else {
+                NOME_DO_APP.to_owned()
+            }
+        }
+    };
+    let janelas = tela.janelas.clone();
+    let subtitulo = move || {
+        if janelas.quantas() > 1 {
+            t!("casca-subtitulo-da-principal")
+        } else {
+            String::new()
+        }
+    };
+    Form::new(titulo)
+        .density(Density::Compact)
+        .title_bar(
+            TitleBar::new(NOME_DO_APP)
+                .icon_image(icone::PEQUENO)
+                .title_badge(marca::selo())
+                .subtitle(subtitulo)
+                .content(busca)
+                .right_header(
+                    Row::new()
+                        .gap(4)
+                        .align(Align::Center)
+                        .child(desempenho::medidor(&tela, nav.janela, medidas))
+                        .child(tema::botao_de_tema(tela.config)),
+                ),
+        )
+        .child(
+            atalhos_das_paginas(&tela, pagina, Column::new())
+                .child(barra_aviso("aviso-erro", InfoBarSeverity::Error))
+                .child(barra_aviso("aviso-atencao", InfoBarSeverity::Warning))
+                .child(barra_aviso("aviso-sucesso", InfoBarSeverity::Success))
+                .child(barra_aviso("aviso-info", InfoBarSeverity::Informational))
+                .child(aviso_so_leitura(&tela))
+                .child(bandeja::aviso_sem_bandeja(&tela))
+                .child(cofre_portatil::aviso_de_conflito(&tela))
+                .child(programas::avisos(&tela))
+                .child(ia::avisos(&tela))
+                .child(controlar::avisos(&tela))
+                .child(instalar::aviso(&tela))
+                .child(navegacao)
+                .child(dialogos_da_arvore(&tela, nav.janela.handle))
+                .child(dialogos_gerais(&tela, nav.janela.handle))
+                .child(dialogos_arquivos)
+                // As perguntas do fechar da principal ficam nela, com o foco onde estiver.
+                .child(bandeja::dialogo_fechar_ou_bandeja(&tela))
+                .child(dialogo_fechar_tudo(&tela)),
+        )
+}
+
+/// O que as páginas da navegação de uma janela usam e é só dela: a página que ela mostra, os
+/// painéis, o item do cofre a escolher, a busca das Configurações e a nota aberta. Na principal,
+/// o que a tela guarda (e vai para o `estado.json`); nas secundárias, signals próprios, que
+/// nascem como os da principal estão.
+#[derive(Clone)]
+struct NavegacaoDaJanela {
+    /// A janela.
+    janela: Janela,
+    /// Os painéis das páginas dela.
+    paineis: PaineisDaJanela,
+    /// O item que o Cofre deve escolher (pedido pela busca ou pelas Chaves).
+    escolher_item: Signal<Option<u64>>,
+    /// A chave do cofre que as Chaves devem exportar (pedida pelo Cofre).
+    exportar_item: Signal<Option<u64>>,
+    /// O texto da busca das Configurações; a busca da barra de título também escreve nele.
+    busca_config: Signal<String>,
+    /// O que a página Notas lembra.
+    notas: EstadoNotas,
+    /// A nota que a página Notas deve abrir.
+    pedido_de_nota: Signal<Option<u64>>,
+    /// O que grava a nota pendente da página Notas.
+    gravar_nota: AoFechar,
+    /// Se as páginas só nascem na primeira vez que a janela as mostra (as secundárias: uma
+    /// janela aberta para terminais não paga pelas outras páginas).
+    sob_demanda: bool,
+}
+
+impl NavegacaoDaJanela {
+    /// A da janela principal.
+    fn da_principal(tela: &Tela) -> Self {
+        Self {
+            janela: tela.janelas.principal(),
+            paineis: PaineisDaJanela::da_principal(tela),
+            escolher_item: signal(None),
+            exportar_item: signal(None),
+            busca_config: tela.busca_config,
+            notas: tela.notas,
+            pedido_de_nota: tela.pedido_de_nota,
+            gravar_nota: Rc::clone(&tela.gravar_nota),
+            sob_demanda: false,
+        }
+    }
+
+    /// A de uma janela secundária, com os painéis `paineis`. O que grava a nota pendente entra
+    /// na lista da tela, para o app não perder a nota ao fechar.
+    fn de_uma_secundaria(tela: &Tela, janela: Janela, paineis: PaineisDaJanela) -> Self {
+        let gravar_nota: AoFechar = Rc::default();
+        tela.gravar_notas_das_secundarias
+            .borrow_mut()
+            .push((janela.handle, Rc::clone(&gravar_nota)));
+        let notas = tela.notas;
+        Self {
+            janela,
+            paineis,
+            escolher_item: signal(None),
+            exportar_item: signal(None),
+            busca_config: signal(String::new()),
+            notas: EstadoNotas {
+                nota: signal(notas.nota.get_untracked()),
+                modo: signal(notas.modo.get_untracked()),
+                divisor: signal(notas.divisor.get_untracked()),
+            },
+            pedido_de_nota: signal(None),
+            gravar_nota,
+            sob_demanda: true,
+        }
+    }
+}
+
+/// As páginas que existem numa janela por vez: duas cópias dividiriam os painéis e as pastas
+/// das abas (Arquivos), o editor (Logs) e o terminal da saída (Scripts).
+const PAGINAS_DE_UMA_JANELA: [&str; 3] = [paineis::ARQUIVOS, "logs", "scripts"];
+
+/// A página `nome`, uma de [`PAGINAS_DE_UMA_JANELA`], na navegação de `nav`. Ela fica com a
+/// última janela que a mostrou com o foco; as outras que estão nela mostram um aviso, e a
+/// página volta quando a pessoa usa a janela de novo. A janela que fecha devolve a página à
+/// principal.
+fn de_uma_janela<V: View>(
+    tela: &Rc<Tela>,
+    nav: &NavegacaoDaJanela,
+    nome: &'static str,
+    montar: impl Fn() -> V + 'static,
+) -> Show {
+    let dona = tela.dona(nome);
+    let (handle, pagina, ativa) = (nav.janela.handle, nav.janela.pagina, tela.ativa);
+    effect(move || {
+        let minha = pagina.with(|p| p == nome) && ativa.get() == handle;
+        if minha && dona.get_untracked() != handle {
+            dona.set(handle);
+        }
     });
+    {
+        let janelas = tela.janelas.clone();
+        on_cleanup(move || {
+            if dona.try_get_untracked() == Some(handle)
+                && let Some(principal) = janelas.principal_se_houver()
+            {
+                let _ = dona.try_set(principal.handle);
+            }
+        });
+    }
+    Show::when(move || dona.get() == handle, montar).otherwise(move || {
+        Column::new()
+            .grow(1)
+            .align(Align::Center)
+            .justify(Justify::Center)
+            .padding(Insets::all(24.0))
+            .child(
+                Text::new(t!("casca-pagina-em-outra-janela"))
+                    .id(format!("{nome}-em-outra-janela"))
+                    .secondary()
+                    .wrap(),
+            )
+    })
+}
 
-    let acoes = AcoesInicio {
+/// Os diálogos da página Arquivos (o conflito da fila, fechar a aba), na janela `handle` quando
+/// ela tem a página.
+fn dialogos_de_arquivos(tela: &Rc<Tela>, handle: WindowHandle) -> Show {
+    let dona = tela.dona(paineis::ARQUIVOS);
+    let tela = Rc::clone(tela);
+    Show::when(
+        move || dona.get() == handle,
+        move || arquivos::dialogos(&tela, &arquivos::contexto(&tela)),
+    )
+}
+
+/// A página `nome` da navegação de `nav`: montada já ou, nas janelas secundárias, na primeira
+/// vez que a janela a mostra. Depois de montada fica, escondida quando não é a da vez, como as
+/// da principal.
+fn sob_demanda<V: View>(
+    nav: &NavegacaoDaJanela,
+    nome: &'static str,
+    montar: impl Fn() -> V + 'static,
+) -> Show {
+    let vista = signal(!nav.sob_demanda);
+    if nav.sob_demanda {
+        let pagina = nav.janela.pagina;
+        effect(move || {
+            if pagina.with(|p| p == nome) && !vista.get_untracked() {
+                vista.set(true);
+            }
+        });
+    }
+    Show::when(vista, montar)
+}
+
+/// A navegação de uma janela: as páginas do app em volta de `terminais`, a página Terminais
+/// dela (a da principal tem o chat e as portas; as das secundárias, as Conexões e as
+/// Propriedades). Cada janela mostra a sua página; o cofre, as notas, as conexões e as
+/// configurações são os mesmos em todas.
+fn navegacao(tela: &Rc<Tela>, nav: &NavegacaoDaJanela, terminais: impl View) -> NavigationView {
+    let pagina = nav.janela.pagina;
+    let (escolher_item, exportar_item) = (nav.escolher_item, nav.exportar_item);
+
+    // O painel fica só com os ícones em Terminais, para a área de trabalho ter a largura; nas
+    // outras páginas segue a largura da janela.
+    let modo_do_painel =
+        move || (pagina.get() == paineis::TERMINAIS).then_some(NavigationMode::Compact);
+
+    let inicio = {
+        let tela = Rc::clone(tela);
+        sob_demanda(nav, "inicio", move || {
+            let t = Rc::clone(&tela);
+            pagina_inicio(
+                move || t.cartoes(pagina),
+                acoes_do_inicio(&tela, pagina),
+                ferramentas_do_inicio(pagina),
+            )
+        })
+    };
+    let pagina_arquivos = {
+        let (t, paineis) = (Rc::clone(tela), nav.paineis.arquivos.clone());
+        de_uma_janela(tela, nav, paineis::ARQUIVOS, move || {
+            arquivos::pagina(&t, &arquivos::contexto(&t), &paineis)
+        })
+    };
+    let cofre_pagina = {
+        let (tela, pedido) = (Rc::clone(tela), nav.pedido_de_nota);
+        sob_demanda(nav, "cofre", move || {
+            pagina_cofre_completa(
+                tela.cofre.clone(),
+                escolher_item,
+                Some(Rc::new(move |id: u64| {
+                    exportar_item.set(Some(id));
+                    pagina.set("chaves".to_owned());
+                })),
+                Some(Portabilidade {
+                    levar: {
+                        let tela = Rc::clone(&tela);
+                        Rc::new(move || tela.levar_cofre())
+                    },
+                    abrir: {
+                        let tela = Rc::clone(&tela);
+                        Rc::new(move || tela.abrir_cofre_de_fora())
+                    },
+                }),
+                Some(Rc::new(move |id: u64| {
+                    pedido.set(Some(id));
+                    pagina.set("notas".to_owned());
+                })),
+            )
+        })
+    };
+    let pagina_das_notas = {
+        let tela = Rc::clone(tela);
+        let (estado, pedido) = (nav.notas, nav.pedido_de_nota);
+        let (ao_fechar, paineis) = (Rc::clone(&nav.gravar_nota), nav.paineis.notas.clone());
+        sob_demanda(nav, paineis::NOTAS, move || {
+            pagina_notas(ContextoNotas {
+                cofre: tela.cofre.clone(),
+                config: tela.config,
+                alarmes: tela.alarmes.clone(),
+                estado,
+                pedido,
+                abridor: Rc::clone(&tela.ferramentas.ambiente().abridor),
+                espera: tela.ferramentas.ambiente().espera_da_nota,
+                ao_fechar: Rc::clone(&ao_fechar),
+                paineis: paineis.clone(),
+            })
+        })
+    };
+    let chaves_pagina = {
+        let tela = Rc::clone(tela);
+        sob_demanda(nav, "chaves", move || {
+            pagina_chaves(
+                Rc::clone(&tela.ferramentas),
+                tela.acoes_de_chaves(escolher_item, exportar_item),
+            )
+        })
+    };
+    let agente_pagina = {
+        let ferramentas = Rc::clone(&tela.ferramentas);
+        sob_demanda(nav, "agente", move || {
+            pagina_agente(Rc::clone(&ferramentas))
+        })
+    };
+    let redes_pagina = {
+        let tela = Rc::clone(tela);
+        sob_demanda(nav, "redes", move || redes::pagina(&tela))
+    };
+    let ia_pagina = {
+        let tela = Rc::clone(tela);
+        sob_demanda(nav, "ia", move || ia_perfis::pagina(&tela))
+    };
+    let logs_pagina = {
+        let t = Rc::clone(tela);
+        de_uma_janela(tela, nav, "logs", move || pagina_logs::pagina(&t, pagina))
+    };
+    let scripts_pagina = {
+        let t = Rc::clone(tela);
+        de_uma_janela(tela, nav, "scripts", move || scripts::pagina(&t))
+    };
+    let desempenho_pagina = {
+        let tela = Rc::clone(tela);
+        sob_demanda(nav, desempenho::PAGINA, move || {
+            desempenho::pagina(&tela, tela.medidas())
+        })
+    };
+    let sobre = {
+        let tela = Rc::clone(tela);
+        sob_demanda(nav, "sobre", move || pagina_sobre(&tela))
+    };
+    let configuracoes_pagina = {
+        let (tela, busca) = (Rc::clone(tela), nav.busca_config);
+        sob_demanda(nav, "configuracoes", move || {
+            pagina_configuracoes(contexto_das_configuracoes(&tela, pagina, busca))
+        })
+    };
+
+    NavigationView::bind(pagina)
+        .id("navegacao")
+        .pane_mode_with(modo_do_painel)
+        .item("inicio", Symbol::Home, t!("casca-inicio"), inicio)
+        .item(
+            paineis::TERMINAIS,
+            Symbol::WindowConsole,
+            t!("casca-terminais"),
+            terminais,
+        )
+        .item(
+            paineis::ARQUIVOS,
+            Symbol::Folder,
+            t!("casca-arquivos"),
+            pagina_arquivos,
+        )
+        .item(
+            "cofre",
+            Symbol::LockClosed,
+            t!("casca-cofre-de-senhas"),
+            cofre_pagina,
+        )
+        .item(
+            paineis::NOTAS,
+            Symbol::Notepad,
+            t!("comum-notas"),
+            pagina_das_notas,
+        )
+        .item("chaves", Symbol::Key, t!("casca-chaves-ssh"), chaves_pagina)
+        .item("agente", Symbol::Shield, t!("casca-agente"), agente_pagina)
+        .item("redes", Symbol::Globe, t!("casca-redes"), redes_pagina)
+        .item("ia", Symbol::Sparkle, t!("casca-ia"), ia_pagina)
+        .item("logs", Symbol::DocumentText, t!("casca-logs"), logs_pagina)
+        .item("scripts", Symbol::Code, t!("casca-scripts"), scripts_pagina)
+        .item(
+            desempenho::PAGINA,
+            Symbol::DataArea,
+            t!("casca-desempenho"),
+            desempenho_pagina,
+        )
+        .footer_item("sobre", Symbol::Info, t!("casca-sobre"), sobre)
+        .settings(configuracoes_pagina)
+}
+
+/// Os atalhos que levam às páginas (Cofre, Notas, Configurações), em `coluna`: valem em qualquer
+/// página da janela de `pagina`.
+fn atalhos_das_paginas(tela: &Tela, pagina: Signal<String>, coluna: Column) -> Column {
+    coluna
+        .accelerator(atalhos::atalho(tela.config, "cofre"), move || {
+            pagina.set("cofre".to_owned());
+        })
+        .accelerator(atalhos::atalho(tela.config, "notas"), move || {
+            pagina.set("notas".to_owned());
+        })
+        .accelerator(atalhos::atalho(tela.config, "configuracoes"), move || {
+            pagina.set("configuracoes".to_owned());
+        })
+}
+
+/// O que os botões e os menus do Início fazem, na janela de `pagina`.
+fn acoes_do_inicio(tela: &Rc<Tela>, pagina: Signal<String>) -> AcoesInicio {
+    AcoesInicio {
         nova: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || {
                 tela.nova_conexao();
-                tela.pagina.set("terminais".to_owned());
+                pagina.set(paineis::TERMINAIS.to_owned());
             })
         },
         importar: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.importar())
         },
         shell: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.abrir_shell_e_mostrar())
         },
         abrir: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |alvo: &AlvoRecente| tela.abrir_recente(alvo))
         },
         abrir_em: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |menu, alvo: &AlvoRecente, base: &str| match alvo {
                 AlvoRecente::Conexao { id } => {
                     abrir_em::com_abrir_em(&tela, menu, base, AlvoAbrir::Conexao(*id))
@@ -6497,13 +7132,13 @@ pub fn tela_com_ferramentas(
             })
         },
         fixar: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |alvo: &AlvoRecente, fixado| {
                 tela.recentes.update(|r| r.fixar(alvo, fixado));
             })
         },
         mostrar: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |alvo: &AlvoRecente| match alvo {
                 AlvoRecente::Conexao { id } => tela.mostrar_na_arvore(*id),
                 AlvoRecente::Espaco { caminho } => {
@@ -6515,11 +7150,16 @@ pub fn tela_com_ferramentas(
             })
         },
         remover: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |alvo: &AlvoRecente| tela.recentes.update(|r| r.remover(alvo)))
         },
-    };
-    let ferramentas = vec![
+    }
+}
+
+/// Os cartões das ferramentas, a última seção do Início, que levam às páginas da janela de
+/// `pagina`.
+fn ferramentas_do_inicio(pagina: Signal<String>) -> Vec<Card> {
+    vec![
         cartao_ferramenta(
             Symbol::LockClosed,
             &t!("inicio-ferramenta-cofre"),
@@ -6562,16 +7202,21 @@ pub fn tela_com_ferramentas(
             "configuracoes",
             pagina,
         ),
-    ];
-    let inicio = {
-        let tela = Rc::clone(&tela);
-        pagina_inicio(move || tela.cartoes(), acoes, ferramentas)
-    };
-    let configuracoes_pagina = pagina_configuracoes(Contexto {
+    ]
+}
+
+/// O que a página Configurações da janela de `pagina` usa da tela; `busca` é o texto da busca
+/// dela.
+fn contexto_das_configuracoes(
+    tela: &Rc<Tela>,
+    pagina: Signal<String>,
+    busca: Signal<String>,
+) -> Contexto {
+    Contexto {
         config: tela.config,
         recentes: tela.recentes,
         pagina,
-        busca: tela.busca_config,
+        busca,
         avisos_da_leitura: tela.avisos_config,
         armazenamento: tela.armazenamento.clone(),
         pasta_padrao: crate::armazenamento::pasta_padrao(),
@@ -6582,238 +7227,66 @@ pub fn tela_com_ferramentas(
         },
         cofre: tela.cofre.clone(),
         importar_ssh_config: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.importar())
         },
         importar_aws: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.importar_aws())
         },
         levar_cofre: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.levar_cofre())
         },
         abrir_cofre_de_fora: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.abrir_cofre_de_fora())
         },
         logs_a_cifrar: tela.logs_pagina.a_cifrar,
         cifrar_logs_existentes: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || {
                 // A confirmação mora na página Logs.
-                tela.pagina.set("logs".to_owned());
+                pagina.set("logs".to_owned());
                 tela.pedir_para_converter_logs(crate::logs::Sentido::Cifrar, true);
             })
         },
         mudar_local_do_cofre: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |destino| tela.pedir_local_do_cofre(destino))
         },
         arvore: tela.tree,
         mcp_estado: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.estado_do_controle())
         },
         mcp_aviso: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.mostrar_aviso_mcp())
         },
         mcp_como: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |espaco| tela.abrir_como_ligar(espaco.as_deref()))
         },
         espaco_novo: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move || tela.novo_espaco_ia(None, ""))
         },
         espaco_editar: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |nome| tela.editar_espaco_ia(&nome))
         },
         abrir_instalacao: {
-            let tela = Rc::clone(&tela);
-            Rc::new(move || tela.na_principal(|t| t.abrir_instalar(false)))
+            let tela = Rc::clone(tela);
+            Rc::new(move || tela.a_mostra(|t| t.abrir_instalar(false)))
         },
-        resumo_da_instalacao: instalar::resumo_para_configuracoes(&tela),
+        resumo_da_instalacao: instalar::resumo_para_configuracoes(tela),
         pasta_dos_assistentes: {
-            let tela = Rc::clone(&tela);
+            let tela = Rc::clone(tela);
             Rc::new(move |escolhida| tela.ferramentas.ambiente().pasta_dos_assistentes(escolhida))
         },
         pasta_pessoal: tela.ferramentas.ambiente().pessoal.clone(),
-    });
-
-    let contexto_arquivos = arquivos::contexto(&tela);
-    let pagina_arquivos = arquivos::pagina(&tela, &contexto_arquivos);
-    let dialogos_arquivos = arquivos::dialogos(&tela, &contexto_arquivos);
-    let dialogos_rclone = rclone::dialogos(&tela);
-    let dialogos_ia = assistente::dialogos(&tela);
-    let dialogos_mcp = Column::new()
-        .child(mcp_como::dialogos(&tela))
-        .child(mcp_espacos::dialogos(&tela));
-
-    let chaves_pagina = pagina_chaves(
-        Rc::clone(&tela.ferramentas),
-        tela.acoes_de_chaves(escolher_item, exportar_item),
-    );
-    let agente_pagina = pagina_agente(Rc::clone(&tela.ferramentas));
-    let dialogos_chaves = chaves::dialogos_de_chaves(&tela);
-    let redes_pagina = redes::pagina(&tela);
-    let ia_pagina = ia_perfis::pagina(&tela);
-    let logs_pagina = pagina_logs::pagina(&tela);
-    let scripts_pagina = scripts::pagina(&tela);
-    wsl::ligar(&tela);
-    instalar::ligar(&tela);
-    ia::ligar(&tela);
-    duplicar::ligar(&tela);
-    sessao_tmux::ligar(&tela);
-    sessoes_servidor::ligar(&tela);
-    let medidas = desempenho::ligar(&tela);
-
-    let navegacao = NavigationView::bind(pagina)
-        .id("navegacao")
-        .pane_mode_with(modo_do_painel)
-        .item("inicio", Symbol::Home, t!("casca-inicio"), inicio)
-        .item(
-            "terminais",
-            Symbol::WindowConsole,
-            t!("casca-terminais"),
-            terminais,
-        )
-        .item(
-            "arquivos",
-            Symbol::Folder,
-            t!("casca-arquivos"),
-            pagina_arquivos,
-        )
-        .item(
-            "cofre",
-            Symbol::LockClosed,
-            t!("casca-cofre-de-senhas"),
-            pagina_cofre_completa(
-                cofre,
-                escolher_item,
-                Some(Rc::new(move |id: u64| {
-                    exportar_item.set(Some(id));
-                    pagina.set("chaves".to_owned());
-                })),
-                Some(Portabilidade {
-                    levar: {
-                        let tela = Rc::clone(&tela);
-                        Rc::new(move || tela.levar_cofre())
-                    },
-                    abrir: {
-                        let tela = Rc::clone(&tela);
-                        Rc::new(move || tela.abrir_cofre_de_fora())
-                    },
-                }),
-                Some(Rc::new({
-                    let tela = Rc::clone(&tela);
-                    move |id: u64| {
-                        tela.pedido_de_nota.set(Some(id));
-                        pagina.set("notas".to_owned());
-                    }
-                })),
-            ),
-        )
-        .item(
-            "notas",
-            Symbol::Notepad,
-            t!("comum-notas"),
-            pagina_das_notas,
-        )
-        .item("chaves", Symbol::Key, t!("casca-chaves-ssh"), chaves_pagina)
-        .item("agente", Symbol::Shield, t!("casca-agente"), agente_pagina)
-        .item("redes", Symbol::Globe, t!("casca-redes"), redes_pagina)
-        .item("ia", Symbol::Sparkle, t!("casca-ia"), ia_pagina)
-        .item("logs", Symbol::DocumentText, t!("casca-logs"), logs_pagina)
-        .item("scripts", Symbol::Code, t!("casca-scripts"), scripts_pagina)
-        .item(
-            desempenho::PAGINA,
-            Symbol::DataArea,
-            t!("casca-desempenho"),
-            desempenho::pagina(&tela, medidas),
-        )
-        .footer_item(
-            "sobre",
-            Symbol::Info,
-            t!("casca-sobre"),
-            pagina_sobre(&tela),
-        )
-        .settings(configuracoes_pagina);
-
-    let busca = campo_de_busca(&tela, pagina, escolher_item);
-
-    // Com outras janelas abertas, a principal se diz principal, no título do sistema (o que a
-    // lista de janelas e o Alt+Tab mostram) e na barra. A plataforma lê o título a cada quadro,
-    // fora de um efeito: essa leitura não rastreia. O subtítulo rastreia, para a barra refazer o
-    // layout quando ele aparece ou some.
-    let titulo = {
-        let janelas = tela.janelas.clone();
-        move || {
-            if janelas.quantas_agora() > 1 {
-                t!("casca-titulo-da-principal")
-            } else {
-                NOME_DO_APP.to_owned()
-            }
-        }
-    };
-    let janelas = tela.janelas.clone();
-    let subtitulo = move || {
-        if janelas.quantas() > 1 {
-            t!("casca-subtitulo-da-principal")
-        } else {
-            String::new()
-        }
-    };
-    Form::new(titulo)
-        .density(Density::Compact)
-        .title_bar(
-            TitleBar::new(NOME_DO_APP)
-                .icon_image(icone::PEQUENO)
-                .title_badge(marca::selo())
-                .subtitle(subtitulo)
-                .content(busca)
-                .right_header(
-                    Row::new()
-                        .gap(4)
-                        .align(Align::Center)
-                        .child(desempenho::medidor(&tela, medidas))
-                        .child(tema::botao_de_tema(tela.config)),
-                ),
-        )
-        .child(
-            Column::new()
-                .accelerator(atalhos::atalho(tela.config, "cofre"), move || {
-                    pagina.set("cofre".to_owned())
-                })
-                .accelerator(atalhos::atalho(tela.config, "notas"), move || {
-                    pagina.set("notas".to_owned())
-                })
-                .accelerator(atalhos::atalho(tela.config, "configuracoes"), move || {
-                    pagina.set("configuracoes".to_owned())
-                })
-                .child(barra_aviso("aviso-erro", InfoBarSeverity::Error))
-                .child(barra_aviso("aviso-atencao", InfoBarSeverity::Warning))
-                .child(barra_aviso("aviso-sucesso", InfoBarSeverity::Success))
-                .child(barra_aviso("aviso-info", InfoBarSeverity::Informational))
-                .child(aviso_so_leitura(&tela))
-                .child(bandeja::aviso_sem_bandeja(&tela))
-                .child(cofre_portatil::aviso_de_conflito(&tela))
-                .child(programas::avisos(&tela))
-                .child(ia::avisos(&tela))
-                .child(controlar::avisos(&tela))
-                .child(instalar::aviso(&tela))
-                .child(navegacao)
-                .child(dialogos)
-                .child(dialogos_chaves)
-                .child(dialogos_arquivos)
-                .child(dialogos_rclone)
-                .child(dialogos_ia)
-                .child(dialogos_mcp)
-                .child(cofre_portatil::dialogos(&tela))
-                .child(importacao::dialogos(&tela)),
-        )
+    }
 }
 
 /// A barra fixa de uma cópia só de leitura do app (outra cópia é a dona da configuração), com o
@@ -6839,12 +7312,11 @@ fn aviso_so_leitura(tela: &Rc<Tela>) -> impl View + use<> {
 }
 
 /// A busca global da barra de título: conexões e itens do cofre. Escolher uma conexão a abre
-/// nos Terminais; escolher um item do cofre abre o Cofre com ele selecionado.
-fn campo_de_busca(
-    tela: &Rc<Tela>,
-    pagina: Signal<String>,
-    escolher_item: Signal<Option<u64>>,
-) -> AutoSuggestBox {
+/// nos Terminais; escolher um item do cofre abre o Cofre com ele selecionado, nas páginas da
+/// janela de `nav`.
+fn campo_de_busca(tela: &Rc<Tela>, nav: &NavegacaoDaJanela) -> AutoSuggestBox {
+    let (pagina, escolher_item) = (nav.janela.pagina, nav.escolher_item);
+    let (pedido_de_nota, busca_config) = (nav.pedido_de_nota, nav.busca_config);
     let texto = signal(String::new());
     let ultimas: Rc<RefCell<HashMap<String, Destino>>> = Rc::default();
 
@@ -6907,7 +7379,7 @@ fn campo_de_busca(
                         .cofre
                         .agora(|c| c.item(id).is_some_and(|i| i.tipo == Tipo::Nota));
                     if e_nota {
-                        tela.pedido_de_nota.set(Some(id));
+                        pedido_de_nota.set(Some(id));
                         pagina.set("notas".to_owned());
                     } else {
                         escolher_item.set(Some(id));
@@ -6917,7 +7389,7 @@ fn campo_de_busca(
                 Destino::Configuracao(chave) => {
                     let titulo =
                         catalogo::definicao(chave).map_or_else(String::new, |d| d.titulo());
-                    tela.busca_config.set(titulo);
+                    busca_config.set(titulo);
                     pagina.set("configuracoes".to_owned());
                 }
             }

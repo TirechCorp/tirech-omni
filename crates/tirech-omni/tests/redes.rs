@@ -233,7 +233,8 @@ fn criar_uma_rede_na_pagina_e_ligar_um_grupo_a_ela() {
 
     m.app.expand("arvore", "1").click("arvore-2");
     assert_eq!(valor(&m.app, "Rede"), "Herdar (Cliente A)");
-    // O shell local não sai por rede nenhuma: a linha some.
+    // O shell local também sai pela rede (variáveis de proxy e túneis): a linha fica. Ele está na
+    // raiz, fora do grupo, então herda a saída direta.
     m.app.click("arvore-5");
     let rede = m
         .app
@@ -241,7 +242,8 @@ fn criar_uma_rede_na_pagina_e_ligar_um_grupo_a_ela() {
         .into_iter()
         .find(|p| p.name == "Rede")
         .unwrap();
-    assert!(rede.hidden);
+    assert!(!rede.hidden);
+    assert_eq!(valor(&m.app, "Rede"), "Herdar (Direta)");
 }
 
 #[test]
@@ -1826,6 +1828,7 @@ fn o_motor_liga_na_primeira_vez_para_na_ultima_e_recusa_a_mesma_identidade_em_do
     drop(mundo.raiz);
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn com_a_zerotier_ligada_o_unico_socket_em_escuta_e_a_ponte_em_loopback() {
     let mundo = mundo_zerotier();

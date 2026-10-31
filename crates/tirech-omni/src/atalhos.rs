@@ -138,6 +138,7 @@ pub const CATALOGO: &[Acao] = &[
     app("fechar_todas", tk!("atalho-fechar-todas"), ""),
     app("cofre", tk!("atalho-cofre"), "Ctrl+Shift+K"),
     app("notas", tk!("atalho-notas"), "Ctrl+Shift+J"),
+    app("autocompletar", tk!("atalho-autocompletar"), "Ctrl+Space"),
     app("ia_comando", tk!("atalho-ia-comando"), "Ctrl+Shift+Space"),
     app("ia_chat", tk!("atalho-ia-chat"), "Ctrl+Shift+A"),
     app("ia_abrir", tk!("atalho-ia-abrir"), "Ctrl+Alt+A"),

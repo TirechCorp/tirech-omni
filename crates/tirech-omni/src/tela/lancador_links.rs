@@ -59,7 +59,9 @@ impl Tela {
     }
 }
 
-pub(super) fn dialogo(tela: &Rc<Tela>) -> impl View + use<> {
+/// O diálogo dos Links: o efeito das linhas liga uma vez, e a função devolvida monta a caixa em
+/// cada janela.
+pub(super) fn dialogo(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     let estado = &tela.links;
     let (aberto, filtro, escolhidos, linhas) = (
         estado.aberto,
@@ -89,48 +91,53 @@ pub(super) fn dialogo(tela: &Rc<Tela>) -> impl View + use<> {
         });
         linhas.set(novas);
     });
-    let grade = {
-        let t = Rc::clone(tela);
-        DataGrid::bind(linhas, escolhidos)
-            .id("links-grade")
-            .height(260)
-            .columns([
-                DataGridColumn::new("nome", t!("comum-nome")).width(ColumnWidth::Star(1.0)),
-                DataGridColumn::new("endereco", t!("comum-endereco")).width(ColumnWidth::Star(1.6)),
-                DataGridColumn::new("rede", t!("comum-rede")).width(ColumnWidth::Star(0.8)),
-                DataGridColumn::new("grupo", t!("comum-grupo")).width(ColumnWidth::Star(0.8)),
-            ])
-            .empty_text(t!("links-nenhum-link"))
-            .on_invoke(move |chave| t.abrir_links(&BTreeSet::from([chave])))
-    };
-    let abrir = {
-        let t = Rc::clone(tela);
-        Button::new(t!("comum-abrir"))
-            .id("links-abrir")
-            .accent()
-            .disabled(move || escolhidos.with(BTreeSet::is_empty))
-            .on_click(move || t.abrir_links(&escolhidos.get_untracked()))
-    };
-    ContentDialog::new(t!("links-titulo"), aberto)
-        .id("links-dialogo")
-        .content(
-            Column::new()
-                .gap(8)
-                .child(Text::new(t!("links-explicacao")).wrap())
-                .child(
-                    Edit::bind(filtro)
-                        .id("links-filtro")
-                        .placeholder(t!("comum-filtrar"))
-                        .height(32),
-                )
-                .child(grade)
-                .child(
-                    Row::new()
-                        .gap(8)
-                        .align(Align::Center)
-                        .child(Row::new().grow(1))
-                        .child(abrir),
-                ),
-        )
-        .close(t!("comum-fechar"))
+    let tela = Rc::clone(tela);
+    move || {
+        let tela = &tela;
+        let grade = {
+            let t = Rc::clone(tela);
+            DataGrid::bind(linhas, escolhidos)
+                .id("links-grade")
+                .height(260)
+                .columns([
+                    DataGridColumn::new("nome", t!("comum-nome")).width(ColumnWidth::Star(1.0)),
+                    DataGridColumn::new("endereco", t!("comum-endereco"))
+                        .width(ColumnWidth::Star(1.6)),
+                    DataGridColumn::new("rede", t!("comum-rede")).width(ColumnWidth::Star(0.8)),
+                    DataGridColumn::new("grupo", t!("comum-grupo")).width(ColumnWidth::Star(0.8)),
+                ])
+                .empty_text(t!("links-nenhum-link"))
+                .on_invoke(move |chave| t.abrir_links(&BTreeSet::from([chave])))
+        };
+        let abrir = {
+            let t = Rc::clone(tela);
+            Button::new(t!("comum-abrir"))
+                .id("links-abrir")
+                .accent()
+                .disabled(move || escolhidos.with(BTreeSet::is_empty))
+                .on_click(move || t.abrir_links(&escolhidos.get_untracked()))
+        };
+        ContentDialog::new(t!("links-titulo"), aberto)
+            .id("links-dialogo")
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(Text::new(t!("links-explicacao")).wrap())
+                    .child(
+                        Edit::bind(filtro)
+                            .id("links-filtro")
+                            .placeholder(t!("comum-filtrar"))
+                            .height(32),
+                    )
+                    .child(grade)
+                    .child(
+                        Row::new()
+                            .gap(8)
+                            .align(Align::Center)
+                            .child(Row::new().grow(1))
+                            .child(abrir),
+                    ),
+            )
+            .close(t!("comum-fechar"))
+    }
 }

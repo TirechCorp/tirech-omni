@@ -328,13 +328,13 @@ fn as_abas_das_maquinas_chegam_ao_assistente_do_cluster() {
 fn salvar_a_janela_como_espaco_guarda_o_cluster_sem_a_aba_do_assistente_e_reabrir_relanca() {
     let (pasta, mut m) = cenario("cluster-ia-espaco", true);
     abrir_cluster_do_grupo(&mut m);
-    let [principal, nova] = m.app.windows()[..] else {
+    let [_, nova] = m.app.windows()[..] else {
         panic!("esperava duas janelas");
     };
+    m.app.set_active_window(nova);
     m.app.switch_to(nova);
     m.app.click("menus-janela").click("salvar-janela-espaco");
-    // O diálogo do nome mora na janela principal.
-    m.app.switch_to(principal);
+    // O diálogo do nome abre na janela de onde veio.
     assert!(m.app.is_open("salvar-espaco-dialogo"));
     m.app.click("espaco-nome");
     m.app.shortcut(tomni_ui::prelude::Shortcut::new(

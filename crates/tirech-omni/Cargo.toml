@@ -91,3 +91,7 @@ windows-registry = "0.6.1"
 # O pipe com dono do canal da ponte MCP (`mcp/pipe.rs`): o `tokio` dos pipes e o `unsafe` fica na lib.
 tomni-ui-win32.workspace = true
 tokio = { workspace = true, features = ["rt", "net", "sync", "macros", "io-util"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# A CPU e a memória do app e dos programas dos shells locais (`desempenho.rs`); o `unsafe` fica na lib.
+tomni-ui-macos.workspace = true

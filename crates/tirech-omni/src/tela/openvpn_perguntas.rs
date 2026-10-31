@@ -13,8 +13,9 @@ use crate::cofre::Tipo;
 use crate::openvpn::rotulo_da_pergunta;
 use crate::t;
 
-/// O diálogo que faz a pergunta do motor e devolve a resposta (ou o cancelamento) a ele.
-pub(super) fn dialogo(tela: &Rc<Tela>) -> impl View + use<> {
+/// O diálogo que faz a pergunta do motor e devolve a resposta (ou o cancelamento) a ele. A
+/// pergunta e os efeitos nascem uma vez; a função devolvida monta a caixa em cada janela.
+pub(super) fn dialogo(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     let aberto = signal(false);
     // O perfil que pergunta e o que ele pergunta.
     let atual: Signal<Option<(u64, Prompt)>> = signal(None);
@@ -63,73 +64,77 @@ pub(super) fn dialogo(tela: &Rc<Tela>) -> impl View + use<> {
         });
     }
 
-    let titulo = move || {
-        atual
-            .get()
-            .map_or_else(String::new, |(_, p)| rotulo_da_pergunta(p.kind))
-    };
-    let texto = move || atual.get().map(|(_, p)| p.text).unwrap_or_default();
-    let nome_do_perfil = {
-        let t = Rc::clone(tela);
-        move || {
+    let tela = Rc::clone(tela);
+    move || {
+        let tela = &tela;
+        let titulo = move || {
             atual
                 .get()
-                .and_then(|(id, _)| t.tree.with(|tr| tr.perfil(id).map(|p| p.name.clone())))
-                .unwrap_or_default()
-        }
-    };
-    let e_senha = move || {
-        atual
-            .get()
-            .is_some_and(|(_, p)| p.kind == PromptKind::Password)
-    };
-    let ecoa = move || atual.get().is_some_and(|(_, p)| p.echo);
-
-    ContentDialog::new(titulo, aberto)
-        .id("openvpn-pergunta-dialogo")
-        .content(
-            Column::new()
-                .gap(8)
-                .child(
-                    Text::new(nome_do_perfil)
-                        .id("openvpn-pergunta-rede")
-                        .secondary()
-                        .wrap(),
-                )
-                .child(Text::new(texto).id("openvpn-pergunta-texto").wrap())
-                .child(
-                    Edit::bind(resposta)
-                        .id("openvpn-pergunta-resposta")
-                        .visible(ecoa),
-                )
-                .child(
-                    Edit::bind(resposta)
-                        .id("openvpn-pergunta-resposta-oculta")
-                        .password()
-                        .visible(move || !ecoa()),
-                )
-                .child(
-                    CheckBox::bind(salvar, t!("openvpn-salvar-no-cofre"))
-                        .id("openvpn-pergunta-salvar")
-                        .visible(e_senha),
-                ),
-        )
-        .primary(t!("openvpn-responder"), {
+                .map_or_else(String::new, |(_, p)| rotulo_da_pergunta(p.kind))
+        };
+        let texto = move || atual.get().map(|(_, p)| p.text).unwrap_or_default();
+        let nome_do_perfil = {
             let t = Rc::clone(tela);
             move || {
-                let Some((perfil, pergunta)) = atual.get_untracked() else {
-                    return;
-                };
-                let texto = resposta.get_untracked();
-                if salvar.get_untracked() && pergunta.kind == PromptKind::Password {
-                    guardar_senha(&t, perfil, &texto);
-                }
-                atual.set(None);
-                resposta.set(String::new());
-                t.motores_vpn.responder(perfil, pergunta.id, Some(texto));
+                atual
+                    .get()
+                    .and_then(|(id, _)| t.tree.with(|tr| tr.perfil(id).map(|p| p.name.clone())))
+                    .unwrap_or_default()
             }
-        })
-        .close(t!("comum-cancelar"))
+        };
+        let e_senha = move || {
+            atual
+                .get()
+                .is_some_and(|(_, p)| p.kind == PromptKind::Password)
+        };
+        let ecoa = move || atual.get().is_some_and(|(_, p)| p.echo);
+
+        ContentDialog::new(titulo, aberto)
+            .id("openvpn-pergunta-dialogo")
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(
+                        Text::new(nome_do_perfil)
+                            .id("openvpn-pergunta-rede")
+                            .secondary()
+                            .wrap(),
+                    )
+                    .child(Text::new(texto).id("openvpn-pergunta-texto").wrap())
+                    .child(
+                        Edit::bind(resposta)
+                            .id("openvpn-pergunta-resposta")
+                            .visible(ecoa),
+                    )
+                    .child(
+                        Edit::bind(resposta)
+                            .id("openvpn-pergunta-resposta-oculta")
+                            .password()
+                            .visible(move || !ecoa()),
+                    )
+                    .child(
+                        CheckBox::bind(salvar, t!("openvpn-salvar-no-cofre"))
+                            .id("openvpn-pergunta-salvar")
+                            .visible(e_senha),
+                    ),
+            )
+            .primary(t!("openvpn-responder"), {
+                let t = Rc::clone(tela);
+                move || {
+                    let Some((perfil, pergunta)) = atual.get_untracked() else {
+                        return;
+                    };
+                    let texto = resposta.get_untracked();
+                    if salvar.get_untracked() && pergunta.kind == PromptKind::Password {
+                        guardar_senha(&t, perfil, &texto);
+                    }
+                    atual.set(None);
+                    resposta.set(String::new());
+                    t.motores_vpn.responder(perfil, pergunta.id, Some(texto));
+                }
+            })
+            .close(t!("comum-cancelar"))
+    }
 }
 
 /// Guarda a senha respondida no item OpenVPN do cofre que o perfil usa.

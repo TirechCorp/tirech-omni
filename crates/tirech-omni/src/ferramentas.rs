@@ -184,6 +184,12 @@ pub struct Ambiente {
     /// trocada por variável (os testes, o `lint`, as capturas), nada bate e o medidor fica em
     /// zero, para as imagens não variarem.
     pub medicao: crate::desempenho::Medicao,
+    /// A fonte das abas Processos e Disco do Desempenho para cada máquina. Os testes põem uma
+    /// [`crate::processos::FonteDeTeste`].
+    pub processos:
+        Rc<dyn Fn(crate::processos::Maquina) -> Box<dyn crate::processos::FonteDeProcessos>>,
+    /// De quanto em quanto tempo as abas Processos e Disco leem.
+    pub ritmo_dos_processos: std::time::Duration,
 }
 
 impl Ambiente {
@@ -262,6 +268,8 @@ impl Ambiente {
             } else {
                 crate::desempenho::Medicao::do_sistema()
             },
+            processos: Rc::new(crate::processos::fonte_do_sistema),
+            ritmo_dos_processos: crate::processos::RITMO,
         }
     }
 
@@ -309,6 +317,8 @@ impl Ambiente {
                 Rc::new(crate::desempenho::FonteFixa::nova()),
                 tomni_ui::files::Live::detached(0),
             ),
+            processos: Rc::new(|_| Box::new(crate::processos::FonteDeTeste::exemplo())),
+            ritmo_dos_processos: std::time::Duration::from_millis(50),
         }
     }
 

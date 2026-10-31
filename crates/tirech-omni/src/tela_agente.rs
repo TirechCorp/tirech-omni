@@ -81,6 +81,23 @@ pub fn pagina_agente(ferr: Rc<Ferramentas>) -> impl View {
     let ligado = signal(ferr.cfg().ligado);
     let minutos = signal((ferr.cfg().vida_padrao_secs / 60) as f64);
 
+    // A mesma página pode estar em outra janela: as caixas seguem a configuração.
+    {
+        let config = ferr.config;
+        effect(move || {
+            let (quer, vida) =
+                config.with(|c| (c.agente.ligado, (c.agente.vida_padrao_secs / 60) as f64));
+            untrack(|| {
+                if ligado.get_untracked() != quer {
+                    ligado.set(quer);
+                }
+                if minutos.get_untracked() != vida {
+                    minutos.set(vida);
+                }
+            });
+        });
+    }
+
     // As caixas escrevem na configuração; quem já está certo não grava de novo.
     {
         let ferr = Rc::clone(&ferr);

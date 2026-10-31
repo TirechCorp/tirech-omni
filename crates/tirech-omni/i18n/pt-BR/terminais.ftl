@@ -106,6 +106,9 @@ tuneis-ajuda-dinamico = Um proxy SOCKS5 aqui: ponha o navegador para usar esta p
 tuneis-ajuda-socket = Com uma porta, o socket vira essa porta aqui; sem porta, um socket Unix daqui (o caminho em branco é automático).
 tuneis-destino-visto-da-maquina = Destino (host:porta, visto desta máquina)
 tuneis-destino-visto-do-servidor = Destino (host:porta, visto do servidor)
+tuneis-destino-visto-da-rede = Destino (host:porta, visto pela rede da conexão)
+tuneis-ajuda-local-shell = A porta daqui leva ao destino pela rede da conexão: o perfil, ou direto.
+tuneis-ajuda-dinamico-shell = Um proxy SOCKS5 e HTTP aqui: os programas que o usam saem pela rede da conexão.
 tuneis-adicionar-um-tunel = Adicionar um túnel
 tuneis-tuneis-de = Túneis de { $nome }
 tuneis-nao-subiu-local = O túnel local { $porta } não subiu: { $motivo }
@@ -311,6 +314,8 @@ baixar-baixando-de = Baixando de { $conexao }
 baixar-andou = { $caminho } · { $feito } de { $total }
 baixar-feito-titulo = Arquivo baixado
 baixar-feito = { $caminho } foi gravado em { $destino }.
+baixar-abrir-pasta = Abrir a pasta
+baixar-abrir-pasta-erro = Não deu para abrir { $pasta }: { $motivo }
 baixar-erro-titulo = Baixar o arquivo marcado
 baixar-erro = Não deu para baixar { $caminho }: { $motivo }
 baixar-e-pasta = { $caminho } é uma pasta. Marque o nome de um arquivo.
@@ -348,6 +353,10 @@ retentar-minutos = { $n } min
 retentar-horas = { $n } h
 retentar-herdar-de = Herdar ({ $nome })
 retentar-herdar-configuracoes = Herdar (Configurações)
+ocioso-linha = Fechar sem uso após
+ocioso-linha-descricao = Fecha a aba desta conexão depois deste tempo sem nada digitado, colado ou mandado por um assistente. O que chega do servidor não conta como uso. A sessão persistente (tmux ou screen) continua no servidor. Herdar segue a pasta e, sem pasta que escolha, as Configurações › Conexões, onde vem desligado.
+ocioso-linha-descricao-pasta = Para as conexões desta pasta que não escolheram outra coisa: depois de quanto tempo sem uso a aba fecha sozinha.
+ocioso-fechou = A aba { $aba } fechou depois de { $tempo } sem uso.
 
 ## Sessões persistentes abertas no servidor
 
@@ -375,3 +384,19 @@ links-menu = Links…
 links-titulo = Links
 links-explicacao = Os links da árvore. Com um perfil de rede, o link abre num navegador só do perfil, que sai pela rede do cliente; sem perfil, no navegador padrão.
 links-nenhum-link = Nenhum link na árvore. Crie uma conexão do tipo Link.
+
+## Autocompletar (Ctrl+Espaço)
+
+autocompletar-sem-terminal = Abra um terminal para usar o autocompletar.
+autocompletar-filtro = Filtrar os comandos
+autocompletar-coluna-comando = Comando
+autocompletar-coluna-origem = Origem
+autocompletar-vazio = Nenhum comando para sugerir
+autocompletar-dica = Enter põe o comando na linha do terminal, sem executar. ↓ desce para a lista; Esc fecha.
+autocompletar-origem-tunel = Túnel { $escuta } → { $destino }
+autocompletar-origem-dinamico = Túnel dinâmico { $escuta }
+autocompletar-origem-da-aba = { $origem }, da aba { $aba }
+autocompletar-origem-shell = Histórico do { $shell }
+autocompletar-origem-escolhidos = Usado nesta conexão
+autocompletar-origem-envio = Barra de envio
+autocompletar-origem-ao-conectar = Comandos ao conectar

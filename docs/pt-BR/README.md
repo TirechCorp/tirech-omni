@@ -17,8 +17,8 @@ operado por assistentes de IA como o Claude Code, o Codex e o OpenCode.
   recentes. SSH com salto, proxy, agente, X11, túneis `-L`, `-R` e `-D` e keepalive; Telnet,
   serial e o shell local.
 - **Terminais** em abas e em grade (1, 2 × 2, 3 × 3), em várias janelas, com envio do que se
-  digita para vários terminais, sessão persistente no tmux ou no screen, log e comandos ao
-  conectar.
+  digita para vários terminais, sessão persistente no tmux ou no screen, log, comandos ao
+  conectar e autocompletar de comandos (Ctrl+Espaço).
 - **Cofre de senhas** cifrado, com gerador, senha mestra opcional, notas em Markdown com anexos
   e cópia para outra máquina num arquivo só. Importa e exporta o formato do Bitwarden e lê o
   CSV do KeePassXC.
@@ -28,8 +28,9 @@ operado por assistentes de IA como o Claude Code, o Codex e o OpenCode.
   `rclone`, com fila de transferências e edição de arquivos remotos.
 - **Redes de clientes**: OpenVPN, WireGuard, Tailscale, Nebula e ZeroTier embutidos, por pasta
   ou por conexão. Só o tráfego do app passa pela VPN, sem placa virtual e sem administrador, e
-  dois clientes com o mesmo IP convivem. Os links da árvore abrem num navegador só do cliente,
-  que sai pela rede dele.
+  dois clientes com o mesmo IP convivem; a Nebula passa pelos relays da rede atrás de CGNAT.
+  Os links da árvore abrem num navegador só do cliente, que sai pela rede dele, e o shell local
+  também sai por ela.
 - **Assistentes de IA**: um assistente do seu computador opera o app pelo MCP (abre conexões,
   lê a tela, digita, roda comandos), com permissões por conexão, aprovação e auditoria. O
   "Controlar com" abre o Claude Code, o Codex ou o OpenCode numa aba ligada a uma sessão. O app
@@ -39,7 +40,8 @@ operado por assistentes de IA como o Claude Code, o Codex e o OpenCode.
 - **Portas do servidor**: o que escuta no servidor, com um clique para encaminhar a porta ou
   abrir a página no navegador pelo canal SSH.
 - **Desempenho**: um medidor de CPU na barra de título e uma página como a do Gerenciador de
-  Tarefas, com o peso de cada terminal.
+  Tarefas, com o peso de cada terminal, e os processos e o disco deste computador ou do
+  servidor SSH, com filtro, árvore e encerrar.
 - Interface em **português, inglês e espanhol**.
 - Versão **portable** para o Windows, pacotes para **ARM**, bandeja do sistema e instalação no
   computador sem administrador.
@@ -61,17 +63,96 @@ Os pacotes ficam nas [Releases](https://github.com/TirechCorp/tirech-omni/releas
 
 | Pacote | Para |
 | --- | --- |
-| `tirech-omni-portable-windows.zip` | Windows 10 e 11 x64, portable: descompacte e rode o `tirech-omni.exe` |
-| `tirech-omni-portable-windows-arm64.zip` | Windows 11 ARM, portable |
-| `tirech-omni-linux-x64.tar.gz` | Linux x64 (glibc 2.35 ou mais nova: Ubuntu 22.04, Debian 12 e afins) |
-| `tirech-omni-linux-arm64.tar.gz` | Linux ARM de 64 bits (Raspberry Pi 4 e 5 com sistema de 64 bits e afins) |
-| `tirech-omni-linux-armv7.tar.gz` | Linux ARM de 32 bits (armhf) |
+| [`tirech-omni-portable-windows.zip`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-portable-windows.zip) | Windows 10 e 11 x64, portable: descompacte e rode o `tirech-omni.exe` |
+| [`tirech-omni-portable-windows-arm64.zip`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-portable-windows-arm64.zip) | Windows 11 ARM, portable |
+| [`tirech-omni-linux-x64.tar.gz`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-linux-x64.tar.gz) | Linux x64 (glibc 2.35 ou mais nova: Ubuntu 22.04, Debian 12 e afins) |
+| [`tirech-omni-linux-arm64.tar.gz`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-linux-arm64.tar.gz) | Linux ARM de 64 bits (Raspberry Pi 4 e 5 com sistema de 64 bits e afins) |
+| [`tirech-omni-linux-armv7.tar.gz`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-linux-armv7.tar.gz) | Linux ARM de 32 bits (armhf) |
+| [`tirech-omni-macos.dmg`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-macos.dmg) | macOS 11 ou mais novo, Apple Silicon e Intel (universal) |
 
 Cada pacote traz o app, as ferramentas de linha de comando (`tirech-omni-keygen`,
 `tirech-omni-agent`, `tirech-omni-add` e `tirech-omni-copy-id`) e o
-`THIRD-PARTY-NOTICES.txt`. O `SHA256SUMS.txt` da release confere os downloads
-(`sha256sum -c SHA256SUMS.txt --ignore-missing`). Para o macOS, por enquanto, compile a partir
-do código.
+`THIRD-PARTY-NOTICES.txt`; no macOS, as ferramentas ficam dentro do `.app`, em
+`Contents/MacOS`. O `SHA256SUMS.txt` da release confere os downloads.
+
+## Instalar
+
+### Windows
+
+1. Baixe o `tirech-omni-portable-windows.zip` (ou o `-arm64`, no Windows ARM) e descompacte.
+2. Abra o `tirech-omni.exe`, dentro da pasta `Tirech Omni`. O app não é assinado: se o
+   SmartScreen avisar, clique em **Mais informações ▸ Executar assim mesmo**.
+
+Assim ele roda **portable**: tudo o que grava fica na pasta `tirech-omnidata`, ao lado do
+`.exe`, e nada vai para o computador. Dá para levar a pasta num pendrive.
+
+Para **instalar**, apague (ou tire de lá) a pasta `tirech-omnidata`, abra o `tirech-omni.exe` e
+use Arquivo ▸ **Instalar no computador…**. O app se copia para
+`%LOCALAPPDATA%\Programs\Tirech Omni`, com as ferramentas de linha de comando, e cria os atalhos
+que você marcar (área de trabalho, menu Iniciar, abrir com o sistema, aparecer em Aplicativos
+instalados). Não pede administrador. Os dados ficam em `%APPDATA%\tirech-omni`.
+
+### Linux
+
+```sh
+# troque x64 por arm64 ou armv7, conforme a máquina
+curl -LO https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-linux-x64.tar.gz
+curl -LO https://github.com/TirechCorp/tirech-omni/releases/latest/download/SHA256SUMS.txt
+sha256sum -c SHA256SUMS.txt --ignore-missing
+tar -xzf tirech-omni-linux-x64.tar.gz
+./tirech-omni-linux-x64/tirech-omni
+```
+
+Com o app aberto, Arquivo ▸ **Instalar no computador…** copia os binários para `~/.local/bin`
+e cria o atalho no menu de aplicativos, na área de trabalho, na barra (no Cinnamon, no GNOME e
+no KDE) e o início com o sistema, conforme o que você marcar. Sem `sudo`. Para instalar à mão:
+
+```sh
+install -m 755 tirech-omni-linux-x64/tirech-omni* ~/.local/bin/
+```
+
+O `~/.local/bin` precisa estar no `PATH` para as ferramentas de linha de comando
+(`tirech-omni-keygen` e as outras); as distribuições comuns já o põem lá. Os dados ficam em
+`~/.config/tirech-omni`. No GNOME, o ícone da bandeja pede a extensão AppIndicator.
+
+### macOS
+
+1. Baixe o `tirech-omni-macos.dmg`, abra e arraste o **Tirech Omni** para **Aplicativos**.
+2. Abra o app. Ele não é assinado com uma conta de desenvolvedor da Apple, e na primeira vez o
+   macOS avisa que não pôde verificá-lo: feche o aviso, vá em **Ajustes do Sistema ▸
+   Privacidade e Segurança**, role até o fim e clique em **Abrir Mesmo Assim**. Das próximas
+   vezes, ele abre direto.
+
+Pelo Terminal, sem o aviso (o `curl` não marca o arquivo como baixado da internet):
+
+```sh
+curl -LO https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-macos.dmg
+curl -LO https://github.com/TirechCorp/tirech-omni/releases/latest/download/SHA256SUMS.txt
+shasum -a 256 -c SHA256SUMS.txt --ignore-missing
+hdiutil attach tirech-omni-macos.dmg
+cp -R "/Volumes/Tirech Omni/Tirech Omni.app" /Applications/
+hdiutil detach "/Volumes/Tirech Omni"
+```
+
+Arquivo ▸ **Instalar no computador…** copia o app para `~/Applications` e cria o atalho na área
+de trabalho, no Dock e o início com o sistema, conforme o que você marcar. As ferramentas de
+linha de comando ficam dentro do `.app`; para usá-las no Terminal:
+
+```sh
+echo 'export PATH="/Applications/Tirech Omni.app/Contents/MacOS:$PATH"' >> ~/.zprofile
+```
+
+Os dados ficam em `~/Library/Application Support/tirech-omni`.
+
+### Atualizar e desinstalar
+
+- **Atualizar:** baixe o pacote novo, abra o app dele e use Arquivo ▸ **Instalar no
+  computador…** de novo: a cópia instalada, se for diferente, é substituída. Na versão portable,
+  troque os `.exe` e mantenha a pasta `tirech-omnidata`. No macOS, arraste o app novo por cima do
+  antigo em Aplicativos. Os dados e as conexões ficam.
+- **Desinstalar:** Arquivo ▸ **Instalar no computador…** ▸ **Desinstalar…** remove a cópia e os
+  atalhos (no Windows, também pelo botão Desinstalar em Aplicativos instalados). Os dados só
+  saem se você marcar "Apagar também os meus dados". A versão portable sai apagando a pasta.
 
 ## Compilar
 
@@ -101,6 +182,7 @@ O workspace tem dois pacotes:
 | --- | --- |
 | `empacotar-portable.sh` | o zip portable do Windows, a partir de `cargo build --release --target x86_64-pc-windows-gnu -p tirech-omni -p tirech-omni-tools` |
 | `empacotar-arm.sh` | os pacotes do Linux ARM de 64 e 32 bits e o portable do Windows ARM, compilados pelo Docker num computador x86_64 |
+| `empacotar-mac.sh` | o `.dmg` do macOS, universal (Apple Silicon e Intel), compilado num Mac com as ferramentas de linha de comando da Apple; assina ad-hoc, ou com o Developer ID de `IDENTIDADE` (e notariza com o perfil de `PERFIL_NOTARIZACAO`) |
 
 ## Onde o app grava
 

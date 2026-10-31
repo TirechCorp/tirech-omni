@@ -166,6 +166,8 @@ pub(super) struct AvisoColar {
     severidade: InfoBarSeverity,
     titulo: String,
     texto: String,
+    /// A pasta que o botão "Abrir a pasta" abre, no aviso de um arquivo baixado.
+    pasta: Option<PathBuf>,
 }
 
 /// O estado do colar na tela.
@@ -1035,6 +1037,19 @@ impl Tela {
         titulo: String,
         texto: String,
     ) {
+        self.avisar_colar_com_pasta(janela, severidade, base, titulo, texto, None);
+    }
+
+    /// O [`Tela::avisar_colar`] com o botão "Abrir a pasta", que abre `pasta` no sistema.
+    pub(super) fn avisar_colar_com_pasta(
+        &self,
+        janela: WindowHandle,
+        severidade: InfoBarSeverity,
+        base: &str,
+        titulo: String,
+        texto: String,
+        pasta: Option<PathBuf>,
+    ) {
         let id = self.colar.proximo_aviso.get() + 1;
         self.colar.proximo_aviso.set(id);
         let iguais = self.colar.avisos.with_untracked(|avisos| {
@@ -1056,6 +1071,7 @@ impl Tela {
                 severidade,
                 titulo,
                 texto,
+                pasta,
             });
         });
     }
@@ -1654,6 +1670,7 @@ pub(super) fn barras(tela: &Rc<Tela>, janela: Janela) -> impl View + use<> {
     let handle = janela.handle;
     let (versao, avisos) = (tela.colar.versao, tela.colar.avisos);
     let (da_lista, da_barra) = (Rc::clone(tela), Rc::clone(tela));
+    let eu = Rc::downgrade(tela);
     Column::new()
         .gap(4)
         .child(For::each(
@@ -1682,11 +1699,33 @@ pub(super) fn barras(tela: &Rc<Tela>, janela: Janela) -> impl View + use<> {
             |a: &AvisoColar| a.id,
             move |a: AvisoColar| {
                 let id = a.id;
-                InfoBar::new(a.severidade)
+                let barra = InfoBar::new(a.severidade)
                     .id(a.widget)
                     .title(a.titulo)
                     .message(a.texto)
-                    .on_close(move || avisos.update(|l| l.retain(|x| x.id != id)))
+                    .on_close(move || avisos.update(|l| l.retain(|x| x.id != id)));
+                let Some(pasta) = a.pasta else {
+                    return barra;
+                };
+                let eu = eu.clone();
+                barra.action(t!("baixar-abrir-pasta"), move || {
+                    let Err(erro) = crate::ferramentas::abrir_pasta(&pasta) else {
+                        return;
+                    };
+                    if let Some(tela) = eu.upgrade() {
+                        tela.avisar_colar(
+                            handle,
+                            InfoBarSeverity::Warning,
+                            "baixar-aviso",
+                            t!("baixar-erro-titulo"),
+                            t!(
+                                "baixar-abrir-pasta-erro",
+                                pasta = pasta.display().to_string(),
+                                motivo = erro.to_string()
+                            ),
+                        );
+                    }
+                })
             },
         ))
 }

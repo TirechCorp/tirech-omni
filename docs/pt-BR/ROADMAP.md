@@ -6,6 +6,15 @@ O que está planejado, sem data e sem ordem de prioridade. Um item aqui não é 
 quiser ajudar em algum, abra uma issue antes para combinar a abordagem
 ([CONTRIBUTING](CONTRIBUTING.md)).
 
+## Qualquer programa do shell local pela VPN
+
+Hoje o shell local sai pela rede do cliente só para quem usa proxy (as variáveis `ALL_PROXY` e
+`HTTP_PROXY`) ou por um túnel local. Para valer para qualquer programa, sem configurar nada, a
+aba precisaria da própria pilha de rede: um *network namespace* com uma placa `tun` ligada à VPN
+embutida (no Linux), ou um adaptador virtual por aba no Windows e no macOS. Isso pede
+privilégios (`CAP_NET_ADMIN`, um ajudante instalado com permissão ou um driver), que o app hoje
+não precisa, e por isso fica para algum dia.
+
 ## Interface em mais idiomas
 
 Hoje a interface está em português (Brasil), inglês e espanhol. Para chegar à maioria dos

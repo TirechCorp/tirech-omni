@@ -56,6 +56,8 @@ pub enum Campo {
     Mouse,
     /// Sessão › Tentar de novo após (a rodada nova de reconexão).
     Reconectar,
+    /// Sessão › Fechar sem uso após.
+    Ocioso,
     /// Sessão › Programa, Argumentos e Pasta inicial do shell local.
     Programa,
     /// A categoria Colar no terminal.
@@ -64,8 +66,11 @@ pub enum Campo {
     Arquivos,
     /// A categoria Comandos ao conectar.
     Comandos,
-    /// A categoria Encaminhamento.
+    /// A categoria Encaminhamento e a linha Túneis: no shell local, os túneis locais e dinâmicos
+    /// saem pela rede da conexão.
     Encaminhamento,
+    /// Encaminhamento › Encaminhar X11, Só túneis e Parar se túnel falhar: só o SSH.
+    EncaminhamentoSsh,
     /// A categoria Jump server.
     Salto,
     /// O endereço do link.
@@ -74,7 +79,7 @@ pub enum Campo {
 
 impl Campo {
     /// Todos os campos, na ordem da grade.
-    pub const TODOS: [Campo; 25] = [
+    pub const TODOS: [Campo; 27] = [
         Campo::Url,
         Campo::Host,
         Campo::Porta,
@@ -94,11 +99,13 @@ impl Campo {
         Campo::Persistente,
         Campo::Mouse,
         Campo::Reconectar,
+        Campo::Ocioso,
         Campo::Programa,
         Campo::Colar,
         Campo::Arquivos,
         Campo::Comandos,
         Campo::Encaminhamento,
+        Campo::EncaminhamentoSsh,
         Campo::Salto,
     ];
 
@@ -122,6 +129,7 @@ impl Campo {
                     | Kind::Ftp
                     | Kind::S3
                     | Kind::Rclone
+                    | Kind::Local
                     | Kind::Telnet
                     | Kind::Link
             ),
@@ -140,10 +148,12 @@ impl Campo {
             Campo::S3 => matches!(tipo, Kind::S3),
             Campo::Rclone => matches!(tipo, Kind::Rclone),
             Campo::Ftp => matches!(tipo, Kind::Ftp),
-            Campo::TipoDeTerminal | Campo::Persistente | Campo::Colar | Campo::Encaminhamento => {
-                matches!(tipo, Kind::Ssh)
-            }
-            Campo::Log | Campo::Comandos | Campo::Mouse => {
+            Campo::TipoDeTerminal
+            | Campo::Persistente
+            | Campo::Colar
+            | Campo::EncaminhamentoSsh => matches!(tipo, Kind::Ssh),
+            Campo::Encaminhamento => matches!(tipo, Kind::Ssh | Kind::Local),
+            Campo::Log | Campo::Comandos | Campo::Mouse | Campo::Ocioso => {
                 matches!(tipo, Kind::Ssh | Kind::Local | Kind::Telnet)
             }
             Campo::Reconectar => matches!(tipo, Kind::Ssh | Kind::Telnet),
@@ -164,7 +174,7 @@ mod testes {
 
     /// A tabela por extenso, na ordem de `Kind::TODOS`: Ssh, Sftp, Ftp, S3, Rclone, Local, Telnet,
     /// Link. Mudar a tabela exige mudar este teste.
-    const TABELA: [(Campo, [bool; 8]); 25] = [
+    const TABELA: [(Campo, [bool; 8]); 27] = [
         (
             Campo::Url,
             [false, false, false, false, false, false, false, true],
@@ -191,7 +201,7 @@ mod testes {
         ),
         (
             Campo::Rede,
-            [true, true, true, true, true, false, true, true],
+            [true, true, true, true, true, true, true, true],
         ),
         (
             Campo::Ia,
@@ -242,6 +252,10 @@ mod testes {
             [true, false, false, false, false, false, true, false],
         ),
         (
+            Campo::Ocioso,
+            [true, false, false, false, false, true, true, false],
+        ),
+        (
             Campo::Programa,
             [false, false, false, false, false, true, false, false],
         ),
@@ -259,6 +273,10 @@ mod testes {
         ),
         (
             Campo::Encaminhamento,
+            [true, false, false, false, false, true, false, false],
+        ),
+        (
+            Campo::EncaminhamentoSsh,
             [true, false, false, false, false, false, false, false],
         ),
         (
@@ -309,6 +327,7 @@ mod testes {
             assert_eq!(Campo::Comandos.vale(tipo), tem_terminal(tipo), "{tipo:?}");
             assert_eq!(Campo::Mouse.vale(tipo), tem_terminal(tipo), "{tipo:?}");
             assert_eq!(Campo::Log.vale(tipo), tem_terminal(tipo), "{tipo:?}");
+            assert_eq!(Campo::Ocioso.vale(tipo), tem_terminal(tipo), "{tipo:?}");
             assert_eq!(Campo::Programa.vale(tipo), tipo == Kind::Local, "{tipo:?}");
         }
     }

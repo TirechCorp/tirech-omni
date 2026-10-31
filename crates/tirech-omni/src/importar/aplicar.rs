@@ -384,6 +384,11 @@ pub fn aplicar(
         for t in importacao.conexoes_mut() {
             t.conexao.chave_do_cofre = None;
         }
+        for entrada in &mut importacao.entradas {
+            if let Entrada::Pasta(p) = entrada {
+                p.chave_do_cofre = None;
+            }
+        }
     }
 
     let raiz = (!nome_destino.is_empty()).then(|| garantir_grupo(arvore, None, nome_destino).0);
@@ -404,7 +409,10 @@ pub fn aplicar(
                         g.persistente = p.persistente;
                         g.mouse = p.mouse;
                         g.retentar = p.retentar;
+                        g.ocioso = p.ocioso;
                         g.credencial_modo = p.credencial_modo;
+                        g.key_file = p.key_file;
+                        g.chave_do_cofre = p.chave_do_cofre;
                     }
                 }
             }

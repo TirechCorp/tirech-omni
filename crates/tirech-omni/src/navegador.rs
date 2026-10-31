@@ -129,7 +129,7 @@ fn candidatos() -> Vec<PathBuf> {
 }
 
 /// `programa` numa das pastas do `PATH` (no Windows, também com `.exe`).
-fn no_path(programa: &str) -> Option<PathBuf> {
+pub fn no_path(programa: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path).find_map(|pasta| {
         let exato = pasta.join(programa);

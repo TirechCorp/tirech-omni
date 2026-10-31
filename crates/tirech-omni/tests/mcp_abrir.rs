@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use tirech_omni::abrir::Senhas;
+use tirech_omni::configuracoes::AbrirAbaIa;
 use tirech_omni::mcp::permissao::PermissaoIa;
 use tirech_omni::modelo::{Connection, Kind, Node, Tree};
 use tomni_ui::terminal::Session;
@@ -137,4 +138,102 @@ fn pasta_livre_libera_as_de_dentro() {
     );
     assert!(!digitou.e_erro(), "{}", digitou.texto());
     assert!(!m.app.visible("mcp-aprovar"), "Livre não pergunta");
+}
+
+// ---------------------------------------------------------------------------------------
+// "Abrir abas novas": Bloquear, Perguntar e a licença da sessão.
+// ---------------------------------------------------------------------------------------
+
+/// Uma pasta `Livre` com a escolha `abrir` e uma conexão local dentro (id 2).
+fn pasta_livre_que(abrir: AbrirAbaIa) -> Tree {
+    let mut tree = Tree::default();
+    let pasta_id = tree.add_group(None, "Livres");
+    if let Some(Node::Group(g)) = tree.find_mut(pasta_id) {
+        g.mcp = PermissaoIa::Livre;
+        g.mcp_abrir = Some(abrir);
+    }
+    tree.add_connection(Some(pasta_id), Connection::new("dentro", Kind::Local));
+    tree
+}
+
+#[test]
+fn abrir_abas_bloqueado_recusa_mesmo_no_livre() {
+    let (_pasta, mut m, endereco) = tela(
+        "mcp-abrir-bloqueado",
+        &pasta_livre_que(AbrirAbaIa::Bloquear),
+    );
+    let mut ia = Assistente::ligar(&mut m.app, &endereco, "Teste");
+    let r = ia.chamar(&mut m.app, "abrir_conexao", json!({ "conexao": 2 }));
+    assert!(r.e_erro());
+    assert!(r.texto().contains("listar_abas"), "{}", r.texto());
+    assert!(Session::find("2-1").is_none());
+    assert!(!m.app.visible("mcp-aprovar"));
+}
+
+#[test]
+fn abrir_abas_perguntar_com_licenca_abre_as_proximas_da_sessao() {
+    let (_pasta, mut m, endereco) =
+        tela("mcp-abrir-licenca", &pasta_livre_que(AbrirAbaIa::Perguntar));
+    let mut ia = Assistente::ligar(&mut m.app, &endereco, "Teste");
+
+    // A primeira pergunta, mesmo no Livre, e oferece a licença (1 hora, o padrão).
+    let id = ia.pedir("abrir_conexao", json!({ "conexao": 2 }));
+    esperar(
+        &mut m.app,
+        |a| a.visible("mcp-aprovar"),
+        "o diálogo não abriu",
+    );
+    assert!(Session::find("2-1").is_none(), "nada abre antes de aprovar");
+    assert!(m.app.visible("mcp-aprovar-abrir-auto"));
+    assert!(!m.app.visible("mcp-aprovar-sessao"));
+    m.app.click("mcp-aprovar-abrir-auto");
+    m.app.click("mcp-aprovar-secondary");
+    assert!(!ia.resposta(&mut m.app, id).e_erro());
+    assert!(Session::find("2-1").is_some());
+
+    // A segunda, da mesma sessão, abre sem perguntar.
+    let r = ia.chamar(&mut m.app, "abrir_conexao", json!({ "conexao": 2 }));
+    assert!(!r.e_erro(), "{}", r.texto());
+    assert!(!m.app.visible("mcp-aprovar"));
+    assert!(Session::find("2-2").is_some());
+
+    // Outra sessão não tem a licença.
+    let mut outra = Assistente::ligar(&mut m.app, &endereco, "Outra");
+    let id = outra.pedir("abrir_conexao", json!({ "conexao": 2 }));
+    esperar(
+        &mut m.app,
+        |a| a.visible("mcp-aprovar"),
+        "a outra sessão não perguntou",
+    );
+    m.app.click("mcp-aprovar-primary");
+    assert!(outra.resposta(&mut m.app, id).e_erro());
+    assert!(Session::find("2-3").is_none());
+}
+
+#[test]
+fn abrir_abas_perguntar_sem_licenca_pergunta_cada_vez() {
+    let tree = pasta_livre_que(AbrirAbaIa::Perguntar);
+    let pasta = Pasta::nova("mcp-abrir-sem-licenca");
+    pasta.semear(&tree);
+    pasta.configurar("ia", "mcp_ligado", json!(true));
+    pasta.configurar("ia", "mcp_abrir_auto", json!("desligado"));
+    let endereco = pasta.0.join("mcp.sock");
+    let mut m = montar(&pasta, Theme::Light);
+    let mut ia = Assistente::ligar(&mut m.app, &endereco, "Teste");
+
+    for vez in 1..=2 {
+        let id = ia.pedir("abrir_conexao", json!({ "conexao": 2 }));
+        esperar(
+            &mut m.app,
+            |a| a.visible("mcp-aprovar"),
+            "o diálogo não abriu",
+        );
+        assert!(
+            !m.app.visible("mcp-aprovar-abrir-auto"),
+            "Desligado esconde a caixa"
+        );
+        m.app.click("mcp-aprovar-secondary");
+        assert!(!ia.resposta(&mut m.app, id).e_erro());
+        assert!(Session::find(&format!("2-{vez}")).is_some());
+    }
 }

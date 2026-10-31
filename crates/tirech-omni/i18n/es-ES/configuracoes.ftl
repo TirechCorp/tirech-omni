@@ -289,6 +289,10 @@ config-conexoes-reconectar-retentar_mins = Reintentar tras (minutos)
     .descricao = Cuando se acaban los intentos, espera estos minutos y empieza otra ronda, hasta que la conexión vuelva; 0 lo desactiva (de 0 a 1440). Cada conexión o carpeta puede elegir otro tiempo en sus propiedades.
     .palavras = reconectar otra vez ronda pausa minutos insistir
 
+config-conexoes-ocioso_mins = Cerrar la pestaña sin uso tras (minutos)
+    .descricao = Cierra la pestaña de terminal que pasó estos minutos sin nada escrito, pegado o enviado por un asistente; 0 lo desactiva (de 0 a 1440). La sesión persistente (tmux o screen) sigue en el servidor. Cada conexión o carpeta puede elegir otro tiempo en sus propiedades.
+    .palavras = inactivo ocioso parado sin uso cerrar pestaña tiempo límite timeout minutos
+
 config-conexoes-abrir_em = Abrir conexión en
     .descricao = Dónde abre el doble clic en el árbol, en el Inicio y en la búsqueda.
     .palavras = ventana panel pestana
@@ -719,6 +723,14 @@ config-ia-espera_resposta = Esperar la respuesta durante
 config-ia-mcp_ligado = Dejar que los asistentes controlen la aplicación
     .descricao = Claude Code y Codex pasan a ver y usar las conexiones que permitas, por MCP. Tirech Omni tiene que estar abierto.
     .palavras = mcp asistente ia ai claude codex controlar activar
+
+config-ia-mcp_abrir = Abrir pestañas nuevas
+    .descricao = Si un asistente puede abrir una pestaña nueva de una conexión (abrir la conexión, iniciar un túnel o usar un espacio de trabajo). Cada conexión y carpeta puede elegir otra cosa en sus propiedades. Reconectar una pestaña que se cayó no cuenta.
+    .palavras = mcp asistente pestaña nueva abrir conexión preguntar bloquear permitir
+
+config-ia-mcp_abrir_auto = Abrir sin preguntar tras aprobar
+    .descricao = Cuando una pestaña nueva pide tu aprobación, el diálogo puede dejar que las próximas pestañas nuevas de la misma sesión se abran durante este tiempo. Desactivado pregunta siempre; Abrir siempre dura hasta que la sesión termine.
+    .palavras = mcp asistente pestaña nueva abrir automático tiempo sesión aprobar
 
 config-ia-bloqueio_extras = Comandos que siempre piden aprobación
     .descricao = Uno por línea: el nombre de un programa o, con re: al principio, una expresión regular. Se suman a la lista de bloqueo de la aplicación, incluso con la conexión en Libre.
@@ -1154,6 +1166,7 @@ atalho-fechar-caidas = Cerrar las pestañas caídas
 atalho-fechar-todas = Cerrar todas las pestañas
 atalho-cofre = Abrir la bóveda
 atalho-notas = Abrir las notas
+atalho-autocompletar = Autocompletar comando
 atalho-ia-comando = Generar comando con IA
 atalho-ia-chat = Abrir o cerrar el chat con la IA
 atalho-ia-abrir = Abrir el asistente de IA en el servidor
@@ -1194,6 +1207,22 @@ opcao-assistente-opencode = OpenCode
 opcao-abrir-ia-aba-nova = En una pestaña nueva
 opcao-abrir-ia-painel-livre = En un panel libre
 opcao-abrir-ia-nesta-aba = En esta pestaña
+
+# AbrirAbaIa
+opcao-mcp-abrir-permitir = Permitir
+opcao-mcp-abrir-perguntar = Preguntar
+opcao-mcp-abrir-bloquear = Bloquear
+
+# AbrirAbaAuto
+opcao-mcp-abrir-auto-desligado = Desactivado
+opcao-mcp-abrir-auto-15m = 15 minutos
+opcao-mcp-abrir-auto-30m = 30 minutos
+opcao-mcp-abrir-auto-1h = 1 hora
+opcao-mcp-abrir-auto-4h = 4 horas
+opcao-mcp-abrir-auto-8h = 8 horas
+opcao-mcp-abrir-auto-12h = 12 horas
+opcao-mcp-abrir-auto-24h = 24 horas
+opcao-mcp-abrir-auto-sempre = Abrir siempre
 
 # MetodoIa
 opcao-metodo-ia-automatico = Automático

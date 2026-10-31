@@ -1244,7 +1244,23 @@ impl Opener for RealOpener {
                 {
                     processo = processo.env("SSH_AUTH_SOCK", socket);
                 }
-                Session::new(processo.spawn())
+                let rede = crate::shell_na_rede::preparar(
+                    &self.proxies,
+                    &self.pasta.borrow(),
+                    &conexao.tuneis,
+                    senhas.rede,
+                );
+                for (nome, valor) in &rede.ambiente {
+                    processo = processo.env(nome, valor);
+                }
+                let sessao = Session::new(processo.spawn());
+                for aviso in &rede.avisos {
+                    sessao.feed(format!("{aviso}\r\n").as_bytes());
+                }
+                if !rede.portas.is_empty() {
+                    sessao.hold(rede.portas);
+                }
+                sessao
             }
             Kind::Telnet => Session::new(telnet(conexao, &senhas)),
             // O FTP não abre terminal: a tela leva a conexão à página Arquivos. O link abre no

@@ -70,7 +70,7 @@ fn abrir_editor(app: &mut TestApp, id: u64) {
 }
 
 #[test]
-fn a_categoria_encaminhamento_so_vale_no_ssh() {
+fn a_categoria_encaminhamento_vale_no_ssh_e_os_tuneis_tambem_no_shell_local() {
     let (_pasta, mut m) = tela("tuneis-categoria", &arvore());
     m.app.click("arvore-1");
     let props = m.app.properties("props");
@@ -89,10 +89,17 @@ fn a_categoria_encaminhamento_so_vale_no_ssh() {
     }
     m.app.click("arvore-3");
     let local = m.app.properties("props");
-    for nome in ["Encaminhar X11", "Túneis", "Só túneis (sem shell)"] {
+    for nome in [
+        "Encaminhar X11",
+        "Só túneis (sem shell)",
+        "Parar se túnel falhar",
+    ] {
         let p = local.iter().find(|p| p.name == nome).unwrap();
         assert!(p.hidden, "{nome} não vale no shell local");
     }
+    // No shell local, os túneis escutam aqui e saem pela rede da conexão.
+    let tuneis = local.iter().find(|p| p.name == "Túneis").unwrap();
+    assert!(!tuneis.hidden, "Túneis vale no shell local");
     encerrar();
 }
 
@@ -149,23 +156,50 @@ fn adicionar_editar_e_remover_gravam_na_arvore() {
 }
 
 #[test]
-fn o_menu_da_arvore_so_tem_os_itens_de_x11_e_tuneis_no_ssh() {
+fn o_menu_da_arvore_so_tem_os_itens_de_x11_no_ssh_e_os_tuneis_tambem_no_shell_local() {
     let (_pasta, mut m) = tela("tuneis-menu", &arvore());
     m.app.context_menu("arvore-1");
     for item in ["virt-manager", "executar", "tuneis"] {
         assert!(m.app.visible(&format!("menu-1-{item}")), "{item} no SSH");
     }
     m.app.key(tomni_ui::Key::Escape);
-    for id in [2, 3] {
+    for (id, tuneis) in [(2, false), (3, true)] {
         m.app.context_menu(&format!("arvore-{id}"));
-        for item in ["virt-manager", "virt-manager-local", "executar", "tuneis"] {
+        for item in ["virt-manager", "virt-manager-local", "executar"] {
             assert!(
                 !m.app.visible(&format!("menu-{id}-{item}")),
                 "{item} em {id}"
             );
         }
+        assert_eq!(m.app.visible(&format!("menu-{id}-tuneis")), tuneis, "{id}");
         m.app.key(tomni_ui::Key::Escape);
     }
+    encerrar();
+}
+
+#[test]
+fn no_shell_local_o_editor_so_oferece_o_tunel_local_e_o_dinamico() {
+    let (pasta, mut m) = tela("tuneis-shell", &arvore());
+    abrir_editor(&mut m.app, 3);
+    m.app.click("tuneis-adicionar");
+    assert!(!m.app.visible("tunel-tipo"));
+    assert!(m.app.visible("tunel-tipo-shell"));
+    m.app
+        .select("tunel-tipo-shell", &TipoTunel::Dinamico.nome());
+    assert!(
+        !m.app.visible("tunel-destino"),
+        "o dinâmico não tem destino"
+    );
+    m.app.select("tunel-tipo-shell", &TipoTunel::Local.nome());
+    // O relé da web é da lista dos túneis ativos do SSH.
+    assert!(!m.app.visible("tunel-opcoes-web"));
+    assert!(!m.app.visible("tunel-caminho-web"));
+    m.app.set_value("tunel-porta", 13389.0);
+    m.app.click("tunel-destino").type_text("10.0.0.5:3389");
+    m.app.click("tunel-salvar");
+    let salvos = gravados(&pasta, 3);
+    assert_eq!(salvos.len(), 1);
+    assert_eq!(salvos[0].destino(), "10.0.0.5:3389");
     encerrar();
 }
 

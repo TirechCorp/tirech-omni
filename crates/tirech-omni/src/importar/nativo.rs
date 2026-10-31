@@ -146,7 +146,10 @@ fn andar(
                     persistente: g.persistente,
                     mouse: g.mouse,
                     retentar: g.retentar,
+                    ocioso: g.ocioso,
                     credencial_modo: g.credencial_modo,
+                    key_file: g.key_file.clone(),
+                    chave_do_cofre: g.chave_do_cofre.clone().filter(|_| com_cofre),
                 }));
                 andar(arvore, &g.children, caminho, com_cofre, importacao);
                 caminho.pop();
@@ -237,6 +240,35 @@ mod testes {
         assert_eq!(perfil.perfil.id, 0);
         assert_eq!(perfil.perfil.proxy.as_ref().unwrap().credencial, None);
         assert_eq!(c[1].conexao.rede, Rede::Herdar);
+    }
+
+    #[test]
+    fn a_chave_da_pasta_vai_junto_e_a_do_cofre_so_com_o_cofre() {
+        let mut t = arvore();
+        let id = (1..10)
+            .find(|&id| matches!(t.find(id), Some(Node::Group(_))))
+            .unwrap();
+        if let Some(Node::Group(g)) = t.find_mut(id) {
+            g.key_file = Some(PathBuf::from("/chaves/clientes"));
+            g.chave_do_cofre = Some("uid-x".to_owned());
+        }
+        let pasta = |i: &Importacao| {
+            i.entradas.iter().find_map(|e| match e {
+                Entrada::Pasta(p) => Some((p.key_file.clone(), p.chave_do_cofre.clone())),
+                Entrada::Conexao(_) => None,
+            })
+        };
+        let i = Nativo
+            .analisar(&serde_json::to_string(&t).unwrap(), None)
+            .unwrap();
+        assert_eq!(
+            pasta(&i),
+            Some((Some(PathBuf::from("/chaves/clientes")), None))
+        );
+        let mut valor = serde_json::to_value(&t).unwrap();
+        valor["cofre"] = documento();
+        let i = Nativo.analisar(&valor.to_string(), None).unwrap();
+        assert_eq!(pasta(&i).unwrap().1.as_deref(), Some("uid-x"));
     }
 
     #[test]

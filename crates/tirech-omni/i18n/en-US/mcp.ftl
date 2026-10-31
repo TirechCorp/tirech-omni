@@ -165,6 +165,9 @@ mcp-aprovar-contexto = { $assistente } on { $conexao } ({ $destino })
 mcp-aprovar-invisiveis = The text has control or invisible characters, which the field shows as marks.
 mcp-aprovar-perigo = Careful: this command { $motivo }.
 mcp-aprovar-sessao = Allow the rest of this session on this tab
+mcp-aprovar-abre-aba = To do this, it opens a new tab of the connection.
+mcp-aprovar-abrir-auto = Open this session's new tabs without asking, for { $tempo }
+mcp-aprovar-abrir-auto-sempre = Open this session's new tabs without asking, until it ends
 mcp-aprovar-motivo-dica = If you refuse, tell the AI why (optional)
 mcp-recusar = Refuse
 mcp-permitir = Allow
@@ -269,6 +272,11 @@ mcp-perm-desligada = Off
 mcp-perm-so-ler = Read only
 mcp-perm-aprovar = Ask first
 mcp-perm-livre = Free
+mcp-abrir-linha = Open new tabs
+mcp-abrir-linha-descricao = Whether an assistant can open a new tab of this connection through MCP (open the connection, start a tunnel with no tab open or use a workspace). Allow follows the permission above; Ask asks for your approval on each new tab, even in Free; Block lets the assistant use only the tabs you open. Reconnecting a tab that dropped does not count.
+mcp-abrir-linha-descricao-pasta = Whether an assistant can open new tabs of the connections in this folder that did not choose something else. Inherit follows the folder above and, with no folder choosing, Settings › Assistants (MCP).
+mcp-abrir-herdar-de = Inherit ({ $escolha })
+mcp-abrir-aba-fechou = The tab the request was going to use closed, and opening a new tab of this connection needs the person's approval. Ask again.
 mcp-arvore-menu = Assistants (MCP)
 
 # The workspace (slice 6): the dialog, the list and the files panel.

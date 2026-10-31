@@ -241,7 +241,7 @@ impl Tela {
 
     /// Seleciona `caminho` na lista e abre. Vai para a página Logs.
     pub(super) fn mostrar_log(&self, caminho: &Path) {
-        self.pagina.set("logs".to_owned());
+        self.ir_para("logs");
         self.atualizar_logs();
         let e = &self.logs_pagina;
         e.filtro.set(String::new());
@@ -904,8 +904,8 @@ impl Tela {
     }
 }
 
-/// A página Logs.
-pub(super) fn pagina(tela: &Rc<Tela>) -> impl View + use<> {
+/// A página Logs, na janela que mostra a página `pagina_atual`.
+pub(super) fn pagina(tela: &Rc<Tela>, pagina_atual: Signal<String>) -> impl View + use<> {
     let e = &tela.logs_pagina;
     let (filtro, entradas, linhas, escolhidos) = (e.filtro, e.entradas, e.linhas, e.escolhidos);
     let (texto, quebrar, trancado, aviso, cauda) =
@@ -913,7 +913,6 @@ pub(super) fn pagina(tela: &Rc<Tela>) -> impl View + use<> {
     let (busca_aberta, busca, diferenciar) = (e.busca_aberta, e.busca, e.diferenciar);
     let (acertos, atual, marcas) = (e.acertos, e.atual, e.marcas);
     let (apagar_aberto, apagar_texto) = (e.apagar_aberto, e.apagar_texto);
-    let pagina_atual = tela.pagina;
 
     // A lista se refaz ao abrir a página.
     {

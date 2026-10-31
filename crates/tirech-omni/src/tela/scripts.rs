@@ -191,7 +191,7 @@ impl Tela {
         self.scripts
             .escolhidos
             .set(previas.iter().map(u64::to_string).collect());
-        self.pagina.set("scripts".to_owned());
+        self.ir_para("scripts");
     }
 
     /// "Rodar script…" do menu Ferramentas: a seleção da árvore, se houver, vem escolhida.

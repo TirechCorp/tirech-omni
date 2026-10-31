@@ -1,9 +1,10 @@
 //! A herança do modo da credencial pela pasta: uma pasta pode dizer que as conexões SSH e SFTP
 //! de dentro entram pelo agente SSH (ou perguntam a senha, ou tentam o agente e depois a senha),
-//! e cada conexão que deixou "Herdar" segue a pasta mais próxima que decidiu. A parte pura; a
-//! linha das propriedades mora em `tela/credencial.rs`.
+//! e cada conexão que deixou "Herdar" segue a pasta mais próxima que decidiu. A chave privada
+//! também: a conexão sem chave própria (nem do cofre, nem em arquivo) usa a da pasta mais
+//! próxima que tem uma. A parte pura; as linhas das propriedades moram em `tela/credencial.rs`.
 
-use crate::modelo::{ModoCredencial, Node, Tree};
+use crate::modelo::{Group, ModoCredencial, Node, Tree};
 use crate::t;
 
 /// O que uma escolha decide: `None` segue subindo.
@@ -22,6 +23,27 @@ pub fn herdado(tree: &Tree, no: u64) -> Option<(&str, ModoCredencial)> {
         }
     }
     None
+}
+
+/// A pasta mais próxima do item `no`, subindo a partir da de cima, que tem uma chave privada
+/// (do cofre ou em arquivo). `None` se nenhuma tem.
+pub fn chave_herdada(tree: &Tree, no: u64) -> Option<&Group> {
+    tree.ancestors(no)
+        .into_iter()
+        .rev()
+        .find_map(|grupo| match tree.find(grupo) {
+            Some(Node::Group(g)) if g.key_file.is_some() || g.chave_do_cofre.is_some() => Some(g),
+            _ => None,
+        })
+}
+
+/// O texto da opção sem chave da linha "Chave do cofre" do item `no`: "Herdar (pasta)" quando
+/// uma pasta de cima tem chave, "Nenhuma" quando não.
+pub fn rotulo_sem_chave(tree: &Tree, no: u64) -> String {
+    match chave_herdada(tree, no) {
+        Some(g) => t!("comum-credencial-herdar-de", nome = g.name.as_str()),
+        None => t!("comum-nenhuma"),
+    }
 }
 
 /// O modo que vale na conexão `conexao`: o dela ou, com "Herdar", o da pasta; sem nenhuma pasta
@@ -117,6 +139,43 @@ mod testes {
         let ftp = tree.add_connection(Some(cliente), Connection::new("ftp", Kind::Ftp));
         let aberta = tree.conexao_para_abrir(ftp).unwrap();
         assert_eq!(aberta.modo_da_credencial(), ModoCredencial::Perguntar);
+    }
+
+    #[test]
+    fn a_conexao_sem_chave_usa_a_da_pasta_mais_proxima_que_tem_uma() {
+        let mut tree = Tree::default();
+        let cliente = pasta_com(&mut tree, None, "Cliente", ModoCredencial::Herdar);
+        let prod = pasta_com(&mut tree, Some(cliente), "Prod", ModoCredencial::Herdar);
+        if let Some(Node::Group(g)) = tree.find_mut(cliente) {
+            g.key_file = Some("/chaves/cliente".into());
+        }
+        let web = tree.add_connection(Some(prod), Connection::new("web", Kind::Ssh));
+        let aberta = tree.conexao_para_abrir(web).unwrap();
+        assert_eq!(aberta.key_file.as_deref(), Some("/chaves/cliente".as_ref()));
+        assert_eq!(aberta.chave_do_cofre, None);
+        assert!(rotulo_sem_chave(&tree, web).contains("Cliente"));
+        // Na conexão gravada, nada muda: a herança só vale ao abrir.
+        assert_eq!(tree.connection(web).unwrap().key_file, None);
+
+        // A pasta mais perto ganha, com a chave do cofre dela.
+        if let Some(Node::Group(g)) = tree.find_mut(prod) {
+            g.chave_do_cofre = Some("uid-prod".into());
+        }
+        let aberta = tree.conexao_para_abrir(web).unwrap();
+        assert_eq!(aberta.chave_do_cofre.as_deref(), Some("uid-prod"));
+        assert_eq!(aberta.key_file, None);
+
+        // A chave da própria conexão vence a da pasta.
+        let mut propria = Connection::new("db", Kind::Ssh);
+        propria.key_file = Some("/chaves/db".into());
+        let db = tree.add_connection(Some(prod), propria);
+        let aberta = tree.conexao_para_abrir(db).unwrap();
+        assert_eq!(aberta.key_file.as_deref(), Some("/chaves/db".as_ref()));
+        assert_eq!(aberta.chave_do_cofre, None);
+
+        let solta = tree.add_connection(None, Connection::new("solta", Kind::Ssh));
+        assert!(chave_herdada(&tree, solta).is_none());
+        assert_eq!(rotulo_sem_chave(&tree, solta), t!("comum-nenhuma"));
     }
 
     #[test]

@@ -375,7 +375,7 @@ impl Tela {
     /// Abre o chat na conversa da aba de `sessao` e põe o foco na caixa de pergunta.
     pub(super) fn abrir_chat_da(&self, sessao: Session) {
         self.mostrar_conversa(sessao);
-        self.pagina.set(paineis::TERMINAIS.to_owned());
+        self.ir_para(paineis::TERMINAIS);
         // `show` leva o foco para o painel; com ele já aberto, o foco fica onde está.
         if !self.paineis_terminais.controle.is_open(PAINEL_DO_CHAT) {
             self.paineis_terminais.controle.show(PAINEL_DO_CHAT);

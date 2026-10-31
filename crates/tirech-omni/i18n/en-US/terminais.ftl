@@ -106,6 +106,9 @@ tuneis-ajuda-dinamico = A SOCKS5 proxy here: point the browser at this port and 
 tuneis-ajuda-socket = With a port, the socket becomes that port here; without one, a Unix socket here (a blank path is automatic).
 tuneis-destino-visto-da-maquina = Destination (host:port, as seen from this machine)
 tuneis-destino-visto-do-servidor = Destination (host:port, as seen from the server)
+tuneis-destino-visto-da-rede = Destination (host:port, as seen through the connection's network)
+tuneis-ajuda-local-shell = The port here leads to the destination through the connection's network: the profile, or direct.
+tuneis-ajuda-dinamico-shell = A SOCKS5 and HTTP proxy here: programs that use it go out through the connection's network.
 tuneis-adicionar-um-tunel = Add a tunnel
 tuneis-tuneis-de = Tunnels of { $nome }
 tuneis-nao-subiu-local = The local tunnel { $porta } did not start: { $motivo }
@@ -314,6 +317,8 @@ baixar-baixando-de = Downloading from { $conexao }
 baixar-andou = { $caminho } · { $feito } of { $total }
 baixar-feito-titulo = File downloaded
 baixar-feito = { $caminho } was saved to { $destino }.
+baixar-abrir-pasta = Open folder
+baixar-abrir-pasta-erro = Could not open { $pasta }: { $motivo }
 baixar-erro-titulo = Download selected file
 baixar-erro = Could not download { $caminho }: { $motivo }
 baixar-e-pasta = { $caminho } is a folder. Select the name of a file.
@@ -351,6 +356,10 @@ retentar-minutos = { $n } min
 retentar-horas = { $n } h
 retentar-herdar-de = Inherit ({ $nome })
 retentar-herdar-configuracoes = Inherit (Settings)
+ocioso-linha = Close idle after
+ocioso-linha-descricao = Closes this connection's tab after this long with nothing typed, pasted or sent by an assistant. Output from the server doesn't count as use. A persistent session (tmux or screen) stays on the server. Inherit follows the folder and, with no folder choosing, Settings › Connections, where it's off.
+ocioso-linha-descricao-pasta = For the connections in this folder that didn't choose something else: how long without use before the tab closes on its own.
+ocioso-fechou = The tab { $aba } closed after { $tempo } without use.
 
 ## Persistent sessions open on the server
 
@@ -378,3 +387,19 @@ links-menu = Links…
 links-titulo = Links
 links-explicacao = The links in the tree. With a network profile, a link opens in a browser just for the profile, going out through the client's network; without a profile, in the default browser.
 links-nenhum-link = No links in the tree. Create a connection of type Link.
+
+## Autocomplete (Ctrl+Space)
+
+autocompletar-sem-terminal = Open a terminal to use autocomplete.
+autocompletar-filtro = Filter commands
+autocompletar-coluna-comando = Command
+autocompletar-coluna-origem = Source
+autocompletar-vazio = No commands to suggest
+autocompletar-dica = Enter puts the command on the terminal line without running it. ↓ moves to the list; Esc closes.
+autocompletar-origem-tunel = Tunnel { $escuta } → { $destino }
+autocompletar-origem-dinamico = Dynamic tunnel { $escuta }
+autocompletar-origem-da-aba = { $origem }, from tab { $aba }
+autocompletar-origem-shell = { $shell } history
+autocompletar-origem-escolhidos = Used on this connection
+autocompletar-origem-envio = Send bar
+autocompletar-origem-ao-conectar = Commands on connect

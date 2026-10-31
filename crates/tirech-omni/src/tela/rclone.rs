@@ -264,7 +264,7 @@ impl Tela {
 
     /// Abre a subpágina na página Arquivos e lê os remotos.
     pub(super) fn abrir_remotos_do_rclone(&self) {
-        self.pagina.set("arquivos".to_owned());
+        self.ir_para("arquivos");
         self.rclone.aberta.set(true);
         self.listar_remotos();
     }

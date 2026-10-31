@@ -115,6 +115,10 @@ fn ctrl_clique_direito_baixa_o_arquivo_marcado_da_home() {
     let texto = m.app.text("baixar-feito");
     assert!(texto.contains("relatorio.txt"), "{texto}");
     assert!(!aparece(&m.app, "baixar-progresso-1"), "a barra ficou");
+    // O aviso tem o "Abrir a pasta", que abre a pasta onde o arquivo foi gravado.
+    let arvore = m.app.tree();
+    let botao = arvore.find("baixar-feito-acao").expect("o Abrir a pasta");
+    assert_eq!(botao.label.as_deref(), Some("Abrir a pasta"));
     m.app.assert_lint();
 }
 
@@ -152,6 +156,10 @@ fn uma_pasta_ou_um_arquivo_que_nao_existe_avisam() {
     marcar(&mut m, "fotos");
     baixar_para(&mut m, "/baixados/fotos", "baixar-erro");
     assert!(m.app.text("baixar-erro").contains("é uma pasta"));
+    assert!(
+        m.app.tree().find("baixar-erro-acao").is_none(),
+        "o erro não tem pasta para abrir"
+    );
     assert!(!m.opener.disco.exists("/baixados/fotos"));
 
     marcar(&mut m, "sumiu.txt");

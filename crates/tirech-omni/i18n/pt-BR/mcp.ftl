@@ -165,6 +165,9 @@ mcp-aprovar-contexto = { $assistente } em { $conexao } ({ $destino })
 mcp-aprovar-invisiveis = O texto tem caracteres de controle ou invisíveis, que o campo mostra como marcas.
 mcp-aprovar-perigo = Atenção: este comando { $motivo }.
 mcp-aprovar-sessao = Permitir o resto desta sessão nesta aba
+mcp-aprovar-abre-aba = Para isso, abre uma aba nova da conexão.
+mcp-aprovar-abrir-auto = Abrir as abas novas desta sessão sem perguntar, por { $tempo }
+mcp-aprovar-abrir-auto-sempre = Abrir as abas novas desta sessão sem perguntar, até ela acabar
 mcp-aprovar-motivo-dica = Se recusar, diga o motivo à IA (opcional)
 mcp-recusar = Recusar
 mcp-permitir = Permitir
@@ -269,6 +272,11 @@ mcp-perm-desligada = Desligada
 mcp-perm-so-ler = Só ler
 mcp-perm-aprovar = Aprovar
 mcp-perm-livre = Livre
+mcp-abrir-linha = Abrir abas novas
+mcp-abrir-linha-descricao = Se um assistente pode abrir uma aba nova desta conexão pelo MCP (abrir a conexão, ligar um túnel sem aba aberta ou usar um espaço de trabalho). Permitir segue a permissão acima; Perguntar pede a sua aprovação a cada aba nova, mesmo em Livre; Bloquear deixa o assistente usar só as abas que você abrir. Reconectar uma aba que caiu não conta.
+mcp-abrir-linha-descricao-pasta = Se um assistente pode abrir abas novas das conexões desta pasta que não escolheram outra coisa. Herdar segue a pasta de cima e, sem pasta que escolha, as Configurações › Assistentes (MCP).
+mcp-abrir-herdar-de = Herdar ({ $escolha })
+mcp-abrir-aba-fechou = A aba que o pedido ia usar fechou, e abrir uma aba nova desta conexão precisa da aprovação da pessoa. Peça de novo.
 mcp-arvore-menu = Assistentes (MCP)
 
 # O espaço de trabalho (fatia 6): o diálogo, a lista e o painel de arquivos.

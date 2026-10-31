@@ -58,6 +58,18 @@ pub(crate) fn dialogo_desbloquear_id(
     aberto: Signal<bool>,
     refazer: Rc<Cell<bool>>,
 ) -> impl View {
+    montar_desbloquear(id, cofre, aberto, refazer)()
+}
+
+/// Como [`dialogo_desbloquear_com`], para montar em várias janelas: o campo, o erro e o efeito
+/// que reabre o diálogo nascem uma vez, e a função devolvida monta a caixa em cada janela.
+pub(crate) fn montar_desbloquear(
+    id: &str,
+    cofre: CofreCompartilhado,
+    aberto: Signal<bool>,
+    refazer: Rc<Cell<bool>>,
+) -> impl Fn() -> ContentDialog + use<> {
+    let id = id.to_owned();
     let senha = signal(String::new());
     let errou = signal(false);
     {
@@ -76,36 +88,39 @@ pub(crate) fn dialogo_desbloquear_id(
             }
         });
     }
-    ContentDialog::new(t!("cofre-desbloquear-o-cofre"), aberto)
-        .id(id)
-        .content(
-            Column::new()
-                .gap(8)
-                .child(
-                    Text::new(t!("cofre-digite-a-senha-mestra-do-cofre"))
-                        .secondary()
-                        .wrap(),
-                )
-                .child(
-                    Edit::bind(senha)
-                        .id(format!("{id}-campo"))
-                        .password()
-                        .placeholder(t!("cofre-senha-mestra")),
-                )
-                .child(
-                    Text::new(t!("cofre-senha-mestra-incorreta"))
-                        .id(format!("{id}-erro"))
-                        .caption()
-                        .visible(move || errou.get()),
-                ),
-        )
-        .primary(t!("comum-desbloquear"), move || {
-            let certa = cofre.mudar(|c| c.desbloquear(&senha.get_untracked()));
-            senha.set(String::new());
-            errou.set(!certa);
-            refazer.set(!certa);
-        })
-        .close(t!("comum-agora-nao"))
+    move || {
+        let (cofre, refazer) = (cofre.clone(), Rc::clone(&refazer));
+        ContentDialog::new(t!("cofre-desbloquear-o-cofre"), aberto)
+            .id(id.as_str())
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(
+                        Text::new(t!("cofre-digite-a-senha-mestra-do-cofre"))
+                            .secondary()
+                            .wrap(),
+                    )
+                    .child(
+                        Edit::bind(senha)
+                            .id(format!("{id}-campo"))
+                            .password()
+                            .placeholder(t!("cofre-senha-mestra")),
+                    )
+                    .child(
+                        Text::new(t!("cofre-senha-mestra-incorreta"))
+                            .id(format!("{id}-erro"))
+                            .caption()
+                            .visible(move || errou.get()),
+                    ),
+            )
+            .primary(t!("comum-desbloquear"), move || {
+                let certa = cofre.mudar(|c| c.desbloquear(&senha.get_untracked()));
+                senha.set(String::new());
+                errou.set(!certa);
+                refazer.set(!certa);
+            })
+            .close(t!("comum-agora-nao"))
+    }
 }
 
 // --- A página ---
@@ -294,6 +309,9 @@ struct Pagina {
     portabilidade: Option<Portabilidade>,
     /// Abre a nota `id` na página Notas, se a casca tem uma (M47).
     abrir_nota: Option<Rc<dyn Fn(u64)>>,
+    /// O que o cofre roda antes de bloquear (esvaziar as imagens, cancelar o que anda); o cofre
+    /// só guarda uma referência fraca.
+    _antes_de_bloquear: Rc<dyn Fn()>,
     /// As imagens decifradas da nota que está na tela.
     imagens: Imagens,
     /// A gravação dos arquivos dos anexos ao lado do JSON exportado (M47).
@@ -2249,23 +2267,31 @@ pub fn pagina_cofre_completa(
     abrir_nota: Option<Rc<dyn Fn(u64)>>,
 ) -> impl View {
     let imagens = Imagens::nova();
-    {
-        let imagens = imagens.clone();
-        cofre.antes_de_bloquear(move || imagens.esvaziar());
-    }
     let exportando = Andamento::nova();
     let importando = Andamento::nova();
-    {
+    // O cofre guarda o aviso enquanto o app vive; a página (há uma por janela) pode sumir antes.
+    let antes_de_bloquear: Rc<dyn Fn()> = {
+        let imagens = imagens.clone();
         let (exportar, importar) = (
             exportando.gancho_de_cancelar(),
             importando.gancho_de_cancelar(),
         );
-        cofre.antes_de_bloquear(move || {
+        Rc::new(move || {
+            imagens.esvaziar();
             exportar();
             importar();
+        })
+    };
+    {
+        let fraco = Rc::downgrade(&antes_de_bloquear);
+        cofre.antes_de_bloquear(move || {
+            if let Some(aviso) = fraco.upgrade() {
+                aviso();
+            }
         });
     }
     let pagina = Rc::new(Pagina {
+        _antes_de_bloquear: antes_de_bloquear,
         exportando,
         importando,
         exportar_chave,

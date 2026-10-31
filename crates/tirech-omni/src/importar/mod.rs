@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cofre::{Lote, Mapa};
 use crate::modelo::{
-    ComandosAoConectar, Connection, ModoCredencial, MouseDoTerminal, Retentar, S3Opcoes,
+    ComandosAoConectar, Connection, ModoCredencial, MouseDoTerminal, Ocioso, Retentar, S3Opcoes,
     S3Provedor, SessaoPersistente,
 };
 use crate::redes::{PerfilRede, ProxyRede, Rede, TipoProxy};
@@ -56,8 +56,14 @@ pub struct PastaTrazida {
     pub mouse: MouseDoTerminal,
     /// A rodada nova de reconexão da pasta, só no JSON nativo.
     pub retentar: Retentar,
+    /// O tempo sem uso que fecha as abas da pasta, só no JSON nativo.
+    pub ocioso: Ocioso,
     /// O modo da credencial da pasta (o agente SSH), só no JSON nativo.
     pub credencial_modo: ModoCredencial,
+    /// A chave privada em arquivo da pasta, só no JSON nativo.
+    pub key_file: Option<PathBuf>,
+    /// A chave privada do cofre da pasta (o `uid`), só no JSON nativo com o cofre.
+    pub chave_do_cofre: Option<String>,
 }
 
 /// Uma conexão trazida de fora, com as senhas recuperadas (quando deu) à parte.

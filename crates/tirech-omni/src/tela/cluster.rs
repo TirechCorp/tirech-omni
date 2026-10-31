@@ -407,8 +407,9 @@ impl Tela {
     }
 }
 
-/// O diálogo "Abrir em modo cluster".
-pub(super) fn dialogo(tela: &Rc<Tela>) -> impl View + use<> {
+/// O diálogo "Abrir em modo cluster": o efeito das linhas liga uma vez, e a função devolvida
+/// monta a caixa em cada janela.
+pub(super) fn dialogo(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     let estado = &tela.cluster;
     let (aberto, filtro, escolhidas, linhas, com_ia, assistente) = (
         estado.aberto,
@@ -437,92 +438,96 @@ pub(super) fn dialogo(tela: &Rc<Tela>) -> impl View + use<> {
         });
         linhas.set(novas);
     });
-    let grade = DataGrid::bind(linhas, escolhidas)
-        .id("cluster-grade")
-        .height(220)
-        .columns([
-            DataGridColumn::new("nome", t!("comum-nome")).width(ColumnWidth::Star(1.0)),
-            DataGridColumn::new("grupo", t!("comum-grupo")).width(ColumnWidth::Star(0.8)),
-            DataGridColumn::new("host", t!("comum-host")).width(ColumnWidth::Star(1.6)),
-        ])
-        .empty_text(t!("cluster-nenhuma-conexao-de-terminal"));
-    let contagem = move || cluster::contagem(escolhidas.with(BTreeSet::len));
-    let abrir = {
-        let t = Rc::clone(tela);
-        Button::new(t!("comum-abrir"))
-            .id("cluster-abrir")
-            .accent()
-            .disabled(move || {
-                escolhidas.with(BTreeSet::is_empty)
-                    || (com_ia.get() && assistente.with(String::is_empty))
-            })
-            .on_click(move || t.confirmar_cluster())
-    };
-    // As opções seguem as Configurações: a escolha é montada de novo a cada abertura.
-    let escolha_do_assistente = {
-        let t = Rc::clone(tela);
-        Show::when(
-            move || aberto.get() && com_ia.get(),
-            move || {
-                let nomes: Vec<String> = t
-                    .assistentes_mostrados()
-                    .into_iter()
-                    .map(|f| ficha(f).nome.to_owned())
-                    .collect();
-                Row::new()
-                    .gap(8)
-                    .align(Align::Center)
-                    .child(Text::new(t!("cluster-ia-assistente")))
-                    .child(
-                        ComboBox::bind(assistente, nomes)
-                            .id("cluster-assistente")
-                            .placeholder(t!("cluster-ia-nenhum-assistente"))
-                            .grow(1),
-                    )
-            },
-        )
-    };
-    let titulo = move || {
-        if com_ia.get() {
-            t!("cluster-ia-abrir-em-cluster-com-ia")
-        } else {
-            t!("cluster-abrir-em-modo-cluster")
-        }
-    };
-    let explicacao = move || {
-        if com_ia.get() {
-            t!("cluster-ia-explicacao")
-        } else {
-            t!("cluster-as-conexoes-escolhidas-abrem-lado-a")
-        }
-    };
-    ContentDialog::new(titulo, aberto)
-        .id("cluster-dialogo")
-        .content(
-            Column::new()
-                .gap(8)
-                .child(Text::new(explicacao).wrap())
-                .child(escolha_do_assistente)
-                .child(
-                    Edit::bind(filtro)
-                        .id("cluster-filtro")
-                        .placeholder(t!("comum-filtrar"))
-                        .height(32),
-                )
-                .child(grade)
-                .child(
+    let tela = Rc::clone(tela);
+    move || {
+        let tela = &tela;
+        let grade = DataGrid::bind(linhas, escolhidas)
+            .id("cluster-grade")
+            .height(220)
+            .columns([
+                DataGridColumn::new("nome", t!("comum-nome")).width(ColumnWidth::Star(1.0)),
+                DataGridColumn::new("grupo", t!("comum-grupo")).width(ColumnWidth::Star(0.8)),
+                DataGridColumn::new("host", t!("comum-host")).width(ColumnWidth::Star(1.6)),
+            ])
+            .empty_text(t!("cluster-nenhuma-conexao-de-terminal"));
+        let contagem = move || cluster::contagem(escolhidas.with(BTreeSet::len));
+        let abrir = {
+            let t = Rc::clone(tela);
+            Button::new(t!("comum-abrir"))
+                .id("cluster-abrir")
+                .accent()
+                .disabled(move || {
+                    escolhidas.with(BTreeSet::is_empty)
+                        || (com_ia.get() && assistente.with(String::is_empty))
+                })
+                .on_click(move || t.confirmar_cluster())
+        };
+        // As opções seguem as Configurações: a escolha é montada de novo a cada abertura.
+        let escolha_do_assistente = {
+            let t = Rc::clone(tela);
+            Show::when(
+                move || aberto.get() && com_ia.get(),
+                move || {
+                    let nomes: Vec<String> = t
+                        .assistentes_mostrados()
+                        .into_iter()
+                        .map(|f| ficha(f).nome.to_owned())
+                        .collect();
                     Row::new()
                         .gap(8)
                         .align(Align::Center)
+                        .child(Text::new(t!("cluster-ia-assistente")))
                         .child(
-                            Row::new()
-                                .grow(1)
-                                .child(Text::new(contagem).id("cluster-contagem")),
+                            ComboBox::bind(assistente, nomes)
+                                .id("cluster-assistente")
+                                .placeholder(t!("cluster-ia-nenhum-assistente"))
+                                .grow(1),
                         )
-                        .child(abrir),
-                ),
-        )
-        .close(t!("comum-cancelar"))
+                },
+            )
+        };
+        let titulo = move || {
+            if com_ia.get() {
+                t!("cluster-ia-abrir-em-cluster-com-ia")
+            } else {
+                t!("cluster-abrir-em-modo-cluster")
+            }
+        };
+        let explicacao = move || {
+            if com_ia.get() {
+                t!("cluster-ia-explicacao")
+            } else {
+                t!("cluster-as-conexoes-escolhidas-abrem-lado-a")
+            }
+        };
+        ContentDialog::new(titulo, aberto)
+            .id("cluster-dialogo")
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(Text::new(explicacao).wrap())
+                    .child(escolha_do_assistente)
+                    .child(
+                        Edit::bind(filtro)
+                            .id("cluster-filtro")
+                            .placeholder(t!("comum-filtrar"))
+                            .height(32),
+                    )
+                    .child(grade)
+                    .child(
+                        Row::new()
+                            .gap(8)
+                            .align(Align::Center)
+                            .child(
+                                Row::new()
+                                    .grow(1)
+                                    .child(Text::new(contagem).id("cluster-contagem")),
+                            )
+                            .child(abrir),
+                    ),
+            )
+            .close(t!("comum-cancelar"))
+    }
 }
 
 /// O submenu "Abrir todas controladas por IA ▸" da pasta `id`, com os assistentes que as

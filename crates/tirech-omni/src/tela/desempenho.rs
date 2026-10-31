@@ -17,8 +17,10 @@ use tomni_ui::files::Live;
 use tomni_ui::prelude::*;
 
 use super::Tela;
+use super::processos::{self, Processos};
 use crate::desempenho::{self as conta, Amostra, Amostrador, PONTOS, RITMO};
 use crate::espacos::id_da_chave;
+use crate::janelas::Janela;
 use crate::t;
 
 /// O id da página na navegação.
@@ -26,32 +28,6 @@ pub(super) const PAGINA: &str = "desempenho";
 
 /// A chave da linha "Interface" da tabela (o que não é de nenhuma aba).
 const INTERFACE: &str = "interface";
-
-/// Os três gráficos da coluna da esquerda.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Grafico {
-    Cpu,
-    Memoria,
-    Rede,
-}
-
-impl Grafico {
-    fn id(self) -> &'static str {
-        match self {
-            Grafico::Cpu => "cpu",
-            Grafico::Memoria => "memoria",
-            Grafico::Rede => "rede",
-        }
-    }
-
-    fn cor(self) -> Token {
-        match self {
-            Grafico::Cpu => Token::AccentFillColorDefault,
-            Grafico::Memoria => Token::SystemFillColorCaution,
-            Grafico::Rede => Token::SystemFillColorSuccess,
-        }
-    }
-}
 
 /// O que a página guarda enquanto o app está aberto.
 #[derive(Clone, Copy)]
@@ -72,14 +48,16 @@ pub(super) struct Desempenho {
     escolhidas: Signal<BTreeSet<String>>,
     /// A ordem da tabela: a CPU, da maior para a menor.
     ordem: Signal<Option<(String, SortDirection)>>,
-    /// O gráfico grande.
-    grafico: Signal<Grafico>,
+    /// O gráfico grande: 0 a CPU, 1 a memória, 2 a rede.
+    grafico: Signal<usize>,
+    /// As abas Processos e Disco.
+    processos: Processos,
 }
 
-/// Se a amostragem deve correr: o medidor ligado ou a página aberta.
-fn ativo(tela: &Tela) -> impl Fn() -> bool + Copy + 'static {
-    let (config, pagina) = (tela.config, tela.pagina);
-    move || config.with(|c| c.geral.medidor_cpu) || pagina.with(|p| p == PAGINA)
+/// Se a amostragem deve correr: o medidor ligado ou a página aberta em alguma janela.
+fn ativo(tela: &Tela) -> impl Fn() -> bool + Clone + 'static {
+    let (config, janelas) = (tela.config, tela.janelas.clone());
+    move || config.with(|c| c.geral.medidor_cpu) || janelas.alguma_em(PAGINA)
 }
 
 /// Põe `valor` no fim da série, que guarda os [`PONTOS`] mais novos.
@@ -101,13 +79,17 @@ pub(super) fn ligar(tela: &Rc<Tela>) -> Desempenho {
         linhas: signal(Vec::new()),
         escolhidas: signal(BTreeSet::new()),
         ordem: signal(Some(("cpu".to_owned(), SortDirection::Descending))),
-        grafico: signal(Grafico::Cpu),
+        grafico: signal(0),
+        processos: processos::ligar(tela, {
+            let janelas = tela.janelas.clone();
+            move || janelas.alguma_em(PAGINA)
+        }),
     };
     let medicao = tela.ferramentas.ambiente().medicao.clone();
     let ativo = ativo(tela);
     let batida = match medicao.batida {
         Some(batida) => batida,
-        None => batida_do_sistema(ativo),
+        None => batida_do_sistema(ativo.clone()),
     };
     let amostrador = Rc::new(RefCell::new(Amostrador::novo()));
     let historicos: Rc<RefCell<HashMap<String, Vec<f64>>>> = Rc::default();
@@ -278,11 +260,10 @@ fn linhas_da_tabela(
 }
 
 /// O medidor da barra de título: os quadradinhos da CPU do app, com a CPU em % na dica. O clique
-/// abre a página Desempenho. Some com `geral.medidor_cpu` desligado.
-pub(super) fn medidor(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
+/// abre a página Desempenho na janela `janela`. Some com `geral.medidor_cpu` desligado.
+pub(super) fn medidor(tela: &Rc<Tela>, janela: Janela, d: Desempenho) -> impl View + use<> {
     let config = tela.config;
     let atual = move || d.cpu.with(|s| s.last().copied().unwrap_or(0.0));
-    let abrir = Rc::clone(tela);
     LevelMeter::new(move || atual() / 100.0)
         .id("barra-de-titulo-cpu")
         .tooltip(move || {
@@ -290,25 +271,36 @@ pub(super) fn medidor(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
             t!("desempenho-medidor-dica", cpu = cpu.as_str())
         })
         .visible(move || config.with(|c| c.geral.medidor_cpu))
-        .on_click(move || abrir.na_principal(|t| t.pagina.set(PAGINA.to_owned())))
+        .on_click(move || janela.pagina.set(PAGINA.to_owned()))
+}
+
+/// Uma curva dos painéis: o item da coluna da esquerda e o gráfico grande dela.
+pub(super) struct Curva {
+    /// O pedaço do id: `{prefixo}-{id}` no item, `{prefixo}-grafico-{id}` no gráfico grande.
+    pub(super) id: &'static str,
+    /// O nome no item ("CPU").
+    pub(super) nome: String,
+    /// O título em cima do gráfico grande ("Uso da CPU").
+    pub(super) titulo: String,
+    pub(super) cor: Token,
+    pub(super) serie: Signal<Vec<f64>>,
+    /// Quantos pontos cabem no gráfico (o último minuto).
+    pub(super) pontos: usize,
+    /// O teto da escala.
+    pub(super) max: Rc<dyn Fn() -> f64>,
+    /// O número de agora, embaixo do nome.
+    pub(super) valor: Rc<dyn Fn() -> String>,
 }
 
 /// Um item da coluna da esquerda: a série pequena, o nome e o número de agora. O clique põe o
 /// gráfico no lado direito; o escolhido tem a barrinha de destaque, como na navegação.
-fn item(
-    d: Desempenho,
-    grafico: Grafico,
-    titulo: String,
-    serie: Signal<Vec<f64>>,
-    max: impl Fn() -> f64 + 'static,
-    valor: impl Fn() -> String + 'static,
-) -> impl View {
-    let escolhido = move || d.grafico.get() == grafico;
+fn item(prefixo: &str, n: usize, c: &Curva, escolhida: Signal<usize>) -> impl View + use<> {
+    let (max, valor) = (Rc::clone(&c.max), Rc::clone(&c.valor));
     Card::new()
-        .id(format!("desempenho-{}", grafico.id()))
-        .label(titulo.clone())
+        .id(format!("{prefixo}-{}", c.id))
+        .label(c.nome.clone())
         .padding(8)
-        .on_click(move || d.grafico.set(grafico))
+        .on_click(move || escolhida.set(n))
         .child(
             Row::new()
                 .gap(8)
@@ -319,21 +311,22 @@ fn item(
                         .height(16)
                         .corner_radius(2)
                         .background(Token::AccentFillColorDefault)
-                        .visible(escolhido),
+                        .visible(move || escolhida.get() == n),
                 )
                 .child(
-                    Sparkline::new(serie)
-                        .id(format!("desempenho-{}-serie", grafico.id()))
-                        .max(max)
-                        .color(grafico.cor()),
+                    Sparkline::new(c.serie)
+                        .id(format!("{prefixo}-{}-serie", c.id))
+                        .max(move || max())
+                        .capacity(c.pontos)
+                        .color(c.cor),
                 )
                 .child(
                     Column::new()
                         .grow(1)
-                        .child(Text::new(titulo).body_strong())
+                        .child(Text::new(c.nome.clone()).body_strong())
                         .child(
-                            Text::new(valor)
-                                .id(format!("desempenho-{}-valor", grafico.id()))
+                            Text::new(move || valor())
+                                .id(format!("{prefixo}-{}-valor", c.id))
                                 .caption()
                                 .secondary(),
                         ),
@@ -343,31 +336,70 @@ fn item(
 
 /// O teto da escala da memória e da rede: o maior ponto com folga, para a curva não colar no
 /// alto. Nunca zero.
-fn teto(serie: Signal<Vec<f64>>, minimo: f64) -> impl Fn() -> f64 + Copy + 'static {
+pub(super) fn teto(serie: Signal<Vec<f64>>, minimo: f64) -> impl Fn() -> f64 + Copy + 'static {
     move || serie.with(|s| s.iter().copied().fold(minimo, f64::max) * 1.25)
 }
 
 /// Um número embaixo do gráfico grande: o rótulo pequeno em cima e o valor.
-fn numero(id: &str, rotulo: String, valor: impl Fn() -> String + 'static) -> impl View {
+pub(super) fn numero(id: &str, rotulo: String, valor: impl Fn() -> String + 'static) -> impl View {
     Column::new()
         .width(140)
         .child(Text::new(rotulo).caption().secondary())
         .child(Text::new(valor).id(id.to_owned()).subtitle())
 }
 
-/// O gráfico grande de `g`, que só aparece quando é o escolhido.
-fn grafico(
-    d: Desempenho,
-    g: Grafico,
-    serie: Signal<Vec<f64>>,
-    max: impl Fn() -> f64 + 'static,
-) -> impl View {
-    AreaChart::new(serie)
-        .id(format!("desempenho-grafico-{}", g.id()))
-        .max(max)
-        .color(g.cor())
+/// Os painéis do Gerenciador de Tarefas: as curvas à esquerda e, à direita, o gráfico grande da
+/// escolhida, com o título, o "60 segundos" e os `numeros` embaixo.
+pub(super) fn paineis<N: View + 'static>(
+    prefixo: &str,
+    curvas: Vec<Curva>,
+    escolhida: Signal<usize>,
+    altura: f64,
+    numeros: N,
+) -> impl View + use<N> {
+    let esquerda = curvas
+        .iter()
+        .enumerate()
+        .fold(Column::new().gap(4).width(220), |coluna, (n, c)| {
+            coluna.child(item(prefixo, n, c, escolhida))
+        });
+    let titulos: Vec<String> = curvas.iter().map(|c| c.titulo.clone()).collect();
+    let titulo = move || titulos.get(escolhida.get()).cloned().unwrap_or_default();
+    let graficos = curvas
+        .into_iter()
+        .enumerate()
+        .fold(Row::new().grow(1), |linha, (n, c)| {
+            let max = c.max;
+            linha.child(
+                AreaChart::new(c.serie)
+                    .id(format!("{prefixo}-grafico-{}", c.id))
+                    .max(move || max())
+                    .capacity(c.pontos)
+                    .color(c.cor)
+                    .grow(1)
+                    .visible(move || escolhida.get() == n),
+            )
+        });
+    let direita = Column::new()
         .grow(1)
-        .visible(move || d.grafico.get() == g)
+        .gap(8)
+        .child(
+            Row::new()
+                .align(Align::End)
+                .child(Text::new(titulo).subtitle().grow(1))
+                .child(
+                    Text::new(t!("desempenho-60-segundos"))
+                        .caption()
+                        .secondary(),
+                ),
+        )
+        .child(graficos)
+        .child(numeros);
+    Row::new()
+        .gap(16)
+        .height(altura)
+        .child(esquerda)
+        .child(direita)
 }
 
 /// "1:02:03" ou "2:03".
@@ -396,39 +428,38 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
         move || ultima.with(|u| conta::bytes_por_segundo(u.as_ref().map_or(0.0, |a| a.dados)));
     let (teto_memoria, teto_rede) = (teto(d.memoria, 64.0), teto(d.rede, 4.0));
 
-    let esquerda = Column::new()
-        .gap(4)
-        .width(220)
-        .child(item(
-            d,
-            Grafico::Cpu,
-            t!("desempenho-cpu"),
-            d.cpu,
-            || 100.0,
-            move || conta::cpu(cpu_agora()),
-        ))
-        .child(item(
-            d,
-            Grafico::Memoria,
-            t!("desempenho-memoria"),
-            d.memoria,
-            teto_memoria,
-            memoria_agora,
-        ))
-        .child(item(
-            d,
-            Grafico::Rede,
-            t!("desempenho-rede"),
-            d.rede,
-            teto_rede,
-            rede_agora,
-        ));
-
-    let titulo_do_grafico = move || match d.grafico.get() {
-        Grafico::Cpu => t!("desempenho-cpu-titulo"),
-        Grafico::Memoria => t!("desempenho-memoria-titulo"),
-        Grafico::Rede => t!("desempenho-rede-titulo"),
-    };
+    let curvas = vec![
+        Curva {
+            id: "cpu",
+            nome: t!("desempenho-cpu"),
+            titulo: t!("desempenho-cpu-titulo"),
+            cor: Token::AccentFillColorDefault,
+            serie: d.cpu,
+            pontos: PONTOS,
+            max: Rc::new(|| 100.0),
+            valor: Rc::new(move || conta::cpu(cpu_agora())),
+        },
+        Curva {
+            id: "memoria",
+            nome: t!("desempenho-memoria"),
+            titulo: t!("desempenho-memoria-titulo"),
+            cor: Token::SystemFillColorCaution,
+            serie: d.memoria,
+            pontos: PONTOS,
+            max: Rc::new(teto_memoria),
+            valor: Rc::new(memoria_agora),
+        },
+        Curva {
+            id: "rede",
+            nome: t!("desempenho-rede"),
+            titulo: t!("desempenho-rede-titulo"),
+            cor: Token::SystemFillColorSuccess,
+            serie: d.rede,
+            pontos: PONTOS,
+            max: Rc::new(teto_rede),
+            valor: Rc::new(rede_agora),
+        },
+    ];
     let abas = {
         let t = Rc::clone(tela);
         move || {
@@ -440,50 +471,28 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
                 .to_string()
         }
     };
-    let direita = Column::new()
-        .grow(1)
-        .gap(8)
-        .child(
-            Row::new()
-                .align(Align::End)
-                .child(Text::new(titulo_do_grafico).subtitle().grow(1))
-                .child(
-                    Text::new(t!("desempenho-60-segundos"))
-                        .caption()
-                        .secondary(),
-                ),
-        )
-        .child(
-            Row::new()
-                .grow(1)
-                .child(grafico(d, Grafico::Cpu, d.cpu, || 100.0))
-                .child(grafico(d, Grafico::Memoria, d.memoria, teto_memoria))
-                .child(grafico(d, Grafico::Rede, d.rede, teto_rede)),
-        )
-        .child(
-            Row::new()
-                .gap(16)
-                .child(numero(
-                    "desempenho-utilizacao",
-                    t!("desempenho-utilizacao"),
-                    move || conta::cpu(cpu_agora()),
-                ))
-                .child(numero(
-                    "desempenho-memoria-numero",
-                    t!("desempenho-memoria"),
-                    memoria_agora,
-                ))
-                .child(numero(
-                    "desempenho-abas",
-                    t!("desempenho-abas-abertas"),
-                    abas,
-                ))
-                .child(numero(
-                    "desempenho-aberto",
-                    t!("desempenho-tempo-aberto"),
-                    move || duracao(d.aberto.get()),
-                )),
-        );
+    let numeros = Row::new()
+        .gap(16)
+        .child(numero(
+            "desempenho-utilizacao",
+            t!("desempenho-utilizacao"),
+            move || conta::cpu(cpu_agora()),
+        ))
+        .child(numero(
+            "desempenho-memoria-numero",
+            t!("desempenho-memoria"),
+            memoria_agora,
+        ))
+        .child(numero(
+            "desempenho-abas",
+            t!("desempenho-abas-abertas"),
+            abas,
+        ))
+        .child(numero(
+            "desempenho-aberto",
+            t!("desempenho-tempo-aberto"),
+            move || duracao(d.aberto.get()),
+        ));
 
     let ir = Rc::clone(tela);
     let tabela = DataGrid::bind(d.linhas, d.escolhidas)
@@ -521,19 +530,38 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
         )
         .child(Text::new(t!("desempenho-descricao")).caption().wrap())
         .child(
-            Row::new()
-                .gap(16)
-                .height(260)
-                .child(esquerda)
-                .child(direita),
+            TabView::bind(d.processos.aba)
+                .id("desempenho-secoes")
+                .tab_width(TabWidth::SizeToContent)
+                .selected_indicator(true)
+                .grow(1)
+                .tab(
+                    processos::APP,
+                    t!("desempenho-este-app"),
+                    Column::new()
+                        .grow(1)
+                        .gap(12)
+                        .padding(8)
+                        .child(paineis("desempenho", curvas, d.grafico, 260.0, numeros))
+                        .child(Text::new(t!("desempenho-por-terminal")).subtitle())
+                        .child(tabela),
+                )
+                .tab(
+                    processos::PROCESSOS,
+                    t!("processos-aba"),
+                    processos::aba_processos(tela, d.processos),
+                )
+                .tab(
+                    processos::DISCO,
+                    t!("processos-aba-disco"),
+                    processos::aba_disco(tela, d.processos),
+                ),
         )
-        .child(Text::new(t!("desempenho-por-terminal")).subtitle())
-        .child(tabela)
 }
 
 impl Tela {
     /// O clique duplo numa linha da tabela: a aba de chave `chave` fica escolhida, a janela dela
-    /// ganha o foco e, na principal, a página volta aos terminais.
+    /// ganha o foco e a página dela volta aos terminais.
     fn ir_para_a_aba_da_chave(&self, chave: &str) {
         let Some((janela, sessao)) = self
             .sessoes_das_janelas(None)
@@ -543,9 +571,7 @@ impl Tela {
             return;
         };
         janela.layout.update(|l| l.select(sessao));
-        if janela.layout == self.janelas.principal().layout {
-            self.pagina.set(super::paineis::TERMINAIS.to_owned());
-        }
+        janela.pagina.set(super::paineis::TERMINAIS.to_owned());
         janela.handle.focus();
     }
 }

@@ -7,6 +7,28 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- As abas Processos e Disco na página Desempenho, para este computador ou para o servidor de uma
+  conexão SSH aberta (Linux): todos os processos com a CPU, a memória, o estado, as threads e o
+  comando, ou a leitura e a escrita no disco de cada um; filtro, ordem por coluna, a árvore de
+  processos e os botões Encerrar e Forçar encerramento, também no menu do botão direito. Em
+  cima, os gráficos do último minuto, como na aba Este app: a CPU e a memória da máquina, ou a
+  leitura e a escrita no disco.
+- Pacote para o macOS: o `tirech-omni-macos.dmg`, universal (Apple Silicon e Intel), com o
+  `Tirech Omni.app` e as ferramentas de linha de comando dentro dele, gerado pelo
+  `empacotar-mac.sh` num Mac.
+- Autocompletar no terminal (Ctrl+Espaço): uma lista com os comandos que cabem na aba e de onde
+  vem cada um. No shell local, os comandos prontos para os túneis abertos, já com a porta de
+  verdade (o `xfreerdp` para um túnel que leva à 3389, o `curl` pelo SOCKS5 de um túnel dinâmico
+  e outros pela porta de destino), e o histórico do bash, do zsh e do fish; em toda aba, os
+  comandos já usados na conexão, os da barra de envio e os comandos ao conectar. Enter põe o
+  comando na linha do terminal, sem executar.
+- A rede Nebula passa pelos relays da rede quando o punch não passa, como atrás de CGNAT (o comum
+  nas operadoras brasileiras) ou de NAT simétrico: o servidor anuncia os relays dele em
+  `relay.relays`, e o app pede o relay e passa por ele, sem nada para ligar.
+- O shell local sai pela rede do perfil (herdado da pasta ou escolhido na linha Rede): abre com
+  `ALL_PROXY`, `HTTP_PROXY` e `HTTPS_PROXY` apontando para o proxy local do perfil, e aceita
+  túneis locais e dinâmicos que levam pela rede do cliente (por exemplo, `127.0.0.1:13389` →
+  `10.0.0.5:3389` para o `xfreerdp`). A primeira linha do terminal diz por qual perfil o shell sai.
 - Links: uma conexão do tipo Link abre um endereço no navegador. Com um perfil de rede, abre num
   navegador só daquele perfil, que sai pela rede do cliente (proxy ou VPN embutida) por um proxy
   HTTP local; sem perfil, no navegador padrão. "Links…" no menu Ferramentas lista todos.
@@ -18,8 +40,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   copia ou cola) ou Menu; "Herdar" segue a pasta e, sem pasta que escolha, Configurações › Terminal.
 - Medidor de CPU na barra de título (quadradinhos do amarelo-claro ao vermelho-escuro) e a página
   Desempenho, aberta pelo clique nele ou por Exibir ▸ Desempenho: CPU, memória e rede do app no
-  último minuto e a tabela "Por terminal", com o peso de cada aba e do programa do shell local. O
-  medidor desliga em Configurações › Geral.
+  último minuto e a tabela "Por terminal", com o peso de cada aba e do programa do shell local,
+  no Linux, no Windows e no macOS. O medidor desliga em Configurações › Geral.
 - A reconexão automática não desiste: acabadas as tentativas, a aba espera e começa outra rodada,
   até a conexão voltar ("Tento de novo em 5 min"). O tempo fica em Configurações › Conexões ›
   Tentar de novo após (5 min por padrão; 0 desliga), e a conexão e a pasta escolhem outro, ou
@@ -34,6 +56,22 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 - O `travamentos.log`, na pasta de configuração: quando a interface fica parada mais de 2 s,
   em que etapa estava, o estado da thread e do sistema e as threads que mais gastaram CPU; a
   cada minuto pesado, o tempo por etapa.
+- A conexão e a pasta escolhem se um assistente pode abrir abas novas pelo MCP: Permitir,
+  Perguntar ou Bloquear, com "Herdar" e o padrão em Configurações › Controle por assistentes
+  (MCP). Ao aprovar uma aba nova, dá para deixar a sessão abrir as próximas sem perguntar, pelo
+  tempo de "Abrir sem perguntar depois de aprovar" (1 hora por padrão).
+- Fechar a aba sem uso: a aba de terminal que passa um tempo sem nada digitado, colado ou mandado
+  por um assistente fecha sozinha (a sessão do tmux ou do screen fica no servidor). O tempo fica
+  em Configurações › Conexões › Fechar a aba sem uso após (desligado por padrão), e a conexão e
+  a pasta escolhem outro, ou Desligado, com "Herdar".
+- O aviso "Arquivo baixado" tem o botão "Abrir a pasta", que abre a pasta onde o arquivo foi
+  gravado.
+- A pasta escolhe a chave do cofre e o arquivo da chave privada das conexões SSH e SFTP de dentro
+  que não têm chave própria; na conexão, a linha "Chave do cofre" mostra "Herdar (pasta)".
+- A navegação completa em todas as janelas: cada janela aberta com Janela > Nova janela (ou com
+  uma aba arrastada para fora) tem a barra lateral, a busca e o medidor, e mostra a sua própria
+  página. O que se abre numa janela (Cofre, Sobre, Configurações…) abre nela. Arquivos, Logs e
+  Scripts ficam numa janela por vez, a última que os usou; as outras mostram um aviso.
 
 ### Mudado
 
@@ -56,6 +94,14 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Corrigido
 
+- A senha não entrava nos servidores que só aceitam o `keyboard-interactive` (o FreeBSD e o
+  pfSense de fábrica, o OpenSSH com `PasswordAuthentication no`): agora entra. Um código de dois
+  fatores pedido depois da senha aparece no erro.
+- No macOS, o app pede a permissão da Rede Local com uma explicação, e o "servidor
+  inalcançável" diz onde liberá-la (Ajustes do Sistema > Privacidade e Segurança > Rede Local).
+- Uma barra de andamento que ocupa a linha inteira (o `pv` num pipe com o `7z`, por exemplo) não
+  desce mais uma linha a cada volta: o Backspace na coluna 0 de uma linha que continua a de cima
+  volta para o fim da de cima, como nos outros terminais.
 - Um programa que despeja saída sem parar num terminal (um `yes`, um `cat` de um arquivo
   enorme) não pendura mais o app nem enche a memória: a fila de cada terminal tem limite de
   1 MiB, a conexão espera a fila esvaziar, o Ctrl+C e os outros canais continuam passando, e o
@@ -73,6 +119,9 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   por usuário: um motor que ainda tinha abas usando era esquecido ao parar e outro subia com a
   mesma identidade, e os dois se derrubavam. Agora o motor que sobra é reaproveitado ou fechado,
   e a trava do perfil só solta quando ele para de fato.
+- Com mais de uma janela, as confirmações e os pedidos (senha, chave do servidor, desbloquear o
+  cofre, salvar espaço, cluster, Links, instalar, importar e os outros) abriam na janela
+  principal, que vinha para a frente. Agora abrem na janela em que foram pedidos.
 
 ## [0.1.0] - 2026-10-26
 

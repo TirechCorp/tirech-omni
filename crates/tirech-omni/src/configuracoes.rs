@@ -446,6 +446,58 @@ escolha! {
 }
 
 escolha! {
+    /// O que fazer quando um assistente quer abrir uma aba nova de uma conexão pelo MCP
+    /// (`ia.mcp_abrir`; a conexão e a pasta podem escolher outra coisa). Reconectar uma aba que
+    /// caiu não conta.
+    AbrirAbaIa {
+        /// Abre, se a permissão da conexão deixa.
+        #[default]
+        Permitir => tk!("opcao-mcp-abrir-permitir"),
+        /// Pergunta à pessoa a cada aba nova, mesmo com a conexão em Livre.
+        Perguntar => tk!("opcao-mcp-abrir-perguntar"),
+        /// Não abre: o assistente usa só as abas que a pessoa abriu.
+        Bloquear => tk!("opcao-mcp-abrir-bloquear"),
+    }
+}
+
+escolha! {
+    /// Por quanto tempo vale o "abrir as abas novas desta sessão sem perguntar" que a pessoa
+    /// marca no diálogo de aprovação de uma aba nova (`ia.mcp_abrir_auto`). Desligado esconde a
+    /// caixa; "Sempre abrir" vale até a sessão do assistente acabar.
+    AbrirAbaAuto {
+        Desligado => tk!("opcao-mcp-abrir-auto-desligado"),
+        Min15 => tk!("opcao-mcp-abrir-auto-15m"),
+        Min30 => tk!("opcao-mcp-abrir-auto-30m"),
+        #[default]
+        Hora1 => tk!("opcao-mcp-abrir-auto-1h"),
+        Horas4 => tk!("opcao-mcp-abrir-auto-4h"),
+        Horas8 => tk!("opcao-mcp-abrir-auto-8h"),
+        Horas12 => tk!("opcao-mcp-abrir-auto-12h"),
+        Horas24 => tk!("opcao-mcp-abrir-auto-24h"),
+        Sempre => tk!("opcao-mcp-abrir-auto-sempre"),
+    }
+}
+
+impl AbrirAbaAuto {
+    /// Quanto vale a licença: `None` quando está desligada, `Some(None)` quando vale até a
+    /// sessão acabar.
+    pub fn duracao(self) -> Option<Option<std::time::Duration>> {
+        let minutos = match self {
+            Self::Desligado => return None,
+            Self::Sempre => return Some(None),
+            Self::Min15 => 15,
+            Self::Min30 => 30,
+            Self::Hora1 => 60,
+            Self::Horas4 => 4 * 60,
+            Self::Horas8 => 8 * 60,
+            Self::Horas12 => 12 * 60,
+            Self::Horas24 => 24 * 60,
+        };
+        Some(Some(std::time::Duration::from_secs(minutos * 60)))
+    }
+}
+
+escolha! {
     /// Como instalar um assistente de IA no servidor (`ia.metodo_*`, M46).
     MetodoIa {
         /// O que o servidor permite: o instalador oficial, senão o npm.
@@ -640,6 +692,9 @@ categoria! {
         chave_nova: ChaveNova = ChaveNova::Perguntar,
         /// Ao cair a conexão.
         reconectar: ReconectarCfg = ReconectarCfg::default(),
+        /// Fechar a aba depois destes minutos sem uso (nada digitado, colado ou mandado por ela);
+        /// 0, o padrão, não fecha. De 0 a 1440. Cada conexão ou pasta pode escolher outro.
+        ocioso_mins: u32 = 0,
         /// Onde abrir uma conexão.
         abrir_em: AbrirEm = AbrirEm::PainelAtivo,
         /// Deixar marcada a caixa "Importar as senhas no cofre" ao importar de outro programa.
@@ -976,6 +1031,11 @@ categoria! {
         espera_resposta: u32 = 0,
         /// Deixar assistentes (Claude Code, Codex) controlarem o app pelo MCP (M51).
         mcp_ligado: bool = false,
+        /// Se um assistente pode abrir abas novas pelo MCP, quando a conexão e as pastas dela não
+        /// escolhem.
+        mcp_abrir: AbrirAbaIa = AbrirAbaIa::Permitir,
+        /// Por quanto tempo o diálogo de uma aba nova pode liberar as próximas da mesma sessão.
+        mcp_abrir_auto: AbrirAbaAuto = AbrirAbaAuto::Hora1,
         /// Comandos que sempre pedem aprovação pelo MCP, além da lista de bloqueio: o nome de um
         /// programa ou, com `re:` no começo, uma expressão regular (M51).
         bloqueio_extras: Vec<String> = Vec::new(),
@@ -1369,6 +1429,12 @@ impl Configuracoes {
             1440,
         );
         prender(
+            "conexoes.ocioso_mins",
+            &mut self.conexoes.ocioso_mins,
+            0,
+            1440,
+        );
+        prender(
             "conexoes.comandos_quieto_ms",
             &mut self.conexoes.comandos_quieto_ms,
             50,
@@ -1509,6 +1575,8 @@ impl Configuracoes {
                 let ia = std::mem::take(&mut self.ia);
                 self.ia = IaCfg {
                     mcp_ligado: ia.mcp_ligado,
+                    mcp_abrir: ia.mcp_abrir,
+                    mcp_abrir_auto: ia.mcp_abrir_auto,
                     bloqueio_extras: ia.bloqueio_extras.clone(),
                     auditoria: ia.auditoria,
                     marca_secs: ia.marca_secs,
@@ -1534,6 +1602,8 @@ impl Configuracoes {
                 let p = padrao.ia;
                 self.ia = IaCfg {
                     mcp_ligado: p.mcp_ligado,
+                    mcp_abrir: p.mcp_abrir,
+                    mcp_abrir_auto: p.mcp_abrir_auto,
                     bloqueio_extras: p.bloqueio_extras,
                     auditoria: p.auditoria,
                     marca_secs: p.marca_secs,

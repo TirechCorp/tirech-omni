@@ -10,7 +10,6 @@ use tomni_ui::terminal::Session;
 use tomni_ui::theme::Theme;
 use tomni_ui_test::TestApp;
 
-use tirech_omni::configuracoes::{AoFechar, Configuracoes, PaginaInicial};
 use tirech_omni::marca::NOME_DO_APP;
 
 use comum::{Montagem, Pasta, exemplo, montar};
@@ -97,13 +96,16 @@ fn com_varias_janelas_a_principal_vem_marcada() {
 }
 
 #[test]
-fn a_janela_secundaria_so_tem_titulo_menus_e_paineis() {
+fn a_janela_secundaria_tem_a_navegacao_e_abre_nos_terminais() {
     let pasta = Pasta::nova("janelas-casca");
     pasta.semear(&exemplo());
     let (mut m, _principal, outra) = com_duas_janelas(&pasta);
     m.app.switch_to(outra);
     for menu in ["janela", "exibir"] {
         assert!(m.app.visible(&format!("menus-{menu}")), "sem o menu {menu}");
+    }
+    for id in ["navegacao-cofre", "navegacao-arquivos", "busca"] {
+        assert!(m.app.visible(id), "sem {id}");
     }
     assert!(m.app.visible("boas-vindas"));
     assert_eq!(abas(&m.app), [Vec::<String>::new()]);
@@ -505,13 +507,19 @@ fn o_exibir_da_secundaria_controla_as_conexoes_e_as_propriedades_dela() {
 
     m.app.switch_to(outra);
     m.app.click("menus-exibir");
-    for id in ["painel-conexoes", "painel-propriedades"] {
+    for id in [
+        "painel-conexoes",
+        "painel-propriedades",
+        "painel-notas-lista",
+        "painel-fila",
+    ] {
         assert!(m.app.enabled(id), "{id} devia valer na secundária");
     }
-    for id in ["painel-chat", "painel-notas-lista", "painel-fila"] {
-        assert!(m.app.visible(id), "{id} sumiu");
-        assert!(!m.app.enabled(id), "{id} devia estar desabilitado");
-    }
+    assert!(m.app.visible("painel-chat"), "painel-chat sumiu");
+    assert!(
+        !m.app.enabled("painel-chat"),
+        "painel-chat devia estar desabilitado"
+    );
     assert!(
         m.app.enabled("layout-2x2"),
         "o layout vale em qualquer janela"
@@ -597,6 +605,44 @@ fn apagar_na_secundaria_pergunta_nela() {
 }
 
 #[test]
+fn os_dialogos_gerais_abrem_na_janela_em_que_foram_pedidos() {
+    let pasta = Pasta::nova("janelas-dialogos-gerais");
+    pasta.semear(&exemplo());
+    let (mut m, principal, outra) = com_duas_janelas(&pasta);
+    m.app.set_active_window(outra);
+    m.app.switch_to(outra);
+    m.app
+        .click("menus-ferramentas")
+        .click("cluster-modo")
+        .click("cluster-menu");
+    m.app.frame();
+    assert!(
+        m.app.is_open("cluster-dialogo"),
+        "o cluster abre na secundária"
+    );
+    m.app.switch_to(principal);
+    assert!(
+        !m.app.is_open("cluster-dialogo"),
+        "a principal não mostra o diálogo da secundária"
+    );
+    m.app.switch_to(outra);
+    m.app.click("cluster-dialogo-close");
+    m.app.frame();
+
+    m.app.click("menus-ajuda").click("atalhos");
+    assert!(m.app.is_open("atalhos-dialogo"));
+    m.app.switch_to(principal);
+    assert!(!m.app.is_open("atalhos-dialogo"));
+
+    // De volta à principal, o diálogo aberto vai junto com o foco.
+    m.app.set_active_window(principal);
+    m.app.frame();
+    assert!(m.app.is_open("atalhos-dialogo"));
+    m.app.switch_to(outra);
+    assert!(!m.app.is_open("atalhos-dialogo"));
+}
+
+#[test]
 fn a_lupa_da_secundaria_poe_o_cursor_no_filtro_dela() {
     let pasta = Pasta::nova("janelas-lupa");
     pasta.semear(&exemplo());
@@ -646,44 +692,24 @@ fn os_paineis_da_secundaria_voltam_na_proxima_execucao() {
 }
 
 #[test]
-fn o_cofre_na_secundaria_traz_a_principal_com_a_pagina() {
+fn o_cofre_e_o_sobre_da_secundaria_abrem_nela() {
     let pasta = Pasta::nova("janelas-cofre");
     pasta.semear(&exemplo());
     let (mut m, principal, outra) = com_duas_janelas(&pasta);
 
+    m.app.set_active_window(outra);
     m.app.switch_to(outra);
     m.app.click("menus-ferramentas").click("abrir-cofre");
-    m.app.switch_to(principal);
     assert_eq!(m.app.text("navegacao"), "cofre");
     assert!(m.app.visible("cofre-pagina"));
-
-    // Ajuda › Sobre também vai para a principal.
-    m.app.switch_to(outra);
+    // A barra de menus fica na página Terminais.
+    m.app.click("navegacao-terminais");
     m.app.click("menus-ajuda").click("sobre");
-    m.app.switch_to(principal);
     assert_eq!(m.app.text("navegacao"), "sobre");
-}
 
-#[test]
-fn o_cofre_na_secundaria_tira_a_principal_da_bandeja() {
-    let pasta = Pasta::nova("janelas-cofre-bandeja");
-    pasta.semear(&exemplo());
-    let mut config = Configuracoes::default();
-    config.geral.pagina_inicial = PaginaInicial::Terminais;
-    config.geral.ao_fechar = AoFechar::Bandeja;
-    config.salvar(&pasta.armazenamento()).unwrap();
-    let (mut m, principal, outra) = com_duas_janelas(&pasta);
-
+    // A principal segue onde estava.
     m.app.switch_to(principal);
-    assert!(!m.app.close_window(principal));
-    assert!(m.app.window_hidden(principal) && m.app.window_hidden(outra));
-
-    // O menu da secundária age mesmo com tudo escondido: a principal volta com a página.
-    m.app.switch_to(outra);
-    m.app.click("menus-ferramentas").click("abrir-cofre");
-    m.app.switch_to(principal);
-    assert!(!m.app.window_hidden(principal));
-    assert_eq!(m.app.text("navegacao"), "cofre");
+    assert_eq!(m.app.text("navegacao"), "terminais");
 }
 
 #[test]
@@ -773,4 +799,71 @@ fn o_atalho_de_item_na_secundaria_abre_uma_janela_so() {
         .shortcut(Shortcut::new('N', Modifiers::CTRL | Modifiers::ALT));
     m.app.frame();
     assert_eq!(m.app.windows().len(), 3);
+}
+
+#[test]
+fn cada_janela_mostra_a_sua_pagina() {
+    let pasta = Pasta::nova("janelas-paginas");
+    pasta.semear(&exemplo());
+    let (mut m, principal, outra) = com_duas_janelas(&pasta);
+    m.app.set_active_window(outra);
+    m.app.switch_to(outra);
+    m.app.click("navegacao-cofre");
+    assert!(
+        m.app.visible("cofre-bloquear"),
+        "o Cofre abre na secundária"
+    );
+    m.app.switch_to(principal);
+    assert!(
+        !m.app.visible("cofre-bloquear"),
+        "a principal segue nos Terminais"
+    );
+    assert!(m.app.visible("arvore"));
+
+    // O cartão das Configurações no Início leva às Configurações a janela dele, e só ela.
+    m.app.switch_to(outra);
+    m.app.click("navegacao-inicio");
+    m.app.click("inicio-ferramenta-configuracoes");
+    assert!(m.app.visible("navegacao-configuracoes-conteudo"));
+    m.app.switch_to(principal);
+    assert!(!m.app.visible("navegacao-configuracoes-conteudo"));
+    m.app.switch_to(outra);
+    m.app.assert_lint();
+}
+
+#[test]
+fn arquivos_fica_com_a_ultima_janela_que_a_usou() {
+    let pasta = Pasta::nova("janelas-arquivos");
+    pasta.semear(&exemplo());
+    let (mut m, principal, outra) = com_duas_janelas(&pasta);
+    m.app.set_active_window(outra);
+    m.app.switch_to(outra);
+    m.app.click("navegacao-arquivos");
+    m.app.frame();
+    assert!(m.app.visible("arquivos-inicio"));
+
+    // A principal abre Arquivos sem o foco: a página segue na secundária, e a principal avisa.
+    m.app.switch_to(principal);
+    m.app.click("navegacao-arquivos");
+    m.app.frame();
+    assert!(m.app.visible("arquivos-em-outra-janela"));
+    assert!(m.app.tree().find("arquivos-inicio").is_none());
+
+    // Com o foco, a página vem para a principal.
+    m.app.set_active_window(principal);
+    m.app.frame();
+    assert!(m.app.visible("arquivos-inicio"));
+    m.app.switch_to(outra);
+    m.app.frame();
+    assert!(m.app.visible("arquivos-em-outra-janela"));
+
+    // A secundária que fecha com a página devolve a página à principal.
+    m.app.set_active_window(outra);
+    m.app.frame();
+    assert!(m.app.visible("arquivos-inicio"));
+    outra.close();
+    m.app.frame();
+    m.app.switch_to(principal);
+    m.app.frame();
+    assert!(m.app.visible("arquivos-inicio"));
 }

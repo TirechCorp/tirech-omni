@@ -8,7 +8,7 @@
 //! ganha a terceira escolha "Passar a aba para {sessão}", que troca o dono dela.
 
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tomni_ui::prelude::*;
 
@@ -40,6 +40,10 @@ pub(super) struct SinaisDoDialogo {
     perigo: Signal<String>,
     pode_sessao: Signal<bool>,
     marcar_sessao: Signal<bool>,
+    /// A caixa "abrir as abas novas desta sessão sem perguntar", com o tempo no texto; vazio
+    /// esconde a caixa.
+    texto_auto: Signal<String>,
+    marcar_auto: Signal<bool>,
     motivo: Signal<String>,
     /// O nome da sessão que pede e o lugar dela na paleta (a faixa colorida).
     sessao: Signal<String>,
@@ -69,6 +73,8 @@ impl SinaisDoDialogo {
             perigo: signal(String::new()),
             pode_sessao: signal(false),
             marcar_sessao: signal(false),
+            texto_auto: signal(String::new()),
+            marcar_auto: signal(false),
             motivo: signal(String::new()),
             sessao: signal(String::new()),
             cor: signal(0),
@@ -184,6 +190,12 @@ impl Tela {
             ),
             None => a.trabalho.pedido.sessao.clone(),
         };
+        // Ligar um túnel ou usar um espaço que precisa de aba nova diz isso também.
+        let contexto = if a.plano.abre_aba && a.plano.acao != Acao::Abrir {
+            format!("{contexto}\n{}", t!("mcp-aprovar-abre-aba"))
+        } else {
+            contexto
+        };
         s.titulo.set(titulo_da(&a));
         s.contexto.set(contexto);
         let quem = self.sessao_ia(a.trabalho.pedido.ligacao);
@@ -196,9 +208,21 @@ impl Tela {
         s.invisiveis.set(tem_controle(&a.plano.detalhe));
         s.detalhe.set(mostrar_sem_controle(&a.plano.detalhe));
         s.perigo.set(a.plano.bloqueio.clone().unwrap_or_default());
-        s.pode_sessao
-            .set(a.plano.sessao.is_some() && a.plano.bloqueio.is_none() && a.plano.dono.is_none());
+        s.pode_sessao.set(
+            a.plano.sessao.is_some()
+                && a.plano.bloqueio.is_none()
+                && a.plano.dono.is_none()
+                && !a.plano.abre_aba,
+        );
         s.marcar_sessao.set(false);
+        let auto = self.config.with_untracked(|c| c.ia.mcp_abrir_auto);
+        s.texto_auto.set(match auto.duracao() {
+            Some(_) if !a.plano.so_abertura || a.plano.dono.is_some() => String::new(),
+            None => String::new(),
+            Some(None) => t!("mcp-aprovar-abrir-auto-sempre"),
+            Some(Some(_)) => t!("mcp-aprovar-abrir-auto", tempo = auto.nome()),
+        });
+        s.marcar_auto.set(false);
         s.motivo.set(String::new());
         let janela = a.janela;
         *self.mcp.ativa.borrow_mut() = Some(a);
@@ -263,6 +287,12 @@ impl Tela {
                     .aprovadas_sessao
                     .borrow_mut()
                     .insert((trabalho.pedido.ligacao, sessao.key_str()));
+            }
+            if !s.texto_auto.get_untracked().is_empty() && s.marcar_auto.get_untracked() {
+                self.mcp
+                    .abrir_auto
+                    .borrow_mut()
+                    .insert(trabalho.pedido.ligacao, Instant::now());
             }
             if resposta == Resposta::Passar
                 && let Some(sessao) = plano.sessao
@@ -467,6 +497,11 @@ pub(super) fn dialogo(tela: &Rc<Tela>, janela: Janela) -> impl View + use<> {
                     CheckBox::bind(s.marcar_sessao, t!("mcp-aprovar-sessao"))
                         .id("mcp-aprovar-sessao")
                         .visible(move || s.pode_sessao.get()),
+                )
+                .child(
+                    CheckBox::bind(s.marcar_auto, move || s.texto_auto.get())
+                        .id("mcp-aprovar-abrir-auto")
+                        .visible(move || !s.texto_auto.get().is_empty()),
                 )
                 .child(
                     Edit::bind(s.motivo)

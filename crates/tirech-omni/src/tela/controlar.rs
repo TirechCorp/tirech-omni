@@ -574,7 +574,6 @@ impl Tela {
         escolha.lembrar.set(false);
         *escolha.pedido.borrow_mut() = Some((janela, alvo, f, opcoes));
         escolha.aberto.set(true);
-        self.janelas.principal().handle.focus();
     }
 
     /// A resposta do diálogo "Continuar a conversa?": `abrir` com a opção marcada, ou nada.

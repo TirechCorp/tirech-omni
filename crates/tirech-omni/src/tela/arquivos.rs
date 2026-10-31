@@ -19,6 +19,7 @@ use crate::arquivos::{
 use crate::configuracoes::EnviarEditado;
 use crate::espacos::ArquivoSalvo;
 use crate::modelo::{Connection, FtpSeguranca, Kind};
+use crate::paineis::PaineisDaPagina;
 use crate::recentes::Alvo as AlvoRecente;
 use crate::t;
 
@@ -200,7 +201,7 @@ impl Tela {
         self.abas_arquivos.update(|a| a.push(aba));
         self.aba_arquivos.set(chave);
         if mostrar {
-            self.pagina.set("arquivos".to_owned());
+            self.ir_para("arquivos");
         }
     }
 
@@ -212,7 +213,7 @@ impl Tela {
             .with_untracked(|a| a.iter().find(|a| a.sessao == Some(sessao)).cloned());
         if let Some(aba) = existente {
             self.aba_arquivos.set(aba.chave);
-            self.pagina.set("arquivos".to_owned());
+            self.ir_para("arquivos");
             return;
         }
         let servidor = match self.opener.arquivos_da_sessao(sessao) {
@@ -335,7 +336,7 @@ impl Tela {
     fn terminal_aqui(&self, sessao: Session, caminho: &str) {
         let seguro = caminho.replace('\'', r"'\''");
         sessao.send(format!("cd '{seguro}'\r").as_bytes());
-        self.pagina.set("terminais".to_owned());
+        self.ir_para("terminais");
         for janela in self.janelas.todas_agora() {
             let tem = janela
                 .layout
@@ -653,7 +654,7 @@ fn detalhe_do_cartao(c: &Connection) -> String {
 }
 
 /// A página Arquivos.
-pub(super) fn pagina(tela: &Rc<Tela>, ctx: &Rc<Contexto>) -> Column {
+pub(super) fn pagina(tela: &Rc<Tela>, ctx: &Rc<Contexto>, paineis: &PaineisDaPagina) -> Column {
     let conexoes = {
         let t = Rc::clone(tela);
         Rc::new(move || {
@@ -734,7 +735,7 @@ pub(super) fn pagina(tela: &Rc<Tela>, ctx: &Rc<Contexto>) -> Column {
         let t = Rc::clone(tela);
         Rc::new(move || {
             t.nova_conexao();
-            t.pagina.set("terminais".to_owned());
+            t.ir_para("terminais");
         })
     };
     let remotos = {
@@ -764,14 +765,14 @@ pub(super) fn pagina(tela: &Rc<Tela>, ctx: &Rc<Contexto>) -> Column {
                     fechar,
                     nova_conexao,
                     remotos,
-                    paineis: tela.paineis_arquivos.clone(),
+                    paineis: paineis.clone(),
                 })),
         )
         .child(rclone::subpagina(tela).visible(move || aberta.get()))
 }
 
 /// Os diálogos da página, que moram ao lado da navegação: o de conflito e o de fechar a aba.
-pub(super) fn dialogos(tela: &Rc<Tela>, ctx: &Rc<Contexto>) -> impl View {
+pub(super) fn dialogos(tela: &Rc<Tela>, ctx: &Rc<Contexto>) -> impl View + use<> {
     let t = Rc::clone(tela);
     Column::new()
         .child(fila::dialogo_de_conflito(ctx))

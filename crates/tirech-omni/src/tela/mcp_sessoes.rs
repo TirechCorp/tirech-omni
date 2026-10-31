@@ -227,13 +227,15 @@ impl Tela {
             .retain(|_, (sessao, _, _)| *sessao != ligacao);
     }
 
-    /// Recusa os pedidos da sessão, tira as aprovações "até eu parar", a marca e a posse das abas.
+    /// Recusa os pedidos da sessão, tira as aprovações "até eu parar", a licença de abrir abas,
+    /// a marca e a posse das abas.
     fn esquecer_sessao(self: &Rc<Self>, ligacao: u64) {
         self.recusar_aprovacoes_de(ligacao, &t!("mcp-a-pessoa-parou"));
         self.mcp
             .aprovadas_sessao
             .borrow_mut()
             .retain(|(sessao, _)| *sessao != ligacao);
+        self.mcp.abrir_auto.borrow_mut().remove(&ligacao);
         self.mcp
             .donos
             .borrow_mut()

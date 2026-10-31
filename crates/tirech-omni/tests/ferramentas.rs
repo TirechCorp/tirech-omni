@@ -272,6 +272,7 @@ fn o_menu_da_aba_age_so_na_janela_da_aba() {
     m.app.frame();
 
     // O menu da aba da primeira janela: só a dela é reaberta.
+    m.app.set_active_window(principal);
     m.app.switch_to(principal);
     let chave = chaves(&m.app, 0).remove(0);
     m.app.context_menu(&format!("paineis-painel-0-{chave}"));

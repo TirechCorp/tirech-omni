@@ -6,6 +6,15 @@ What is planned, with no dates and in no particular order. An item here is not a
 you want to help with one, open an issue first to agree on the approach
 ([CONTRIBUTING](CONTRIBUTING.md)).
 
+## Any program in the local shell through the VPN
+
+Today the local shell goes out through the client's network only for programs that use a proxy
+(the `ALL_PROXY` and `HTTP_PROXY` variables) or through a local tunnel. To make it work for any
+program, with no setup, the tab would need its own network stack: a *network namespace* with a
+`tun` device tied to the embedded VPN (on Linux), or a virtual adapter per tab on Windows and
+macOS. That needs privileges (`CAP_NET_ADMIN`, a helper installed with permission, or a driver)
+that the app doesn't need today, so it stays for someday.
+
 ## Interface in more languages
 
 Today the interface is in Portuguese (Brazil), English and Spanish. To reach most languages:

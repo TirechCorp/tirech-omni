@@ -429,7 +429,7 @@ impl Tela {
             InfoBarSeverity::Success
         };
         self.avisar(severidade, mensagem);
-        self.pagina.set("terminais".to_owned());
+        self.ir_para("terminais");
     }
 
     // --- Exportar ---
@@ -595,8 +595,9 @@ pub(super) fn menu_exportar(tela: &Rc<Tela>) -> MenuFlyout {
     menu
 }
 
-/// Os diálogos de importar e de exportar.
-pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View + use<> {
+/// Os diálogos de importar e de exportar. Os efeitos ligam uma vez, e a função devolvida monta
+/// os diálogos em cada janela.
+pub(super) fn dialogos(tela: &Rc<Tela>) -> impl Fn() -> Column + use<> {
     let e = &tela.importacao;
 
     // Solta o que a pré-visualização guardava quando ela fecha sem importar.
@@ -610,13 +611,17 @@ pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View + use<> {
         });
     }
 
-    Column::new()
-        .child(dialogo_mestra(tela))
-        .child(dialogo_previa(tela))
-        .child(dialogo_exportar(tela))
+    let mestra = dialogo_mestra(tela);
+    let tela = Rc::clone(tela);
+    move || {
+        Column::new()
+            .child(mestra())
+            .child(dialogo_previa(&tela))
+            .child(dialogo_exportar(&tela))
+    }
 }
 
-fn dialogo_mestra(tela: &Rc<Tela>) -> impl View + use<> {
+fn dialogo_mestra(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     let e = &tela.importacao;
     let (aberto, senha, errou) = (e.mestra_aberta, e.mestra_senha, e.mestra_errou);
     let refazer = Rc::clone(&e.refazer_mestra);
@@ -636,39 +641,43 @@ fn dialogo_mestra(tela: &Rc<Tela>) -> impl View + use<> {
             }
         });
     }
-    let t = Rc::clone(tela);
-    ContentDialog::new(t!("importacao-senha-mestra-do-mremoteng"), aberto)
-        .id("importar-mestra-dialogo")
-        .content(
-            Column::new()
-                .gap(8)
-                .child(
-                    Text::new(t!("importacao-esse-arquivo-usa-uma-senha-mestra"))
-                        .secondary()
-                        .wrap(),
-                )
-                .child(
-                    Edit::bind(senha)
-                        .id("importar-mestra-senha")
-                        .password()
-                        .placeholder(t!("importacao-senha-mestra")),
-                )
-                .child(
-                    Text::new(t!("importacao-a-senha-mestra-informada-nao-abre"))
-                        .id("importar-mestra-erro")
-                        .caption()
-                        .visible(move || errou.get()),
-                ),
-        )
-        .primary(t!("comum-continuar"), move || {
-            let digitada = senha.get_untracked();
-            t.analisar_importacao(Some(&digitada));
-        })
-        .secondary(t!("importacao-sem-senhas"), {
-            let t = Rc::clone(tela);
-            move || t.importar_sem_decifrar()
-        })
-        .close(t!("comum-cancelar"))
+    let tela = Rc::clone(tela);
+    move || {
+        let tela = &tela;
+        let t = Rc::clone(tela);
+        ContentDialog::new(t!("importacao-senha-mestra-do-mremoteng"), aberto)
+            .id("importar-mestra-dialogo")
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(
+                        Text::new(t!("importacao-esse-arquivo-usa-uma-senha-mestra"))
+                            .secondary()
+                            .wrap(),
+                    )
+                    .child(
+                        Edit::bind(senha)
+                            .id("importar-mestra-senha")
+                            .password()
+                            .placeholder(t!("importacao-senha-mestra")),
+                    )
+                    .child(
+                        Text::new(t!("importacao-a-senha-mestra-informada-nao-abre"))
+                            .id("importar-mestra-erro")
+                            .caption()
+                            .visible(move || errou.get()),
+                    ),
+            )
+            .primary(t!("comum-continuar"), move || {
+                let digitada = senha.get_untracked();
+                t.analisar_importacao(Some(&digitada));
+            })
+            .secondary(t!("importacao-sem-senhas"), {
+                let t = Rc::clone(tela);
+                move || t.importar_sem_decifrar()
+            })
+            .close(t!("comum-cancelar"))
+    }
 }
 
 fn dialogo_previa(tela: &Rc<Tela>) -> impl View + use<> {

@@ -338,6 +338,7 @@ pub const CATALOGO: &[Definicao] = &[
         tk!("config-secao-conexoes"),
         Valor
     ),
+    def!("conexoes.ocioso_mins", tk!("config-secao-conexoes"), Valor),
     def!("conexoes.abrir_em", tk!("config-secao-conexoes"), Valor),
     def!(
         "acao.importar_ssh_config",
@@ -623,6 +624,8 @@ pub const CATALOGO: &[Definicao] = &[
     ),
     // Controle por assistentes (MCP)
     def!("ia.mcp_ligado", tk!("config-secao-mcp"), Valor),
+    def!("ia.mcp_abrir", tk!("config-secao-mcp"), Valor),
+    def!("ia.mcp_abrir_auto", tk!("config-secao-mcp"), Valor),
     def!("acao.mcp_como", tk!("config-secao-mcp"), Acao),
     def!("acao.mcp_espaco_novo", tk!("config-secao-mcp"), Acao),
     def!("ia.bloqueio_extras", tk!("config-secao-mcp"), Valor),

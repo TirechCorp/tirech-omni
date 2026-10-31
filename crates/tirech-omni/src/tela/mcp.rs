@@ -25,14 +25,15 @@ use tomni_ui::terminal::Session;
 
 use super::mcp_aprovacao::Aprovacao;
 use super::{Janela, Tela};
-use crate::configuracoes::Configuracoes;
+use crate::configuracoes::{AbrirAbaIa, Configuracoes};
 use crate::espacos::id_da_chave;
 use crate::mcp::alvo::achar_conexao;
 use crate::mcp::auditoria::{self, DecisaoRegistrada, Registro};
 use crate::mcp::bloqueio::{perigoso, perigoso_digitado};
 use crate::mcp::operacao::{self, Resposta, caminho_na_arvore};
 use crate::mcp::permissao::{
-    Decisao, Exigencia, PermissaoIa, decidir, exigencia, permissao_efetiva, permissao_mais_alta,
+    ABRIR_ABA_BLOQUEADA, Decisao, Exigencia, PermissaoIa, abrir_aba_efetiva, decidir,
+    decidir_abertura, exigencia, permissao_efetiva, permissao_mais_alta,
 };
 use crate::mcp::saidas::Saidas;
 use crate::mcp::servidor::{self, Fila, Pedido, ServidorMcp};
@@ -122,6 +123,12 @@ pub(super) struct Plano {
     pub dono: Option<SessaoIa>,
     /// A janela (a partir de 1), as colunas e as linhas de um `organizar_paineis`.
     pub grade: Option<(usize, usize, usize)>,
+    /// Se o pedido abre uma aba nova da conexão (o `abrir_conexao`, ligar um túnel ou usar um
+    /// espaço sem aba de pé), o que passa pela escolha "Abrir abas novas".
+    pub abre_aba: bool,
+    /// Se só a escolha "Abrir abas novas" (em Perguntar) faz o pedido perguntar: é quando o
+    /// diálogo oferece abrir as próximas abas da sessão sem perguntar.
+    pub so_abertura: bool,
 }
 
 /// Um pedido em andamento.
@@ -293,6 +300,9 @@ pub(super) struct EstadoMcp {
     pub sincronizando: Cell<bool>,
     /// As abas cujas próximas ações a pessoa aprovou, por ligação.
     pub aprovadas_sessao: RefCell<HashSet<(u64, String)>>,
+    /// Quando a pessoa deixou cada sessão (ligação) abrir abas novas sem perguntar; vale pelo
+    /// tempo de `ia.mcp_abrir_auto`, contado daí.
+    pub abrir_auto: RefCell<HashMap<u64, Instant>>,
     /// As saídas cortadas, para o `ler_saida`.
     pub saidas: RefCell<Saidas>,
     /// As aprovações à espera, na ordem; a primeira vai para o diálogo.
@@ -334,6 +344,7 @@ impl EstadoMcp {
             grades: RefCell::new(HashMap::new()),
             sincronizando: Cell::new(false),
             aprovadas_sessao: RefCell::new(HashSet::new()),
+            abrir_auto: RefCell::new(HashMap::new()),
             saidas: RefCell::new(Saidas::default()),
             aprovacoes: RefCell::new(VecDeque::new()),
             ativa: RefCell::new(None),
@@ -589,8 +600,10 @@ impl Tela {
             }
             _ => (Exige::Conexao, Acao::Ver),
         };
+        let mut abre_aba = nome == "abrir_conexao";
         let alvo = if DO_ESPACO.contains(&nome) {
-            let (_, conexao) = self.espaco_do_pedido(&t.pedido)?;
+            let (espaco, conexao) = self.espaco_do_pedido(&t.pedido)?;
+            abre_aba = self.espaco_abre_aba(&espaco, conexao.id);
             Alvo {
                 conexao: Some(conexao),
                 sessao: None,
@@ -699,6 +712,11 @@ impl Tela {
             }
             Acao::Ver => (String::new(), None),
         };
+        if nome == "ligar_tunel"
+            && let Some(c) = &alvo.conexao
+        {
+            abre_aba = self.aba_com_tuneis(c.id, alvo.sessao).is_none();
+        }
         if let Some(c) = &alvo.conexao {
             t.conexao.set(Some(c.id));
             *t.nome_conexao.borrow_mut() = c.name.clone();
@@ -714,6 +732,8 @@ impl Tela {
             bloqueio,
             dono: None,
             grade,
+            abre_aba,
+            so_abertura: false,
         })
     }
 
@@ -747,10 +767,23 @@ impl Tela {
             Some(p) => decidir(p, exig, plano.bloqueio.is_some()),
             None => Decisao::Permitir,
         };
+        // Uma aba nova passa pela escolha "Abrir abas novas" da conexão. Quando só ela pergunta,
+        // a licença que a pessoa deu à sessão no diálogo abre sem perguntar.
+        let mut sempre = false;
+        let mut pela_licenca = false;
+        if plano.abre_aba
+            && let Some(c) = &plano.conexao
+        {
+            let antes = decisao.clone();
+            (decisao, sempre) = decidir_abertura(decisao, self.abrir_aba_da_conexao(c.id));
+            plano.so_abertura = sempre && antes == Decisao::Permitir;
+            if plano.so_abertura && self.abre_sem_perguntar(t.pedido.ligacao) {
+                (decisao, sempre, pela_licenca) = (Decisao::Permitir, false, true);
+            }
+        }
         // Mudar uma aba de outra sessão pergunta sempre, mesmo em Livre e mesmo com o "resto
         // desta sessão" aprovado em outra aba. Duas sessões pedindo grades diferentes em
         // seguida também: a segunda pergunta.
-        let mut sempre = false;
         if !matches!(decisao, Decisao::Recusar(_)) {
             if let Some(dono) = self.dono_de_outra(&t, &plano) {
                 plano.dono = Some(dono);
@@ -764,7 +797,11 @@ impl Tela {
         }
         match decisao {
             Decisao::Permitir => {
-                t.decisao.set(DecisaoRegistrada::Permitida);
+                t.decisao.set(if pela_licenca {
+                    DecisaoRegistrada::AprovadaSessao
+                } else {
+                    DecisaoRegistrada::Permitida
+                });
                 self.executar_mcp(t, plano);
             }
             Decisao::Recusar(motivo) => {
@@ -784,6 +821,46 @@ impl Tela {
                     self.enfileirar_aprovacao(t, plano);
                 }
             }
+        }
+    }
+
+    /// A escolha "Abrir abas novas" que vale para a conexão `id` (a dela, a da pasta ou a das
+    /// Configurações).
+    pub(super) fn abrir_aba_da_conexao(&self, id: u64) -> AbrirAbaIa {
+        let padrao = self.config.with_untracked(|c| c.ia.mcp_abrir);
+        self.tree
+            .with_untracked(|tr| abrir_aba_efetiva(tr, id, padrao))
+    }
+
+    /// Se a sessão `ligacao` tem licença para abrir abas novas sem perguntar: a pessoa marcou a
+    /// caixa no diálogo há menos tempo que `ia.mcp_abrir_auto`. A licença vencida sai.
+    fn abre_sem_perguntar(&self, ligacao: u64) -> bool {
+        let duracao = self
+            .config
+            .with_untracked(|c| c.ia.mcp_abrir_auto.duracao());
+        let mut licencas = self.mcp.abrir_auto.borrow_mut();
+        let Some(desde) = licencas.get(&ligacao).copied() else {
+            return false;
+        };
+        let vale = match duracao {
+            None => false,
+            Some(None) => true,
+            Some(Some(d)) => desde.elapsed() < d,
+        };
+        if !vale {
+            licencas.remove(&ligacao);
+        }
+        vale
+    }
+
+    /// Confere, na hora de abrir uma aba nova da conexão `id`, se pode. `decidida` diz se a
+    /// decisão já contou com a aba nova; se não contou (a aba que o pedido ia usar fechou
+    /// enquanto ele esperava), só "Permitir" abre.
+    pub(super) fn pode_abrir_aba(&self, id: u64, decidida: bool) -> Result<(), String> {
+        match self.abrir_aba_da_conexao(id) {
+            AbrirAbaIa::Bloquear => Err(ABRIR_ABA_BLOQUEADA.to_owned()),
+            AbrirAbaIa::Perguntar if !decidida => Err(t!("mcp-abrir-aba-fechou")),
+            AbrirAbaIa::Perguntar | AbrirAbaIa::Permitir => Ok(()),
         }
     }
 
@@ -1141,6 +1218,7 @@ impl Tela {
     pub(super) fn parar_ia_mcp(self: &Rc<Self>) {
         self.mcp.geracao.set(self.mcp.geracao.get() + 1);
         self.mcp.aprovadas_sessao.borrow_mut().clear();
+        self.mcp.abrir_auto.borrow_mut().clear();
         self.recusar_todas_as_aprovacoes(&t!("mcp-a-pessoa-parou"));
         self.mcp.atividade.borrow_mut().clear();
         self.mcp.donos.borrow_mut().clear();

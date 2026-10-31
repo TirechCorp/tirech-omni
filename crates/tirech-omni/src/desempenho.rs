@@ -8,8 +8,9 @@
 //! sobra do total é a linha "Interface". O programa do shell local (o filho do pseudoterminal e
 //! os filhos dele) é de outro processo e fica numa coluna à parte, fora do total.
 //!
-//! A [`FonteDoSistema`] lê o `/proc` no Linux e o `GetProcessTimes` no Windows (pelo
-//! `tomni-ui-win32`); nos outros sistemas, só o tempo da interface por aba. A [`FonteFixa`] é a
+//! A [`FonteDoSistema`] lê o `/proc` no Linux, o `GetProcessTimes` no Windows (pelo
+//! `tomni-ui-win32`) e o `proc_pidinfo` no macOS (pelo `tomni-ui-macos`); nos outros sistemas,
+//! só o tempo da interface por aba. A [`FonteFixa`] é a
 //! dos testes, com os números que eles põem.
 
 use std::cell::RefCell;
@@ -341,7 +342,7 @@ pub fn cpu(valor: f64) -> String {
     }
 }
 
-/// As leituras do sistema: o `/proc` no Linux, o Win32 no Windows.
+/// As leituras do sistema: o `/proc` no Linux, o Win32 no Windows e o `libproc` no macOS.
 mod sistema {
     use super::UsoDoProcesso;
     use std::time::Duration;
@@ -371,6 +372,7 @@ mod sistema {
     }
 
     /// A memória residente do `/proc/self/status` (a linha `VmRSS`, em kB).
+    #[cfg(any(target_os = "linux", test))]
     pub(super) fn memoria_do_status(texto: &str) -> Option<u64> {
         let linha = texto.lines().find(|l| l.starts_with("VmRSS:"))?;
         let kb: u64 = linha.split_whitespace().nth(1)?.parse().ok()?;
@@ -396,7 +398,16 @@ mod sistema {
         })
     }
 
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(target_os = "macos")]
+    pub(super) fn processo() -> Option<UsoDoProcesso> {
+        let uso = tomni_ui_macos::process_usage(std::process::id()).ok()?;
+        Some(UsoDoProcesso {
+            cpu: uso.cpu,
+            memoria: uso.memory,
+        })
+    }
+
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
     pub(super) fn processo() -> Option<UsoDoProcesso> {
         None
     }
@@ -469,7 +480,33 @@ mod sistema {
         Some(total)
     }
 
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(target_os = "macos")]
+    pub(super) fn programa(pid: u32) -> Option<Duration> {
+        let mut total = tomni_ui_macos::process_usage(pid).ok()?.cpu;
+        // Os descendentes, filho a filho (um pid reaproveitado no meio da leitura poderia fazer
+        // um ciclo: o teto evita andar em círculos). O que não dá para ler (o `sudo`, de outro
+        // usuário) fica de fora, mas os filhos dele entram.
+        let mut fila = vec![pid];
+        let mut vistos = 0;
+        while let Some(pai) = fila.pop() {
+            vistos += 1;
+            if vistos > 4096 {
+                break;
+            }
+            for filho in tomni_ui_macos::child_pids(pai).unwrap_or_default() {
+                if filho == pai {
+                    continue;
+                }
+                if let Ok(uso) = tomni_ui_macos::process_usage(filho) {
+                    total += uso.cpu;
+                }
+                fila.push(filho);
+            }
+        }
+        Some(total)
+    }
+
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
     pub(super) fn programa(_pid: u32) -> Option<Duration> {
         None
     }
@@ -596,6 +633,29 @@ mod testes {
         let eu = tomni_ui::terminal::current_thread_id().unwrap();
         assert!(sistema::thread(eu).is_some());
         assert!(sistema::programa(std::process::id()).is_some());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn o_processo_e_o_neto_do_shell_aparecem_no_macos() {
+        let uso = sistema::processo().expect("o proc_pidinfo do próprio processo");
+        assert!(uso.memoria > 0);
+        assert!(uso.cpu > Duration::ZERO);
+        // O shell só espera; quem gasta é o neto, que para sozinho em 2 s.
+        let mut shell = std::process::Command::new("/bin/sh")
+            .args([
+                "-c",
+                "/bin/bash -c 'while [ $SECONDS -lt 2 ]; do :; done' & wait",
+            ])
+            .spawn()
+            .unwrap();
+        std::thread::sleep(Duration::from_secs(1));
+        let programa = sistema::programa(shell.id());
+        shell.kill().unwrap();
+        shell.wait().unwrap();
+        let programa = programa.expect("o shell ainda roda");
+        assert!(programa >= Duration::from_millis(300), "{programa:?}");
+        assert_eq!(sistema::programa(999_999), None);
     }
 
     #[test]

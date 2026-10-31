@@ -73,11 +73,9 @@ impl Tela {
     /// O que fazer com um pedido de fechar a principal. `true` encerra o app; `false` o deixa
     /// aberto, porque a janela foi escondida ou um diálogo perguntou.
     pub(super) fn principal_pode_fechar(&self) -> bool {
-        // A nota que ainda espera a pausa do salvamento automático não se perde.
-        let gravar = self.gravar_nota.borrow().clone();
-        if let Some(gravar) = gravar {
-            gravar();
-        }
+        // A nota que ainda espera a pausa do salvamento automático não se perde, nem a das
+        // outras janelas.
+        self.gravar_notas(None);
         if self.liberado.get() {
             return true;
         }

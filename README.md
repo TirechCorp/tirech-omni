@@ -8,13 +8,15 @@
 and tiled terminals, an encrypted password vault, SSH keys and agent, remote files (SFTP, FTP,
 S3, rclone) and built-in VPNs that need no admin rights. AI assistants can drive it over MCP.
 Interface in English, Portuguese and Spanish. → [Read the documentation](docs/en/README.md) ·
-[Download](https://github.com/TirechCorp/tirech-omni/releases)
+[Download](https://github.com/TirechCorp/tirech-omni/releases) ·
+[How to install](docs/en/README.md#install)
 
 **Português**: gerenciador de conexões SSH, Telnet, serial e shell local, com terminais em abas e
 em grade, cofre de senhas cifrado, chaves e agente SSH, arquivos remotos (SFTP, FTP, S3, rclone)
 e VPNs embutidas que rodam sem administrador. Assistentes de IA operam o app pelo MCP. Interface
 em português, inglês e espanhol. → [Leia a documentação](docs/pt-BR/README.md) ·
-[Baixar](https://github.com/TirechCorp/tirech-omni/releases)
+[Baixar](https://github.com/TirechCorp/tirech-omni/releases) ·
+[Como instalar](docs/pt-BR/README.md#instalar)
 
 | | English | Português |
 | --- | --- | --- |

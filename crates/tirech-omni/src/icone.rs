@@ -1,8 +1,9 @@
 //! O ícone do app: os dois desenhos em SVG (o grande, de 32 px para cima, e o pequeno, para 16 e
 //! 24 px) e os arquivos que saem deles: `assets/icones/tirech-omni-<n>.png` (o tema `hicolor` do
-//! Linux) e `assets/icone.ico` (o executável do Windows). O app não depende dos PNGs em
-//! `assets/`: eles existem para o `build.rs` e para o atalho do menu; o teste de referência
-//! confere que são os que estes desenhos geram.
+//! Linux), `assets/icone.ico` (o executável do Windows) e `assets/icone.icns` (o `.app` do
+//! macOS, do `empacotar-mac.sh`). O app não depende dos PNGs em `assets/`: eles existem para o
+//! `build.rs` e para o atalho do menu; o teste de referência confere que são os que estes
+//! desenhos geram.
 //!
 //! Para regravar depois de mexer num SVG: `TIRECH_ATUALIZAR_ICONES=1 cargo test -p tirech-omni
 //! --lib icone`, e abra os PNGs antes de seguir.
@@ -79,6 +80,39 @@ pub fn ico(tamanhos: &[u32]) -> Vec<u8> {
     saida
 }
 
+/// As imagens do `.icns`: o tipo de cada uma e o lado em pixels. Os `@2x` (`ic11` a `ic14` e
+/// `ic10`) são os da tela Retina: o dobro de pixels do tamanho em pontos.
+pub const IMAGENS_DO_ICNS: &[(&[u8; 4], u32)] = &[
+    (b"icp4", 16),
+    (b"ic11", 32),
+    (b"icp5", 32),
+    (b"ic12", 64),
+    (b"ic07", 128),
+    (b"ic13", 256),
+    (b"ic08", 256),
+    (b"ic14", 512),
+    (b"ic09", 512),
+    (b"ic10", 1024),
+];
+
+/// O `.icns` do `.app` do macOS, com as [`IMAGENS_DO_ICNS`] como PNG. Como o `.ico`, vai escrito
+/// à mão: `icns` e o tamanho do arquivo, depois cada imagem com o tipo e o tamanho dela (os 8
+/// bytes do cabeçalho contam), tudo em big-endian.
+pub fn icns() -> Vec<u8> {
+    let mut corpo = Vec::new();
+    for (tipo, lado) in IMAGENS_DO_ICNS {
+        let imagem = png(*lado);
+        corpo.extend_from_slice(*tipo);
+        corpo.extend_from_slice(&(imagem.len() as u32 + 8).to_be_bytes());
+        corpo.extend_from_slice(&imagem);
+    }
+    let mut saida = Vec::with_capacity(corpo.len() + 8);
+    saida.extend_from_slice(b"icns");
+    saida.extend_from_slice(&(corpo.len() as u32 + 8).to_be_bytes());
+    saida.extend_from_slice(&corpo);
+    saida
+}
+
 #[cfg(test)]
 mod testes {
     use super::*;
@@ -132,6 +166,31 @@ mod testes {
     #[test]
     fn o_ico_gravado_e_o_que_os_desenhos_geram() {
         confere(&assets().join("icone.ico"), &ico(TAMANHOS));
+    }
+
+    #[test]
+    fn o_icns_gravado_e_o_que_os_desenhos_geram() {
+        confere(&assets().join("icone.icns"), &icns());
+    }
+
+    #[test]
+    fn o_icns_tem_o_cabecalho_e_um_png_valido_por_tipo() {
+        let icns = icns();
+        let u32_em =
+            |i: usize| u32::from_be_bytes([icns[i], icns[i + 1], icns[i + 2], icns[i + 3]]);
+        assert_eq!(&icns[..4], b"icns");
+        assert_eq!(u32_em(4) as usize, icns.len());
+        let mut onde = 8;
+        for (tipo, lado) in IMAGENS_DO_ICNS {
+            assert_eq!(&icns[onde..onde + 4], *tipo);
+            let fim = onde + u32_em(onde + 4) as usize;
+            let leitor = png::Decoder::new(std::io::Cursor::new(&icns[onde + 8..fim]))
+                .read_info()
+                .unwrap();
+            assert_eq!((leitor.info().width, leitor.info().height), (*lado, *lado));
+            onde = fim;
+        }
+        assert_eq!(onde, icns.len());
     }
 
     #[test]

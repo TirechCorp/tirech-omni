@@ -420,6 +420,17 @@ impl Tela {
         self.terminar_mcp(&t, Saida::App(texto));
     }
 
+    /// A aba de pé com túneis em que o túnel da conexão `conexao` liga: a do pedido (`sessao`)
+    /// ou uma da conexão. `None`: ligar abre uma aba nova.
+    pub(super) fn aba_com_tuneis(&self, conexao: u64, sessao: Option<Session>) -> Option<Session> {
+        let com_tuneis = |s: &Session| !s.closed() && s.ssh_forwards().is_some();
+        sessao.filter(com_tuneis).or_else(|| {
+            self.aba_da_conexao(conexao)
+                .map(|(_, s)| s)
+                .filter(com_tuneis)
+        })
+    }
+
     /// `ligar_tunel` e `desligar_tunel`. Ligar abre a aba da conexão se não houver.
     pub(super) fn mcp_mexer_no_tunel(self: &Rc<Self>, t: Rc<Trabalho>, plano: Plano, ligar: bool) {
         let Some(conexao) = plano.conexao.clone() else {
@@ -430,18 +441,10 @@ impl Tela {
             Err(erro) => return self.terminar_mcp(&t, Saida::Erro(erro)),
         };
         let tunel = conexao.tuneis[n].clone();
-        let com_forwards = |sessao: Session| sessao.ssh_forwards().map(|f| (sessao, f));
-        let existente = plano
-            .sessao
-            .filter(|s| !s.closed())
-            .and_then(com_forwards)
-            .or_else(|| {
-                self.aba_da_conexao(conexao.id)
-                    .map(|(_, s)| s)
-                    .filter(|s| !s.closed())
-                    .and_then(com_forwards)
-            });
-        if let Some((_, forwards)) = existente {
+        let existente = self
+            .aba_com_tuneis(conexao.id, plano.sessao)
+            .and_then(|s| s.ssh_forwards());
+        if let Some(forwards) = existente {
             let saida = self.mexer_no_forward(&forwards, conexao.id, n, &tunel, ligar);
             return self.terminar_mcp(&t, saida);
         }
@@ -450,6 +453,9 @@ impl Tela {
         }
         if tunel.problema().is_some() {
             return self.terminar_mcp(&t, Saida::Erro(t!("mcp-tunel-invalido")));
+        }
+        if let Err(erro) = self.pode_abrir_aba(conexao.id, plano.abre_aba) {
+            return self.terminar_mcp(&t, Saida::Erro(erro));
         }
         // Sem aba: abre a da conexão e liga quando o SSH subir.
         let antes: Vec<String> = self

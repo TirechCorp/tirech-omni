@@ -291,6 +291,10 @@ config-conexoes-reconectar-retentar_mins = Tentar de novo após (minutos)
     .descricao = Quando as tentativas acabam, espera estes minutos e começa outra rodada, até a conexão voltar; 0 desliga (de 0 a 1440). Cada conexão ou pasta pode escolher outro tempo nas propriedades.
     .palavras = reconectar de novo rodada pausa minutos insistir
 
+config-conexoes-ocioso_mins = Fechar a aba sem uso após (minutos)
+    .descricao = Fecha a aba de terminal que passou estes minutos sem nada digitado, colado ou mandado por um assistente; 0 desliga (de 0 a 1440). A sessão persistente (tmux ou screen) continua no servidor. Cada conexão ou pasta pode escolher outro tempo nas propriedades.
+    .palavras = ocioso inativo parado sem uso fechar aba tempo limite timeout minutos
+
 config-conexoes-abrir_em = Abrir conexão em
     .descricao = Onde abre o clique duplo na árvore, no Início e na busca.
     .palavras = janela painel aba
@@ -722,6 +726,14 @@ config-ia-espera_resposta = Esperar a resposta por
 config-ia-mcp_ligado = Deixar assistentes controlarem o app
     .descricao = O Claude Code e o Codex passam a ver e usar as conexões que você liberar, pelo MCP. O Tirech Omni precisa estar aberto.
     .palavras = mcp assistente ia ai claude codex controlar ligar
+
+config-ia-mcp_abrir = Abrir abas novas
+    .descricao = Se um assistente pode abrir uma aba nova de uma conexão (abrir a conexão, ligar um túnel ou usar um espaço de trabalho). Cada conexão e pasta pode escolher outra coisa nas propriedades. Reconectar uma aba que caiu não conta.
+    .palavras = mcp assistente aba nova abrir conexão perguntar bloquear permitir
+
+config-ia-mcp_abrir_auto = Abrir sem perguntar depois de aprovar
+    .descricao = Quando uma aba nova pede a sua aprovação, o diálogo pode liberar as próximas abas novas da mesma sessão por este tempo. Desligado sempre pergunta; Sempre abrir vale até a sessão acabar.
+    .palavras = mcp assistente aba nova abrir automático tempo sessão aprovar
 
 config-ia-bloqueio_extras = Comandos que sempre pedem aprovação
     .descricao = Um por linha: o nome de um programa ou, com re: no começo, uma expressão regular. Valem além da lista de bloqueio do app, mesmo com a conexão em Livre.
@@ -1157,6 +1169,7 @@ atalho-fechar-caidas = Fechar as abas caídas
 atalho-fechar-todas = Fechar todas as abas
 atalho-cofre = Abrir o cofre
 atalho-notas = Abrir as notas
+atalho-autocompletar = Autocompletar comando
 atalho-ia-comando = Gerar comando com IA
 atalho-ia-chat = Abrir ou fechar o chat com a IA
 atalho-ia-abrir = Abrir o assistente de IA no servidor
@@ -1197,6 +1210,22 @@ opcao-assistente-opencode = OpenCode
 opcao-abrir-ia-aba-nova = Numa aba nova
 opcao-abrir-ia-painel-livre = Num painel livre
 opcao-abrir-ia-nesta-aba = Nesta aba
+
+# AbrirAbaIa
+opcao-mcp-abrir-permitir = Permitir
+opcao-mcp-abrir-perguntar = Perguntar
+opcao-mcp-abrir-bloquear = Bloquear
+
+# AbrirAbaAuto
+opcao-mcp-abrir-auto-desligado = Desligado
+opcao-mcp-abrir-auto-15m = 15 minutos
+opcao-mcp-abrir-auto-30m = 30 minutos
+opcao-mcp-abrir-auto-1h = 1 hora
+opcao-mcp-abrir-auto-4h = 4 horas
+opcao-mcp-abrir-auto-8h = 8 horas
+opcao-mcp-abrir-auto-12h = 12 horas
+opcao-mcp-abrir-auto-24h = 24 horas
+opcao-mcp-abrir-auto-sempre = Sempre abrir
 
 # MetodoIa
 opcao-metodo-ia-automatico = Automático

@@ -7,7 +7,7 @@
 //! download fica em cima dos terminais da janela, com "Cancelar"; o fim vira um aviso.
 
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -221,6 +221,9 @@ impl Tela {
         }
         self.baixar.versao.update(|v| *v += 1);
         for (b, fim) in acabados {
+            let pasta = matches!(fim, Ok(()))
+                .then(|| b.destino.parent().map(Path::to_path_buf))
+                .flatten();
             let (severidade, base, titulo, texto) = match fim {
                 Ok(()) => (
                     InfoBarSeverity::Success,
@@ -246,7 +249,7 @@ impl Tela {
                     t!("baixar-erro", caminho = b.caminho.as_str(), motivo = motivo),
                 ),
             };
-            self.avisar_colar(b.janela, severidade, base, titulo, texto);
+            self.avisar_colar_com_pasta(b.janela, severidade, base, titulo, texto, pasta);
         }
     }
 

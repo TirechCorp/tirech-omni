@@ -34,16 +34,18 @@ tabs from the previous state does not count. Deleting a connection removes its r
 ## Windows and workspaces
 
 - **Multiple windows**: Window ▸ New window (Ctrl+Alt+N) opens another window with the terminals
-  and the **Connections** and **Properties** panels, pinned as in the main window (title bar, the
-  same menu bar as the main window, and the panes). The tree's selection, filter and open folders
+  and the **Connections** and **Properties** panels, pinned as in the main window (title bar with the
+  search, the navigation and the same menu bar as the main window). The tree's selection, filter and open folders
   are the same in every window; each window's View menu shows and hides its own panels, and each
   window's layout comes back on the next run. Deleting, editing tunnels and commands, running and
-  the server sessions ask in the window whose tree you used. The vault and the other pages stay
-  in the main window. In the other windows, session actions
-  (Reconnect, Stop logging, Close tab…) act on the window the menu belongs to; the ones that only
-  exist in the main window (New connection, Import, Export, Vault, Notes, Keyboard shortcuts,
-  About, and the tree menu's cluster, script, files and copy key) bring the main window to the
-  front, even from the tray, and act there; the other pane items in the View menu are disabled.
+  the server sessions ask in the window whose tree you used. Each window shows its own page,
+  and what is opened in it (Vault, Notes, Performance, About, Settings, the tree menu's script and
+  files) opens there. Files, Logs and Scripts live in one window at a time, the last one that used
+  them; the others show a notice, and the page comes back when you use that window. Session
+  actions (Reconnect, Stop logging, Close tab…) act on the window the menu belongs to; the ones
+  that open a dialog of the main window (New connection, New group, Keyboard shortcuts, Links,
+  Install on this computer, the cluster and copy key) bring the main window to the front, even
+  from the tray, and act there; in the other windows' View menu, only the chat item is disabled.
   Double-clicking a connection opens the tab in the last window you interacted with. Dragging a tab to another window (or outside all of them, which
   opens a new window) and the tab menu's "Move to window" carry the **same session**: nothing
   reconnects and the history is kept. The Window menu lists the open windows and focuses them.
@@ -130,7 +132,8 @@ tabs from the previous state does not count. Deleting a connection removes its r
   absolute path is used as is; `~/…` goes to the home folder; a bare name goes to the folder the
   shell is in (the same probe as "Open the current folder"; without it, `OSC 7`; with nothing, the home folder).
   Surrounding quotes and the `\ ` from `ls` are removed. A folder or a file that does not exist gives a
-  warning. With nothing selected, or in a tab without files (local shell, Telnet, serial),
+  warning. The notice that it finished has **Open folder**, which opens the folder the file was
+  saved to. With nothing selected, or in a tab without files (local shell, Telnet, serial),
   Ctrl+right-click opens the menu, as always.
 - **Persistent session (tmux or screen)**: the **Persistent session** row in the properties of
   an SSH connection (and of a folder, which passes the choice on to those inside it; "Inherit" says where it comes from)
@@ -182,6 +185,20 @@ tabs from the previous state does not count. Deleting a connection removes its r
   program running in a local shell and the history, with the cells colored by weight. The
   **Interface** row is the rest of the app. The table sorts by any column, and double-clicking a
   row goes to the tab. With the meter off and the page closed, nothing is measured.
+  The page has three tabs: **This app** (what is described above), **Processes** and **Disk**.
+  The two new ones have charts in the same style: in Processes, the machine's CPU and memory in
+  the last minute, with the utilization, the memory, the processes and the threads below; in
+  Disk, the reads and the writes, with how many processes are using the disk now. Below the
+  charts, Processes lists every process of the machine chosen in the selector (**This computer** or the
+  server of one of the open SSH connections, if it runs Linux) with the PID, the user, the state,
+  the CPU (in % of the machine), the memory, the threads and the command, plus a summary with the
+  total and the memory in use. Disk shows how much each one reads and writes per second and the
+  total since it started (the **Only those using the disk** box hides the idle ones). Both filter
+  by name, user, command or PID, sort by any column and refresh every 2 seconds while on screen;
+  Processes also shows the **Tree** (each one under its parent). The **End** and **Force end**
+  buttons, and the right-click menu, act on the selected ones (on Linux and macOS, `kill` with
+  TERM or KILL; on Windows, `taskkill`, with `/F` to force; on the server, `kill` over the
+  connection).
 - **Retry after (reconnection that doesn't give up)**: when the tab reconnects automatically
   (Settings › Connections › When the connection drops set to **Reconnect automatically**, and
   always in an assistant's tab) and the attempts run out, it waits and starts another round,
@@ -190,6 +207,13 @@ tabs from the previous state does not count. Deleting a connection removes its r
   **Retry after** row in the properties of an SSH or Telnet connection, or of a folder, chooses
   another one: Inherit, **Off**, 1, 2, 5, 10, 15 or 30 min, or 1 h. "Inherit" says which folder
   it comes from.
+- **Close an unused tab**: a terminal tab that goes a while with nothing typed, pasted or sent
+  by an assistant closes on its own, with a notice ("The tab web closed after 10 min without
+  use"). Output from the server doesn't count as use, and a persistent session (tmux or screen)
+  stays on the server. The time comes from **Close an unused tab after (minutes)**, in
+  Settings › Connections (0, off, by default), and the **Close idle after** row in the
+  properties of an SSH, Telnet or local shell connection, or of a folder, chooses another one:
+  Inherit, **Off**, 5, 10, 15 or 30 min, or 1, 2, 4, 8 or 12 h.
 - **Import and export**: File ▸ **Import ▸** brings in connections from WinSSHTerm, FileZilla,
   WinSCP, PuTTY/KiTTY, mRemoteNG, MobaXterm and the app's own JSON; **Export ▸** sends them
   to those same programs and to `~/.ssh/config` ("Import and export" section, below). The
@@ -431,6 +455,13 @@ Persistent session and Commands: choosing **SSH agent** on a folder makes every 
 connection inside it (and in its subfolders) that left "Inherit" log in through the agent,
 without asking for the password. A connection that chose another mode, or that points to a vault
 item, follows its own.
+
+A folder also has the **Vault key** and **Private key** (the key file) rows: the SSH and SFTP
+connections inside it (and in its subfolders) that have no key of their own use the key of the
+nearest folder that chose one. On the connection, the "Vault key" row shows "Inherit (Client)"
+when a folder supplies the key; the connection's own key, from the vault or a file, always wins.
+Together with "SSH agent" in Credential, the folder makes the connections inside log in with the
+key without asking for a password.
 
 The jump server does not have these modes: its password is never asked for before connecting. It
 tries the agent and the keys (and the vault item, if any), and a rejection only opens the jump's
@@ -751,6 +782,26 @@ recipes are in `empacotar/`) and leaves in `target/` (or in `$SAIDA`):
 The Linux ones require glibc 2.35 or newer (the container is Ubuntu 22.04). `./empacotar-arm.sh
 linux-arm64` builds a single target. The build goes into `target/docker`, separate from the computer's own build.
 
+### macOS package
+
+`empacotar-mac.sh`, at the repository root, runs on a Mac with Apple's command-line tools
+(`xcode-select --install`) and `rustup`. It builds `aarch64-apple-darwin` and
+`x86_64-apple-darwin`, joins each executable into a universal one with `lipo` and leaves
+`target/tirech-omni-macos.dmg` (or the path it is given), with:
+
+- `Tirech Omni.app`: the five executables in `Contents/MacOS` (installing copies the app and the
+  tools together), the `assets/icone.icns` icon, made from the same drawings as the `.ico`, and
+  an `Info.plist` with the identifier `com.tirech.omni`, the same as the start-with-the-system
+  LaunchAgent;
+- a shortcut to `/Applications` and `THIRD-PARTY-NOTICES.txt`.
+
+Without `IDENTIDADE`, the signature is ad hoc: Apple Silicon runs it, but Gatekeeper does not
+recognize the signer and, the first time, asks for **Open Anyway** in System Settings ▸ Privacy &
+Security. With `IDENTIDADE` (the name of a "Developer ID Application" certificate in the
+keychain), it signs with the hardened runtime; with `PERFIL_NOTARIZACAO` as well (the profile
+saved by `xcrun notarytool store-credentials`), it sends the `.dmg` to Apple for notarization and
+staples the result, and the app opens with no warning. The package needs macOS 11 or newer.
+
 ### Copying the key to the server
 
 **Copy to the server…** (Tools, or from the keys) is the equivalent of `ssh-copy-id`.
@@ -908,6 +959,16 @@ The approval dialog shows the exact command (control characters appear as `<ESC>
 `<BEL>`…, nothing is hidden) and the connection. You can approve just that action, check "Allow the
 rest of this session on this tab" or refuse (with a reason, which goes to the assistant). The block
 list ignores that checkbox: the dangerous command asks again.
+
+**Open new tabs**, in the same category, decides whether the assistant can open a new tab of the
+connection: `abrir_conexao`, `ligar_tunel` with no tab open and the workspace without its "(AI)"
+tab up. **Allow** (the default) follows the permission; **Ask** asks for your OK on each new
+tab, even in Free; **Block** refuses, and the assistant uses only the tabs you open.
+Reconnecting a tab that dropped does not count. **Inherit** follows the folder and, with no
+folder choosing, Settings › Control by assistants (MCP) › Open new tabs. When the new tab asks,
+the dialog offers "Open this session's new tabs without asking, for 1 hour": the time comes from
+"Open without asking after approving" (Off, 15 or 30 minutes, 1, 4, 8, 12 or 24 hours, or Always
+open, which lasts until the session ends), and "Stop the AI" undoes it.
 
 The **block list** catches the most common dangerous commands (`rm -rf` and relatives, `mkfs`, `dd`
 on a disk, `shutdown`, `curl … | sh`, touching accounts and `authorized_keys`, erasing history,
@@ -1452,7 +1513,7 @@ The app solves this with a **network profile** per client: the profile points to
 down. A group or a connection picks the profile in the **Network** row; whatever is inside the group
 inherits it (`Inherit (Client A)`), and `Direct` breaks the inheritance. The profile applies to SSH, SFTP, Telnet,
 FTP, S3 and rclone (with the caveat that rclone 1.60's `sftp` and `ftp` ignore the proxy); the
-local shell and serial don't use a network. The tab gets the suffix ` · Client A`, and the bring-down
+local shell does too (see below), and serial doesn't use a network. The tab gets the suffix ` · Client A`, and the bring-down
 command runs when the profile's last tab closes and when the app closes. Each profile has its own
 `known_hosts`.
 
@@ -1485,6 +1546,54 @@ network, to open one without searching.
 
 It doesn't work yet for a profile with only an SSH jump (no proxy and no embedded VPN): the link
 warns that the profile has no proxy.
+
+### Local shell through the client's network
+
+A **Local shell** inside a folder with a network profile (or with the profile picked in the
+connection's own **Network** row) also goes out through the client's network, for programs that
+know how to use a proxy. The embedded VPN runs inside the app, without a virtual network adapter,
+so there's no new route on the computer: the path is the same local proxy the links use (one per
+profile, on `127.0.0.1`, which now speaks HTTP and SOCKS5 on the same port), and the shell opens
+with these variables in its environment:
+
+- `ALL_PROXY` and `all_proxy`: `socks5h://127.0.0.1:<port>` (names are also resolved through
+  the client's network);
+- `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy` and `https_proxy`: `http://127.0.0.1:<port>`;
+- `NO_PROXY` and `no_proxy`: `localhost,127.0.0.1,::1`.
+
+`curl`, `wget`, `git`, `pip` and `npm` then go out through the client's network; the terminal's
+first line says through which profile and reminds you that **Network › Direct** on the connection
+turns the inheritance off.
+
+For what ignores proxies (`xfreerdp`, a database client, plain `ssh`), use the connection's
+**Tunnels**, which accept two types in the local shell:
+
+- **Local**: the port here leads to a fixed destination, as seen from the connection's network.
+  A `13389 → 10.0.0.5:3389` tunnel lets `xfreerdp /v:127.0.0.1:13389` open the desktop of the
+  client's `10.0.0.5`, even if another client has the same IP.
+- **Dynamic**: a SOCKS5 and HTTP proxy on a port you choose, for programs where you can set the
+  proxy by hand.
+
+The tunnels come up with the tab and go down with it; the line
+`Tunnel 127.0.0.1:13389 → 10.0.0.5:3389` at the top of the terminal shows the actual port (with
+**Use the next free port**, it may be a different one). Without a network profile, the local shell's tunnels
+lead straight to the destination.
+
+A profile with only an SSH jump doesn't apply to the local shell (the shell doesn't go through a
+jump): the terminal warns about it, the shell goes out directly and the tunnels don't come up.
+
+**Autocomplete (Ctrl+Space).** Over the active terminal, a list opens with the commands that fit
+the tab, and the **Source** column says where each one came from. In a local shell, the ready-made
+commands for the tunnels the tab sees come first (its own and the `-L`/`-D` of the open SSH tabs),
+already with the real port: `xfreerdp /v:127.0.0.1:13389 /dynamic-resolution /u:` for a tunnel
+that leads to 3389 (`mstsc` on Windows and `rdp://` on macOS), `vncviewer` for 5900, `ssh`,
+`mysql`, `psql`, `redis-cli`, `mongosh`, `sqlcmd` and `curl` depending on the destination port,
+`nc` for the rest; for a dynamic tunnel, `curl --proxy socks5h://...` and `export ALL_PROXY`. Then
+come the commands already used on this connection, the ones from the send bar, the **Commands on connect**
+steps and, in the local shell, the bash, zsh and fish history of this computer. The field at the
+top filters by words; ↓ moves to the list and Enter (or a double click) **puts the command on the
+terminal line, without running it**, so you can fill in the user or adjust it first. Tab still
+belongs to the shell, and the shortcut can be changed in Settings › Shortcuts.
 
 ### Embedded Nebula network
 
@@ -1533,10 +1642,19 @@ config. If the network doesn't connect, the notice says whether it was the locke
 vault, a lighthouse that doesn't answer or a `cipher` different from the network's. The network is **fail-closed**:
 if Nebula doesn't come up, the connection does **not** go straight out over the internet; it fails.
 
+**Relays (CGNAT).** When the computer and the server are both behind CGNAT (common with Brazilian
+carriers) or symmetric NAT, the punch doesn't get through and the connection goes through a **relay**
+of the network: a node with `relay.am_relay: true` (usually the lighthouse itself). There's nothing to
+turn on in the app: the server lists its relays in `relay.relays` in its `config.yml`, the lighthouse
+tells the app, and the app asks for the relay and goes through it, with the tunnel still encrypted end
+to end (the relay only forwards). `relay.use_relays: false` in the profile's config turns this off. If
+the app also needs to be reached through relays (another node opening a connection to it), the
+profile config's `relay.relays` works the same way.
+
 **What it doesn't do.** TCP only and IPv4 only; it doesn't accept incoming connections (the app only opens them; SSH's `-R` keeps
-working, because it runs inside the SSH connection); it isn't a lighthouse or relay; it doesn't sign
-certificates; it doesn't read keys from a token (PKCS#11); the P-256 curve and **relays** aren't supported yet (a network where
-both sides are behind symmetric NAT needs a relay and gives "no direct path").
+working, because it runs inside the SSH connection); it isn't a lighthouse or relay (it uses the network's relays,
+but doesn't serve as a relay for others); it doesn't sign certificates; it doesn't read keys from a token
+(PKCS#11); the P-256 curve isn't supported yet.
 Nothing of the Nebula network is exposed to other programs: there's no port, address or credential to
 copy.
 

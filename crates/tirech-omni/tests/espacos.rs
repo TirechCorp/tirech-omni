@@ -186,6 +186,7 @@ fn salvar_todas_guarda_uma_entrada_por_janela() {
     m.app.double_click("arvore-4");
     m.app.frame();
     let principal = m.app.windows()[0];
+    m.app.set_active_window(principal);
     m.app.switch_to(principal);
 
     salvar_pelo_menu(&mut m.app, "salvar-todas-espaco", "tudo");
@@ -365,7 +366,9 @@ fn abrir_todas_reabre_uma_janela_por_janela_salva() {
     m.app.set_active_window(outra);
     m.app.double_click("arvore-4");
     m.app.frame();
-    m.app.switch_to(m.app.windows()[0]);
+    let principal = m.app.windows()[0];
+    m.app.set_active_window(principal);
+    m.app.switch_to(principal);
     salvar_pelo_menu(&mut m.app, "salvar-todas-espaco", "tudo");
 
     // Fecha a secundária e as abas da principal.

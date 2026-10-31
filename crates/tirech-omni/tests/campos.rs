@@ -27,6 +27,7 @@ const LINHAS: &[(&str, Option<Campo>)] = &[
     ("Rede", Some(Campo::Rede)),
     ("Provedor de IA", Some(Campo::Ia)),
     ("Assistentes (MCP)", Some(Campo::Mcp)),
+    ("Abrir abas novas", Some(Campo::Mcp)),
     ("Provedor", Some(Campo::S3)),
     ("Endereço", Some(Campo::S3)),
     ("Região", Some(Campo::S3)),
@@ -51,6 +52,7 @@ const LINHAS: &[(&str, Option<Campo>)] = &[
     ("Sessão persistente", Some(Campo::Persistente)),
     ("Mouse no terminal", Some(Campo::Mouse)),
     ("Tentar de novo após", Some(Campo::Reconectar)),
+    ("Fechar sem uso após", Some(Campo::Ocioso)),
     ("Programa", Some(Campo::Programa)),
     ("Argumentos", Some(Campo::Programa)),
     ("Pasta inicial", Some(Campo::Programa)),
@@ -67,10 +69,10 @@ const LINHAS: &[(&str, Option<Campo>)] = &[
     ("Comparar pastas", Some(Campo::Arquivos)),
     ("Sincronizar pastas", Some(Campo::Arquivos)),
     ("Comandos", Some(Campo::Comandos)),
-    ("Encaminhar X11", Some(Campo::Encaminhamento)),
+    ("Encaminhar X11", Some(Campo::EncaminhamentoSsh)),
     ("Túneis", Some(Campo::Encaminhamento)),
-    ("Só túneis (sem shell)", Some(Campo::Encaminhamento)),
-    ("Parar se túnel falhar", Some(Campo::Encaminhamento)),
+    ("Só túneis (sem shell)", Some(Campo::EncaminhamentoSsh)),
+    ("Parar se túnel falhar", Some(Campo::EncaminhamentoSsh)),
     ("Host do jump", Some(Campo::Salto)),
     ("Porta do jump", Some(Campo::Salto)),
     ("Usuário do jump", Some(Campo::Salto)),
@@ -145,14 +147,18 @@ fn o_shell_local_mostra_so_o_que_vale() {
             "Nome",
             "Descrição",
             "Tipo",
+            "Rede",
             "Provedor de IA",
             "Assistentes (MCP)",
+            "Abrir abas novas",
             "Log",
             "Mouse no terminal",
+            "Fechar sem uso após",
             "Programa",
             "Argumentos",
             "Pasta inicial",
             "Comandos",
+            "Túneis",
         ]
     );
     for p in m.app.properties("props").into_iter().filter(|p| !p.hidden) {
@@ -351,10 +357,14 @@ fn a_grade_da_pasta_nao_muda() {
         [
             "Rede",
             "Assistentes (MCP)",
+            "Abrir abas novas",
             "Sessão persistente",
             "Mouse no terminal",
             "Tentar de novo após",
+            "Fechar sem uso após",
             "Credencial",
+            "Chave do cofre",
+            "Chave privada",
             "Comandos"
         ]
     );

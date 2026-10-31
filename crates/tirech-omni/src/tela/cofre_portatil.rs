@@ -705,8 +705,9 @@ impl Tela {
 }
 
 /// Os diálogos do cofre entre máquinas: levar, a senha do cofre de fora, as duas escolhas, a
-/// confirmação de usar no lugar e o do local.
-pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View + use<> {
+/// confirmação de usar no lugar e o do local. Os efeitos ligam uma vez, e a função devolvida
+/// monta os diálogos em cada janela.
+pub(super) fn dialogos(tela: &Rc<Tela>) -> impl Fn() -> Column + use<> {
     let p = &tela.portatil;
 
     // Esvazia o cofre de fora (que já foi decifrado) quando nenhum diálogo o usa mais.
@@ -723,17 +724,21 @@ pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View + use<> {
         });
     }
 
-    Column::new()
-        .child(dialogo_levar(tela))
-        .child(dialogo_senha_do_externo(tela))
-        .child(dialogo_abrir(tela))
-        .child(dialogo_substituir(tela))
-        .child(dialogo_local(tela))
-        .child(
-            tela.portatil
-                .copia
-                .dialogo(t!("cofre-copiando-os-anexos"), "cofre-copia"),
-        )
+    let senha_do_externo = dialogo_senha_do_externo(tela);
+    let tela = Rc::clone(tela);
+    move || {
+        Column::new()
+            .child(dialogo_levar(&tela))
+            .child(senha_do_externo())
+            .child(dialogo_abrir(&tela))
+            .child(dialogo_substituir(&tela))
+            .child(dialogo_local(&tela))
+            .child(
+                tela.portatil
+                    .copia
+                    .dialogo(t!("cofre-copiando-os-anexos"), "cofre-copia"),
+            )
+    }
 }
 
 fn dialogo_levar(tela: &Rc<Tela>) -> impl View + use<> {
@@ -792,7 +797,7 @@ fn dialogo_levar(tela: &Rc<Tela>) -> impl View + use<> {
         .close(t!("comum-cancelar"))
 }
 
-fn dialogo_senha_do_externo(tela: &Rc<Tela>) -> impl View + use<> {
+fn dialogo_senha_do_externo(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     let p = &tela.portatil;
     let (aberto, senha, errou) = (p.senha_aberta, p.senha, p.senha_errou);
     let refazer = Rc::clone(&p.refazer_senha);
@@ -813,32 +818,35 @@ fn dialogo_senha_do_externo(tela: &Rc<Tela>) -> impl View + use<> {
         });
     }
     let arquivo = p.arquivo;
-    let t = Rc::clone(tela);
-    ContentDialog::new(t!("portatil-senha-do-cofre-de-fora"), aberto)
-        .id("cofre-abrir-senha-dialogo")
-        .content(
-            Column::new()
-                .gap(8)
-                .child(
-                    Text::new(move || t!("cofre-senha-propria", arquivo = arquivo.get()))
-                        .secondary()
-                        .wrap(),
-                )
-                .child(
-                    Edit::bind(senha)
-                        .id("cofre-abrir-senha")
-                        .password()
-                        .placeholder(t!("portatil-senha-mestra-do-cofre-de-fora")),
-                )
-                .child(
-                    Text::new(t!("portatil-senha-incorreta"))
-                        .id("cofre-abrir-senha-erro")
-                        .caption()
-                        .visible(move || errou.get()),
-                ),
-        )
-        .primary(t!("comum-abrir"), move || t.destravar_externo())
-        .close(t!("comum-cancelar"))
+    let tela = Rc::clone(tela);
+    move || {
+        let t = Rc::clone(&tela);
+        ContentDialog::new(t!("portatil-senha-do-cofre-de-fora"), aberto)
+            .id("cofre-abrir-senha-dialogo")
+            .content(
+                Column::new()
+                    .gap(8)
+                    .child(
+                        Text::new(move || t!("cofre-senha-propria", arquivo = arquivo.get()))
+                            .secondary()
+                            .wrap(),
+                    )
+                    .child(
+                        Edit::bind(senha)
+                            .id("cofre-abrir-senha")
+                            .password()
+                            .placeholder(t!("portatil-senha-mestra-do-cofre-de-fora")),
+                    )
+                    .child(
+                        Text::new(t!("portatil-senha-incorreta"))
+                            .id("cofre-abrir-senha-erro")
+                            .caption()
+                            .visible(move || errou.get()),
+                    ),
+            )
+            .primary(t!("comum-abrir"), move || t.destravar_externo())
+            .close(t!("comum-cancelar"))
+    }
 }
 
 fn dialogo_abrir(tela: &Rc<Tela>) -> impl View + use<> {

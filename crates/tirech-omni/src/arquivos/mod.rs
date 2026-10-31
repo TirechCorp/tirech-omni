@@ -525,8 +525,17 @@ fn com_abas(
 fn aba_view(aba: &Aba, ctx: &Rc<Contexto>) -> Column {
     aba.local.ligar();
     aba.remoto.ligar();
-    aba.local.abrir(aba.local_inicial.clone());
-    aba.remoto.abrir(aba.inicial.clone());
+    // A página muda de janela (e a aba é montada de novo): os painéis seguem onde estavam.
+    for (painel, inicial) in [
+        (&aba.local, &aba.local_inicial),
+        (&aba.remoto, &aba.inicial),
+    ] {
+        if painel.caminho.with_untracked(String::is_empty) {
+            painel.abrir(inicial.clone());
+        } else {
+            painel.atualizar();
+        }
+    }
 
     // As pastas remotas visitadas entram nos recentes.
     {

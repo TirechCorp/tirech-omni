@@ -49,6 +49,8 @@ pub struct Janela {
     pub envio: Envio,
     /// Se o Flyout "Gerar comando com IA" (M52) está aberto nesta janela.
     pub ia_comando: Signal<bool>,
+    /// O Flyout do autocompletar (Ctrl+Espaço) está aberto.
+    pub autocompletar: Signal<bool>,
     /// Se a pergunta "enviar ou colar o caminho local" (M45) está aberta nesta janela.
     pub colar_dialogo: Signal<bool>,
     /// Se o diálogo de aprovação de um pedido de assistente (M51) está aberto nesta janela.
@@ -56,6 +58,9 @@ pub struct Janela {
     /// Os painéis Conexões e Propriedades em volta dos terminais (na principal, também o chat
     /// e as portas), que o `DockHost` da janela mantém em dia.
     pub paineis: Signal<DockLayout>,
+    /// A página da navegação que a janela mostra ("terminais", "cofre"…). Cada janela tem a sua;
+    /// a da principal é a `pagina` da tela.
+    pub pagina: Signal<String>,
 }
 
 /// A lista das janelas abertas, na ordem em que abriram. A primeira é a principal.
@@ -80,6 +85,14 @@ impl Janelas {
         self.lista.with_untracked(|l| l[0])
     }
 
+    /// A janela principal, se a lista ainda existe e tem alguma: para as limpezas, que podem
+    /// rodar com o app acabando.
+    pub fn principal_se_houver(&self) -> Option<Janela> {
+        self.lista
+            .try_with_untracked(|l| l.first().copied())
+            .flatten()
+    }
+
     /// Registra, como a única janela, a que está sendo montada agora. É o que a tela de lint de
     /// uma janela secundária faz: ela é a principal da sessão de ferramentas.
     pub fn trocar_principal(&self, janela: Janela) {
@@ -94,6 +107,14 @@ impl Janelas {
     /// As janelas abertas, sem rastrear (para botões e eventos).
     pub fn todas_agora(&self) -> Vec<Janela> {
         self.lista.get_untracked()
+    }
+
+    /// Alguma janela mostra a página `nome`? Com rastreamento.
+    pub fn alguma_em(&self, nome: &str) -> bool {
+        self.lista.with(|l| {
+            l.iter()
+                .any(|j| j.pagina.try_with(|p| p == nome).unwrap_or(false))
+        })
     }
 
     /// Quantas janelas há, com rastreamento.
@@ -137,22 +158,33 @@ impl Janelas {
         tela: impl FnOnce(Janela) -> V + 'static,
     ) -> Option<Janela> {
         let escopo = Scope::detached();
-        let (layout, grade_atual, envio, ia_comando, colar_dialogo, mcp_aprovar, paineis) = escopo
-            .run(|| {
-                let layout = signal(PaneLayout::with(Vec::new()));
-                if grade.0 > 0 && grade.1 > 0 && grade != (1, 1) {
-                    layout.update(|l| l.grid(grade.0, grade.1));
-                }
-                (
-                    layout,
-                    signal(grade),
-                    Envio::novo(),
-                    signal(false),
-                    signal(false),
-                    signal(false),
-                    signal(paineis),
-                )
-            });
+        let (
+            layout,
+            grade_atual,
+            envio,
+            ia_comando,
+            autocompletar,
+            colar_dialogo,
+            mcp_aprovar,
+            paineis,
+            pagina,
+        ) = escopo.run(|| {
+            let layout = signal(PaneLayout::with(Vec::new()));
+            if grade.0 > 0 && grade.1 > 0 && grade != (1, 1) {
+                layout.update(|l| l.grid(grade.0, grade.1));
+            }
+            (
+                layout,
+                signal(grade),
+                Envio::novo(),
+                signal(false),
+                signal(false),
+                signal(false),
+                signal(false),
+                signal(paineis),
+                signal(crate::paineis::TERMINAIS.to_owned()),
+            )
+        });
         let (largura, altura) = geometria.map_or(TAMANHO_PADRAO, |g| g.size);
         let mut nova = open_window(move || {
             tela(Janela {
@@ -161,9 +193,11 @@ impl Janelas {
                 grade: grade_atual,
                 envio,
                 ia_comando,
+                autocompletar,
                 colar_dialogo,
                 mcp_aprovar,
                 paineis,
+                pagina,
             })
         })
         .title(titulo)
@@ -181,9 +215,11 @@ impl Janelas {
             grade: grade_atual,
             envio,
             ia_comando,
+            autocompletar,
             colar_dialogo,
             mcp_aprovar,
             paineis,
+            pagina,
         };
         self.escopos
             .lock()

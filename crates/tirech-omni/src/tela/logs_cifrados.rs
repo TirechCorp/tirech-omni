@@ -34,7 +34,7 @@ impl Tela {
             let (cifrar, _pasta) = t
                 .config
                 .with(|c| (c.terminal.logs.cifrar, c.terminal.logs.pasta.clone()));
-            let na_pagina = t.pagina.get() == "configuracoes";
+            let na_pagina = t.janelas.alguma_em("configuracoes");
             if cifrar && na_pagina {
                 untrack(|| t.atualizar_logs());
             }

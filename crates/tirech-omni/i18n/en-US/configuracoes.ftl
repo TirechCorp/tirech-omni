@@ -291,6 +291,10 @@ config-conexoes-reconectar-retentar_mins = Retry after (minutes)
     .descricao = When the attempts run out, waits this many minutes and starts another round, until the connection is back; 0 turns it off (0 to 1440). Each connection or folder can choose another time in its properties.
     .palavras = reconnect again round pause minutes keep trying
 
+config-conexoes-ocioso_mins = Close an unused tab after (minutes)
+    .descricao = Closes a terminal tab that went this many minutes with nothing typed, pasted or sent by an assistant; 0 turns it off (0 to 1440). A persistent session (tmux or screen) stays on the server. Each connection or folder can choose another time in its properties.
+    .palavras = idle inactive unused close tab time limit timeout minutes
+
 config-conexoes-abrir_em = Open connection in
     .descricao = Where a double-click opens in the tree, on Home, and in search.
     .palavras = window pane tab
@@ -722,6 +726,14 @@ config-ia-espera_resposta = Wait for the answer for
 config-ia-mcp_ligado = Let assistants control the app
     .descricao = Claude Code and Codex can see and use the connections you allow, through MCP. Tirech Omni must be open.
     .palavras = mcp assistant ai claude codex control turn on
+
+config-ia-mcp_abrir = Open new tabs
+    .descricao = Whether an assistant can open a new tab of a connection (open the connection, start a tunnel or use a workspace). Each connection and folder can choose something else in its properties. Reconnecting a tab that dropped does not count.
+    .palavras = mcp assistant new tab open connection ask block allow
+
+config-ia-mcp_abrir_auto = Open without asking after approving
+    .descricao = When a new tab asks for your approval, the dialog can let the same session's next new tabs open for this long. Off always asks; Always open lasts until the session ends.
+    .palavras = mcp assistant new tab open automatic time session approve
 
 config-ia-bloqueio_extras = Commands that always ask for approval
     .descricao = One per line: a program name or, with re: at the start, a regular expression. They apply on top of the app's block list, even with the connection on Free.
@@ -1157,6 +1169,7 @@ atalho-fechar-caidas = Close the dropped tabs
 atalho-fechar-todas = Close all tabs
 atalho-cofre = Open the vault
 atalho-notas = Open the notes
+atalho-autocompletar = Autocomplete a command
 atalho-ia-comando = Generate a command with AI
 atalho-ia-chat = Open or close the AI chat
 atalho-ia-abrir = Open the AI assistant on the server
@@ -1197,6 +1210,22 @@ opcao-assistente-opencode = OpenCode
 opcao-abrir-ia-aba-nova = In a new tab
 opcao-abrir-ia-painel-livre = In a free pane
 opcao-abrir-ia-nesta-aba = In this tab
+
+# AbrirAbaIa
+opcao-mcp-abrir-permitir = Allow
+opcao-mcp-abrir-perguntar = Ask
+opcao-mcp-abrir-bloquear = Block
+
+# AbrirAbaAuto
+opcao-mcp-abrir-auto-desligado = Off
+opcao-mcp-abrir-auto-15m = 15 minutes
+opcao-mcp-abrir-auto-30m = 30 minutes
+opcao-mcp-abrir-auto-1h = 1 hour
+opcao-mcp-abrir-auto-4h = 4 hours
+opcao-mcp-abrir-auto-8h = 8 hours
+opcao-mcp-abrir-auto-12h = 12 hours
+opcao-mcp-abrir-auto-24h = 24 hours
+opcao-mcp-abrir-auto-sempre = Always open
 
 # MetodoIa
 opcao-metodo-ia-automatico = Automatic

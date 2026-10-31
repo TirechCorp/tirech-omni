@@ -601,22 +601,10 @@ fn resultado(tela: &Rc<Tela>) -> impl View {
     )
 }
 
-/// Os diálogos: o de instalar e o de confirmar a remoção dos dados.
-pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View {
+/// Os diálogos: o de instalar e o de confirmar a remoção dos dados. O efeito da barra liga uma
+/// vez, e a função devolvida monta os dois em cada janela.
+pub(super) fn dialogos(tela: &Rc<Tela>) -> impl Fn() -> Column + use<> {
     let e = &tela.instalar;
-    let ctx = Contexto::de(tela.ferramentas.ambiente());
-    let (windows, macos) = (ctx.windows, ctx.macos);
-    let (aberto, confirmar, desinstalar, apagar) =
-        (e.aberto, e.confirmar, e.desinstalar, e.apagar_dados);
-    let situacao = e.situacao;
-    let dados = pastas_de_dados(tela, &ctx);
-    let texto_dos_dados = dados
-        .iter()
-        .map(|p| ctx.mostrar(p))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let em_uso = ctx.executando_da_copia();
-
     // A barra precisa do atalho no menu: marcá-la marca o menu e trava a marca dele.
     let (barra, menu) = (e.marca(Item::Barra), e.marca(Item::Menu));
     effect(move || {
@@ -625,90 +613,108 @@ pub(super) fn dialogos(tela: &Rc<Tela>) -> impl View {
         }
     });
 
-    let mut itens = Column::new().gap(10);
-    for item in Item::TODOS {
-        itens = itens.child(linha_do_item(tela, &ctx, item, em_uso, (windows, macos)));
-    }
+    let tela = Rc::clone(tela);
+    move || {
+        let tela = &tela;
+        let e = &tela.instalar;
+        let ctx = Contexto::de(tela.ferramentas.ambiente());
+        let (windows, macos) = (ctx.windows, ctx.macos);
+        let (aberto, confirmar, desinstalar, apagar) =
+            (e.aberto, e.confirmar, e.desinstalar, e.apagar_dados);
+        let situacao = e.situacao;
+        let dados = pastas_de_dados(tela, &ctx);
+        let texto_dos_dados = dados
+            .iter()
+            .map(|p| ctx.mostrar(p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let em_uso = ctx.executando_da_copia();
 
-    let dados_visiveis = {
-        let vazio = dados.is_empty();
-        move || desinstalar.get() && !vazio
-    };
-    let caixa_dos_dados = Column::new()
-        .gap(2)
-        .id("instalar-dados-bloco")
-        .visible(dados_visiveis)
-        .child(CheckBox::bind(apagar, t!("instalar-apagar-dados")).id("instalar-dados"))
-        .child(legenda(
-            Text::new(t!(
-                "instalar-apagar-dados-pasta",
-                pasta = texto_dos_dados.as_str()
-            ))
-            .id("instalar-dados-pasta"),
-        ));
-
-    let conteudo = Column::new()
-        .gap(14)
-        .width(496)
-        .child(
-            Text::new(move || {
-                if desinstalar.get() {
-                    t!("instalar-introducao-desinstalar")
-                } else {
-                    t!("instalar-introducao")
-                }
-            })
-            .id("instalar-introducao")
-            .wrap(),
-        )
-        .child(itens)
-        .child(caixa_dos_dados);
-
-    let (para_aplicar, para_desinstalar) = (Rc::clone(tela), Rc::clone(tela));
-    let principal = ContentDialog::new(
-        move || {
-            if desinstalar.get() {
-                t!("instalar-titulo-desinstalar")
-            } else {
-                t!("instalar-titulo")
-            }
-        },
-        aberto,
-    )
-    .id("instalar-dialogo")
-    .content(conteudo)
-    .primary(t!("instalar-aplicar"), move || {
-        if desinstalar.get_untracked() && apagar.get_untracked() {
-            confirmar.set(true);
-        } else {
-            para_aplicar.aplicar_instalar();
+        let mut itens = Column::new().gap(10);
+        for item in Item::TODOS {
+            itens = itens.child(linha_do_item(tela, &ctx, item, em_uso, (windows, macos)));
         }
-    })
-    .secondary(t!("instalar-desinstalar"), move || {
-        para_desinstalar.virar_desinstalar();
-    })
-    .secondary_visible(move || {
-        !desinstalar.get() && situacao.with(|s| s.iter().any(|(_, e)| e.instalado()))
-    })
-    .close(t!("comum-cancelar"));
 
-    let para_confirmar = Rc::clone(tela);
-    let confirmacao = ContentDialog::new(t!("instalar-confirmar-titulo"), confirmar)
-        .id("instalar-confirmar")
-        .content(
-            Text::new(t!(
-                "instalar-confirmar-texto",
-                pasta = texto_dos_dados.as_str()
-            ))
-            .id("instalar-confirmar-texto")
-            .wrap(),
+        let dados_visiveis = {
+            let vazio = dados.is_empty();
+            move || desinstalar.get() && !vazio
+        };
+        let caixa_dos_dados = Column::new()
+            .gap(2)
+            .id("instalar-dados-bloco")
+            .visible(dados_visiveis)
+            .child(CheckBox::bind(apagar, t!("instalar-apagar-dados")).id("instalar-dados"))
+            .child(legenda(
+                Text::new(t!(
+                    "instalar-apagar-dados-pasta",
+                    pasta = texto_dos_dados.as_str()
+                ))
+                .id("instalar-dados-pasta"),
+            ));
+
+        let conteudo = Column::new()
+            .gap(14)
+            .width(496)
+            .child(
+                Text::new(move || {
+                    if desinstalar.get() {
+                        t!("instalar-introducao-desinstalar")
+                    } else {
+                        t!("instalar-introducao")
+                    }
+                })
+                .id("instalar-introducao")
+                .wrap(),
+            )
+            .child(itens)
+            .child(caixa_dos_dados);
+
+        let (para_aplicar, para_desinstalar) = (Rc::clone(tela), Rc::clone(tela));
+        let principal = ContentDialog::new(
+            move || {
+                if desinstalar.get() {
+                    t!("instalar-titulo-desinstalar")
+                } else {
+                    t!("instalar-titulo")
+                }
+            },
+            aberto,
         )
-        .primary(t!("instalar-confirmar-apagar"), move || {
-            para_confirmar.aplicar_instalar();
+        .id("instalar-dialogo")
+        .content(conteudo)
+        .primary(t!("instalar-aplicar"), move || {
+            if desinstalar.get_untracked() && apagar.get_untracked() {
+                confirmar.set(true);
+            } else {
+                para_aplicar.aplicar_instalar();
+            }
+        })
+        .secondary(t!("instalar-desinstalar"), move || {
+            para_desinstalar.virar_desinstalar();
+        })
+        .secondary_visible(move || {
+            !desinstalar.get() && situacao.with(|s| s.iter().any(|(_, e)| e.instalado()))
         })
         .close(t!("comum-cancelar"));
 
-    Column::new().child(principal).child(confirmacao)
+        let para_confirmar = Rc::clone(tela);
+        let confirmacao = ContentDialog::new(t!("instalar-confirmar-titulo"), confirmar)
+            .id("instalar-confirmar")
+            .content(
+                Text::new(t!(
+                    "instalar-confirmar-texto",
+                    pasta = texto_dos_dados.as_str()
+                ))
+                .id("instalar-confirmar-texto")
+                .wrap(),
+            )
+            .primary(t!("instalar-confirmar-apagar"), move || {
+                para_confirmar.aplicar_instalar();
+            })
+            .close(t!("comum-cancelar"));
+
+        Column::new().child(principal).child(confirmacao)
+    }
 }
 
 /// A linha pequena embaixo de uma caixa, alinhada com o texto dela.

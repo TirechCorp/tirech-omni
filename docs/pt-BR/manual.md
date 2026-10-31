@@ -32,16 +32,18 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
 ## Janelas e espaços de trabalho
 
 - **Várias janelas**: Janela ▸ Nova janela (Ctrl+Alt+N) abre outra janela com os terminais e
-  os painéis **Conexões** e **Propriedades**, fixados como na principal (barra de título, a mesma
-  barra de menus da principal e os painéis). A seleção, o filtro e as pastas abertas da árvore
+  os painéis **Conexões** e **Propriedades**, fixados como na principal (barra de título com a busca, a
+  navegação e a mesma barra de menus da principal). A seleção, o filtro e as pastas abertas da árvore
   são os mesmos em todas as janelas; o Exibir de cada janela mostra e esconde os painéis dela, e o
   arranjo de cada uma volta na próxima execução. Apagar, editar túneis e comandos, executar e as
-  sessões do servidor perguntam na janela da árvore em que a pessoa mexeu. O cofre e as demais
-  páginas ficam na janela principal. Nas outras janelas, as ações de sessão
-  (Reconectar, Parar o log, Fechar a aba…) agem na janela do menu; as que só existem na
-  principal (Nova conexão, Importar, Exportar, Cofre, Notas, Atalhos, Sobre, o cluster, o script,
-  os arquivos e copiar a chave do menu da árvore) trazem a principal para a frente, até da
-  bandeja, e agem lá; os itens dos outros painéis do Exibir ficam desabilitados. Um clique duplo
+  sessões do servidor perguntam na janela da árvore em que a pessoa mexeu. Cada janela mostra a
+  sua própria página, e o que se abre nela (Cofre, Notas, Desempenho, Sobre, Configurações, o
+  script e os arquivos do menu da árvore) abre ali. Arquivos, Logs e Scripts ficam numa janela por
+  vez, a última que os usou; as outras mostram um aviso, e a página volta quando a pessoa usa a
+  janela. As ações de sessão (Reconectar, Parar o log, Fechar a aba…) agem na janela do menu; as
+  que abrem um diálogo da principal (Nova conexão, Novo grupo, Atalhos, Links, Instalar no
+  computador, o cluster e copiar a chave) trazem a principal para a frente, até da bandeja, e agem
+  lá; no Exibir das outras janelas, só o item do chat fica desabilitado. Um clique duplo
   numa conexão abre a aba na última janela em que a pessoa mexeu. Arrastar uma aba para outra janela (ou para fora de todas, que
   abre uma janela nova) e o menu da aba "Mover para a janela" levam a **mesma sessão**: nada
   reconecta e o histórico continua. O menu Janela lista as janelas abertas e dá o foco.
@@ -128,7 +130,8 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   caminho absoluto vale como está; `~/…` vai para a home; um nome solto vai para a pasta em que
   o shell está (a mesma sonda do "Abrir a pasta atual"; sem ela, o `OSC 7`; sem nada, a home).
   Aspas em volta e o `\ ` do `ls` são tirados. Uma pasta ou um arquivo que não existe dá um
-  aviso. Sem nada marcado, ou numa aba sem arquivos (shell local, Telnet, serial), o
+  aviso. O aviso de que terminou tem **Abrir a pasta**, que abre a pasta onde o arquivo foi
+  gravado. Sem nada marcado, ou numa aba sem arquivos (shell local, Telnet, serial), o
   Ctrl+clique direito abre o menu, como sempre.
 - **Sessão persistente (tmux ou screen)**: a linha **Sessão persistente** das propriedades de
   uma conexão SSH (e de uma pasta, que passa a escolha às de dentro; "Herdar" diz de onde vem)
@@ -179,6 +182,20 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   roda num shell local e o histórico, com as células pintadas conforme o peso. A linha
   **Interface** é o resto do app. A tabela ordena por qualquer coluna, e o clique duplo numa
   linha vai para a aba. Com o medidor desligado e a página fechada, nada é medido.
+  A página tem três abas: **Este app** (o que está acima), **Processos** e **Disco**. As duas
+  novas têm os gráficos do mesmo jeito: em Processos, a CPU e a memória da máquina no último
+  minuto, com a utilização, a memória, os processos e as threads embaixo; em Disco, a leitura e
+  a escrita, com quantos processos usam o disco agora. Embaixo dos gráficos, em
+  Processos, todos os processos da máquina escolhida no seletor (**Este computador** ou o
+  servidor de uma das conexões SSH abertas, se for Linux) com o PID, o usuário, o estado, a CPU
+  (em % da máquina), a memória, as threads e o comando, e um resumo com o total e a memória
+  usada. Em Disco, quanto cada um lê e escreve por segundo e o total desde que começou (a
+  caixa **Só os que usam o disco** esconde os parados). As duas filtram pelo
+  nome, usuário, comando ou PID, ordenam por qualquer coluna e se atualizam a cada 2 segundos
+  enquanto estão na tela; Processos também mostra a **Árvore** (cada um embaixo do pai). Os
+  botões **Encerrar** e **Forçar encerramento**, e o menu do botão direito, agem nos
+  selecionados (no Linux e no macOS, `kill` com TERM ou KILL; no Windows, `taskkill`, com `/F`
+  para forçar; no servidor, `kill` pela conexão).
 - **Tentar de novo após (reconexão que não desiste)**: quando a aba reconecta sozinha (Configurações
   › Conexões › Ao cair a conexão em **Reconectar sozinho**, e sempre na aba de um assistente)
   e as tentativas acabam, ela espera e começa outra rodada, até a conexão voltar; a aba avisa
@@ -186,6 +203,13 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   Conexões (5 por padrão; 0 desliga), e a linha **Tentar de novo após** das propriedades de uma
   conexão SSH ou Telnet, ou de uma pasta, escolhe outro: Herdar, **Desligado**, 1, 2, 5, 10, 15
   ou 30 min, ou 1 h. "Herdar" diz de qual pasta vem.
+- **Fechar a aba sem uso**: a aba de terminal que passa um tempo sem nada digitado, colado ou
+  mandado por um assistente fecha sozinha, com um aviso ("A aba web fechou depois de 10 min sem
+  uso"). O que chega do servidor não conta como uso, e a sessão persistente (tmux ou screen)
+  continua no servidor. O tempo vem de **Fechar a aba sem uso após (minutos)**, em
+  Configurações › Conexões (0, desligado, por padrão), e a linha **Fechar sem uso após**
+  das propriedades de uma conexão SSH, Telnet ou do shell local, ou de uma pasta, escolhe outro:
+  Herdar, **Desligado**, 5, 10, 15 ou 30 min, ou 1, 2, 4, 8 ou 12 h.
 - **Importar e exportar**: Arquivo ▸ **Importar ▸** traz as conexões do WinSSHTerm, do FileZilla, do
   WinSCP, do PuTTY/KiTTY, do mRemoteNG, do MobaXterm e do JSON do próprio app; **Exportar ▸** leva
   para esses mesmos programas e para o `~/.ssh/config` (seção "Importar e exportar", abaixo). O
@@ -426,6 +450,12 @@ A pasta tem a mesma linha "Credencial" nas propriedades dela, ao lado de Rede, A
 (MCP), Sessão persistente e Comandos: escolher **Agente SSH** numa pasta faz todas as conexões
 SSH e SFTP de dentro (e das subpastas) que deixaram "Herdar" entrarem pelo agente, sem pedir a
 senha. Uma conexão que escolheu outro modo, ou que aponta para um item do cofre, segue a dela.
+
+A pasta também tem as linhas **Chave do cofre** e **Chave privada** (o arquivo da chave): as
+conexões SSH e SFTP de dentro (e das subpastas) que não têm chave própria usam a da pasta mais
+próxima que escolheu uma. Na conexão, a linha "Chave do cofre" mostra "Herdar (Cliente)" quando
+uma pasta dá a chave; a chave da própria conexão, do cofre ou em arquivo, sempre vence. Somada a
+"Agente SSH" na Credencial, a pasta faz as conexões de dentro entrarem pela chave sem pedir senha.
 
 O salto (jump server) não tem esses modos: a senha dele nunca é pedida antes de conectar. Ele
 tenta o agente e as chaves (e o item do cofre, se houver), e uma recusa só abre o diálogo da
@@ -746,6 +776,26 @@ receitas ficam em `empacotar/`) e deixa em `target/` (ou em `$SAIDA`):
 Os do Linux pedem glibc 2.35 ou mais nova (o contêiner é o Ubuntu 22.04). `./empacotar-arm.sh
 linux-arm64` faz um alvo só. O build fica em `target/docker`, separado do build do computador.
 
+### Pacote para macOS
+
+O `empacotar-mac.sh`, na raiz do repositório, roda num Mac com as ferramentas de linha de comando
+da Apple (`xcode-select --install`) e o `rustup`. Compila o `aarch64-apple-darwin` e o
+`x86_64-apple-darwin`, junta cada executável num universal com o `lipo` e deixa
+`target/tirech-omni-macos.dmg` (ou o caminho que receber), com:
+
+- o `Tirech Omni.app`: os cinco executáveis em `Contents/MacOS` (a instalação copia o app e as
+  ferramentas juntos), o ícone `assets/icone.icns`, gerado dos mesmos desenhos do `.ico`, e o
+  `Info.plist` com o identificador `com.tirech.omni`, o mesmo do LaunchAgent do início com o
+  sistema;
+- um atalho para `/Applications` e o `THIRD-PARTY-NOTICES.txt`.
+
+Sem `IDENTIDADE`, a assinatura é ad-hoc: o Apple Silicon roda, mas o Gatekeeper não reconhece
+quem assinou e, na primeira vez, pede o **Abrir Mesmo Assim** em Ajustes do Sistema ▸
+Privacidade e Segurança. Com `IDENTIDADE` (o nome de um certificado "Developer ID Application" no
+chaveiro), assina com o runtime endurecido; com `PERFIL_NOTARIZACAO` também (o perfil gravado por
+`xcrun notarytool store-credentials`), manda o `.dmg` para a Apple notarizar e grampeia o
+resultado, e o app abre sem aviso. O pacote pede o macOS 11 ou mais novo.
+
 ### Copiar a chave para o servidor
 
 **Copiar para o servidor…** (Ferramentas, ou nas chaves) é o equivalente do `ssh-copy-id`.
@@ -903,6 +953,16 @@ O diálogo de aprovação mostra o comando exato (os caracteres de controle apar
 `<BEL>`…, nada fica escondido) e a conexão. Dá para aprovar só aquela ação, marcar "Permitir o
 resto desta sessão nesta aba" ou recusar (com um motivo, que vai para o assistente). A lista de
 bloqueio ignora a marca: o comando perigoso pergunta de novo.
+
+**Abrir abas novas**, na mesma categoria, decide se o assistente pode abrir uma aba nova da
+conexão: o `abrir_conexao`, o `ligar_tunel` sem aba aberta e o espaço de trabalho sem a aba
+"(IA)" de pé. **Permitir** (o padrão) segue a permissão; **Perguntar** pede o seu OK a cada aba
+nova, mesmo em Livre; **Bloquear** recusa, e o assistente usa só as abas que você abrir.
+Reconectar uma aba que caiu não conta. **Herdar** segue a pasta e, sem pasta que escolha,
+Configurações › Controle por assistentes (MCP) › Abrir abas novas. Quando a aba nova pergunta, o
+diálogo oferece "Abrir as abas novas desta sessão sem perguntar, por 1 hora": o tempo vem de
+"Abrir sem perguntar depois de aprovar" (Desligado, 15 ou 30 minutos, 1, 4, 8, 12 ou 24 horas,
+ou Sempre abrir, que vale até a sessão acabar), e "Parar a IA" desfaz.
 
 A **lista de bloqueio** pega os comandos perigosos mais comuns (`rm -rf` e parentes, `mkfs`, `dd`
 em disco, `shutdown`, `curl … | sh`, mexer em contas e no `authorized_keys`, apagar o histórico,
@@ -1441,7 +1501,7 @@ O app resolve com um **perfil de rede** por cliente: o perfil aponta para um pro
 descer. Um grupo ou uma conexão escolhe o perfil na linha **Rede**; o que está dentro do grupo
 herda (`Herdar (Cliente A)`), `Direta` corta a herança. O perfil vale para SSH, SFTP, Telnet,
 FTP, S3 e rclone (com a ressalva do `sftp` e do `ftp` do rclone 1.60, que ignoram o proxy); o
-shell local e a serial não usam rede. A aba ganha o sufixo ` · Cliente A`, e o comando de
+shell local também (veja abaixo), e a serial não usa rede. A aba ganha o sufixo ` · Cliente A`, e o comando de
 descer roda quando a última aba do perfil fecha e quando o app fecha. Cada perfil tem o seu
 `known_hosts`.
 
@@ -1473,6 +1533,52 @@ rede, para abrir sem procurar.
 
 Ainda não vale para um perfil só com salto SSH (sem proxy nem VPN embutida): o link avisa que o
 perfil não tem proxy.
+
+### Shell local pela rede do cliente
+
+Um **Shell local** dentro de uma pasta com perfil de rede (ou com o perfil escolhido na linha
+**Rede** da própria conexão) também sai pela rede do cliente, para os programas que sabem usar
+proxy. A VPN embutida roda dentro do app, sem placa virtual, então não há rota nova no
+computador: o caminho é o mesmo proxy local dos links (um por perfil, em `127.0.0.1`, que agora
+fala HTTP e SOCKS5 na mesma porta), e o shell abre com estas variáveis no ambiente:
+
+- `ALL_PROXY` e `all_proxy`: `socks5h://127.0.0.1:<porta>` (o nome também é resolvido pela rede
+  do cliente);
+- `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy` e `https_proxy`: `http://127.0.0.1:<porta>`;
+- `NO_PROXY` e `no_proxy`: `localhost,127.0.0.1,::1`.
+
+O `curl`, o `wget`, o `git`, o `pip` e o `npm` passam a sair pela rede do cliente; a primeira
+linha do terminal diz por qual perfil e lembra que **Rede › Direta** na conexão desliga a
+herança.
+
+Para o que ignora proxy (o `xfreerdp`, um cliente de banco, o `ssh` puro), use os **Túneis** da
+conexão, que no shell local aceitam dois tipos:
+
+- **Local**: a porta daqui leva a um destino fixo, visto pela rede da conexão. Um túnel
+  `13389 → 10.0.0.5:3389` deixa `xfreerdp /v:127.0.0.1:13389` abrir a área de trabalho
+  do `10.0.0.5` do cliente, mesmo que outro cliente tenha o mesmo IP.
+- **Dinâmico**: um proxy SOCKS5 e HTTP numa porta escolhida, para os programas em que dá para
+  configurar o proxy à mão.
+
+Os túneis sobem com a aba e descem com ela; a linha `Túnel 127.0.0.1:13389 → 10.0.0.5:3389`
+no começo do terminal mostra a porta de verdade (com **Usar a próxima porta livre**, ela pode ser outra). Sem
+perfil de rede, os túneis do shell local levam direto ao destino.
+
+Um perfil só com salto SSH não vale para o shell local (o shell não passa por salto): o
+terminal avisa, o shell sai direto e os túneis não sobem.
+
+**Autocompletar (Ctrl+Espaço).** Sobre o terminal ativo abre uma lista de comandos que cabem
+na aba, com a coluna **Origem** dizendo de onde veio cada um. Num shell local vêm primeiro os
+comandos prontos para os túneis que a aba enxerga (os dela e os `-L`/`-D` das abas SSH abertas),
+já com a porta de verdade: `xfreerdp /v:127.0.0.1:13389 /dynamic-resolution /u:` para um túnel
+que leva à 3389 (o `mstsc` no Windows e o `rdp://` no macOS), `vncviewer` para a 5900, `ssh`,
+`mysql`, `psql`, `redis-cli`, `mongosh`, `sqlcmd` e `curl` conforme a porta de destino, `nc`
+no resto; para um túnel dinâmico, o `curl --proxy socks5h://...` e o `export ALL_PROXY`. Depois vêm os comandos já usados nesta
+conexão, os da barra de envio, os passos dos **Comandos ao conectar** e, no shell local, o histórico do
+bash, do zsh e do fish desta máquina. O campo de cima filtra por palavras; ↓ desce para a
+lista e Enter (ou o clique duplo) **põe o comando na linha do terminal, sem executar**, para
+completar o usuário ou ajustar antes. O Tab segue sendo do shell, e o atalho muda em
+Configurações › Atalhos.
 
 ### Rede Nebula embutida
 
@@ -1521,10 +1627,19 @@ config. Se a rede não conecta, o aviso diz se foi o cofre trancado, a identidad
 cofre, um lighthouse que não responde ou uma `cipher` diferente da rede. A rede é **fail-closed**:
 se a Nebula não sobe, a conexão **não** sai direto pela internet; ela falha.
 
+**Relays (CGNAT).** Quando o computador e o servidor estão os dois atrás de CGNAT (o comum nas
+operadoras brasileiras) ou de NAT simétrico, o punch não passa e a conexão vai por um **relay**
+da rede: um nó com `relay.am_relay: true` (em geral o próprio lighthouse). Não há o que ligar no
+app: o servidor lista os relays dele em `relay.relays` no `config.yml` dele, o lighthouse conta
+isso ao app, e o app pede o relay e passa por ele, com o túnel ainda cifrado de ponta a ponta
+(o relay só repassa). O `relay.use_relays: false` no config do perfil desliga isso. Se o app
+também precisa ser alcançado por relays (outro nó abrindo conexão até ele), o `relay.relays` do
+config do perfil vale do mesmo jeito.
+
 **O que não faz.** Só TCP e só IPv4; não recebe conexões (o app só abre; o `-R` do SSH segue
-funcionando, porque vai dentro da conexão SSH); não é lighthouse nem relay; não assina
-certificados; não lê chave em token (PKCS#11); curva P-256 e **relays** ainda não (uma rede em
-que os dois lados estão atrás de NAT simétrico precisa de relay e dá "sem caminho direto").
+funcionando, porque vai dentro da conexão SSH); não é lighthouse nem relay (usa os relays da
+rede, não serve de relay para os outros); não assina certificados; não lê chave em token
+(PKCS#11); curva P-256 ainda não.
 Nada da rede Nebula é exposto a outros programas: não há porta, endereço ou credencial para
 copiar.
 

@@ -1816,7 +1816,7 @@ impl Tela {
 
 /// A página Redes, em Ferramentas: a lista dos perfis, as propriedades do escolhido e os
 /// botões Novo, Duplicar, Apagar e Testar.
-pub(super) fn pagina(tela: &Rc<Tela>) -> impl View {
+pub(super) fn pagina(tela: &Rc<Tela>) -> impl View + use<> {
     let tree = tela.tree;
     let cofre = tela.cofre.clone();
     let campos = CamposRede::novo();

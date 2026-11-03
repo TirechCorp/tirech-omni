@@ -665,6 +665,9 @@ categoria! {
         fechar_painel_vazio: bool = false,
         /// A aba duplicada abre na pasta em que a original está (M64).
         duplicar_na_pasta: bool = true,
+        /// Os avisos que os programas do terminal pedem (`OSC 9`, `OSC 777`) viram notificações
+        /// do sistema quando a pessoa não está vendo a aba.
+        notificar_avisos: bool = true,
         /// Ctrl+clique abre os links do terminal (M49).
         links_com_ctrl: bool = true,
         /// O shell local.
@@ -1125,6 +1128,9 @@ categoria! {
         conversas_reabrir: bool = true,
         /// O que o "Controlar com" faz quando a aba já teve conversa com o assistente.
         conversas_ao_controlar: ConversaAoControlar = ConversaAoControlar::Perguntar,
+        /// O "Controlar com" pede ao assistente que avise quando termina ou espera pela pessoa,
+        /// e o aviso vira notificação do sistema quando ela não está vendo a aba.
+        avisar_ao_terminar: bool = true,
     }
 }
 
@@ -1161,6 +1167,7 @@ impl IaCfg {
         self.conversas_lembrar = outra.conversas_lembrar;
         self.conversas_reabrir = outra.conversas_reabrir;
         self.conversas_ao_controlar = outra.conversas_ao_controlar;
+        self.avisar_ao_terminar = outra.avisar_ao_terminar;
     }
 
     /// O caminho do executável da ferramenta neste computador, pelas Configurações (M63).

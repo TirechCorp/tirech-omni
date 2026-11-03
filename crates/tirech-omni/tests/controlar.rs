@@ -15,6 +15,7 @@ use tirech_omni::armazenamento::Armazenamento;
 use tirech_omni::configuracoes::Configuracoes;
 use tirech_omni::modelo::{Connection, Kind, Tree};
 use tomni_ui::Modifiers;
+use tomni_ui::reactive::untrack;
 use tomni_ui::terminal::Session;
 use tomni_ui::theme::Theme;
 use tomni_ui_test::TestApp;
@@ -189,10 +190,21 @@ fn o_codex_leva_a_ponte_em_tres_c_e_o_opencode_no_ambiente() {
         "{}",
         opencode.local_argumentos
     );
-    let [(nome, valor)] = opencode.local_ambiente.as_slice() else {
+    // A ponte, e os avisos do terminal (ligados por padrão nas Configurações).
+    let [(nome, valor), (cli, _), (protocolo, osc)] = opencode.local_ambiente.as_slice() else {
         panic!("{:?}", opencode.local_ambiente);
     };
     assert_eq!(nome, "OPENCODE_CONFIG_CONTENT");
+    assert_eq!(cli, "OPENCODE_CLI_CONFIG_CONTENT");
+    assert_eq!(
+        (protocolo.as_str(), osc.as_str()),
+        ("OPENTUI_NOTIFICATION_PROTOCOL", "osc777")
+    );
+    assert!(
+        codex.local_argumentos.contains("tui.notifications=true"),
+        "{}",
+        codex.local_argumentos
+    );
     assert!(valor.contains("--aba"), "{valor}");
     assert!(valor.contains("1-1"), "{valor}");
 
@@ -634,4 +646,124 @@ fn sem_reabrir_os_assistentes_so_a_aba_volta() {
     m.app.wait(Duration::from_millis(200));
     assert_eq!(abas(&m.app).len(), 1);
     assert!(lancados(&m).is_empty());
+}
+
+/// O lançamento escrito no arquivo da ponte do Claude Code (`lancar-<pid>-<n>.json`).
+fn lancamento_do_claude(pasta: &Pasta) -> String {
+    let ponte = std::fs::read_dir(pasta.0.join("mcp"))
+        .expect("a pasta mcp")
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| {
+            let nome = p.file_name().unwrap_or_default().to_string_lossy();
+            nome.starts_with("lancar-") && !nome.ends_with("-avisos.json")
+        })
+        .expect("o arquivo da ponte");
+    let json = std::fs::read_to_string(ponte).expect("o arquivo da ponte");
+    json.split("\"--lancamento\",")
+        .nth(1)
+        .and_then(|resto| resto.split('"').nth(1))
+        .unwrap_or_else(|| panic!("a ponte sem --lancamento: {json}"))
+        .to_owned()
+}
+
+#[test]
+fn o_fim_do_claude_vira_notificacao_quando_a_pessoa_esta_em_outro_programa() {
+    let (pasta, mut m) = cenario("controlar-atencao", true);
+    controlar_pelo_terminal(&mut m, "1-1", "claude");
+    let assistente = abas(&m.app)[1][0].clone();
+    let lancamento = lancamento_do_claude(&pasta);
+    // Os hooks `Stop` e `Notification` chamam a ponte com `--atencao` e o mesmo lançamento.
+    let settings = std::fs::read_dir(pasta.0.join("mcp"))
+        .expect("a pasta mcp")
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.to_string_lossy().ends_with("-avisos.json"))
+        .expect("o arquivo dos avisos");
+    let hook = std::fs::read_to_string(settings).expect("o arquivo dos avisos");
+    assert!(hook.contains("\"Stop\""), "{hook}");
+    assert!(hook.contains("\"Notification\""), "{hook}");
+    assert!(
+        hook.contains(&format!("--atencao '{lancamento}'")),
+        "{hook}"
+    );
+
+    // A pessoa foi para outro programa; o Claude Code termina.
+    m.app.set_window_active(false);
+    let endereco = tirech_omni::mcp::endereco_da_pasta(pasta.caminho());
+    let pedido = tirech_omni::mcp::ponte::pedido_de_atencao(
+        &lancamento,
+        &json!({ "hook_event_name": "Stop", "last_assistant_message": "Pronto,  terminei." }),
+    )
+    .expect("o pedido do Stop");
+    tirech_omni::mcp::ponte::enviar_atencao(&endereco, &pedido);
+    esperar(
+        &mut m.app,
+        |app| !app.notifications().is_empty(),
+        "a notificação do fim",
+    );
+    let [aviso] = m.app.notifications().try_into().expect("uma notificação");
+    assert_eq!(aviso.title, "Claude Code terminou");
+    assert_eq!(aviso.body, "Pronto, terminei.");
+    assert_eq!(aviso.tag.as_deref(), Some(assistente.as_str()));
+    let sessao = Session::find(&assistente).expect("a aba do assistente");
+    // O aviso fica na aba (o ponto não acende: ela está à mostra no painel da direita).
+    assert_eq!(untrack(|| sessao.notices()), 1);
+
+    // O clique traz a aba; o lançamento de outra cópia do app não faz nada.
+    m.app.notification_click("Claude Code terminou");
+    assert!(m.app.notifications().is_empty());
+    let mut outro = pedido.clone();
+    outro.atencao = "0-0".to_owned();
+    tirech_omni::mcp::ponte::enviar_atencao(&endereco, &outro);
+    m.app.wait(Duration::from_millis(200));
+    assert!(m.app.notifications().is_empty());
+}
+
+#[test]
+fn o_aviso_do_programa_so_notifica_com_a_aba_fora_da_vista() {
+    let (_pasta, mut m) = cenario("controlar-osc9", true);
+    let sessao = Session::find("1-1").expect("a aba 1-1");
+    let handle = m.opener.handle_de(sessao).unwrap();
+    // À vista: só o aviso na aba, sem notificação.
+    handle.feed("\x1b]9;compilou\x07");
+    m.app.frame();
+    assert!(m.app.notifications().is_empty());
+    // Com a pessoa em outro programa, vira notificação com o título da aba.
+    m.app.set_window_active(false);
+    handle.feed("\x1b]9;os testes passaram\x07");
+    esperar(
+        &mut m.app,
+        |app| !app.notifications().is_empty(),
+        "a notificação do OSC 9",
+    );
+    let [aviso] = m.app.notifications().try_into().expect("uma notificação");
+    assert_eq!(aviso.title, sessao.title());
+    assert_eq!(aviso.body, "os testes passaram");
+    assert_eq!(aviso.tag.as_deref(), Some("1-1"));
+    // O OSC 777 traz o título.
+    handle.feed("\x1b]777;notify;Build;falhou\x07");
+    esperar(
+        &mut m.app,
+        |app| app.notifications().iter().any(|n| n.title == "Build"),
+        "a notificação do OSC 777",
+    );
+    // A mesma aba toma o lugar da anterior.
+    assert_eq!(m.app.notifications().len(), 1);
+}
+
+#[test]
+fn sem_a_opcao_o_aviso_do_programa_fica_so_na_aba() {
+    let (_pasta, mut m) = cenario_com("controlar-osc9-desligado", true, |pasta| {
+        pasta.configurar("terminal", "notificar_avisos", json!(false));
+    });
+    let sessao = Session::find("1-1").expect("a aba 1-1");
+    m.app.set_window_active(false);
+    m.opener
+        .handle_de(sessao)
+        .unwrap()
+        .feed("\x1b]9;os testes passaram\x07");
+    m.app.wait(Duration::from_millis(200));
+    assert!(m.app.notifications().is_empty());
+    assert_eq!(untrack(|| sessao.notices()), 1);
 }

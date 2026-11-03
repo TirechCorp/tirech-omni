@@ -7,6 +7,12 @@ follow [SemVer](https://semver.org/).
 
 ### Added
 
+- Desktop notifications: a notice from a terminal program (`OSC 9` and `OSC 777`, such as the
+  end of a build) shows up in the notifications when you are not looking at the tab, and
+  clicking it brings the tab. Claude Code, Codex and OpenCode opened with "Control with" notify
+  when they finish a reply or are waiting for you. Two settings, on by default: Terminal ›
+  Notify program alerts and AI assistants › Notify when the assistant finishes or waits for
+  you.
 - The Processes and Disk tabs on the Performance page, for this computer or for the server of an
   open SSH connection (Linux): every process with its CPU, memory, state, threads and command,
   or the disk reads and writes of each one; filter, sort by column, the process tree and the End

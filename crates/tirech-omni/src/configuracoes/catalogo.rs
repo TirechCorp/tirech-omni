@@ -263,6 +263,11 @@ pub const CATALOGO: &[Definicao] = &[
         Valor
     ),
     def!(
+        "terminal.notificar_avisos",
+        tk!("config-secao-terminal"),
+        Valor
+    ),
+    def!(
         "terminal.links_com_ctrl",
         tk!("config-secao-terminal"),
         Valor
@@ -623,6 +628,7 @@ pub const CATALOGO: &[Definicao] = &[
         tk!("config-secao-ia-local"),
         Valor
     ),
+    def!("ia.avisar_ao_terminar", tk!("config-secao-ia-local"), Valor),
     // Controle por assistentes (MCP)
     def!("ia.mcp_ligado", tk!("config-secao-mcp"), Valor),
     def!("ia.mcp_abrir", tk!("config-secao-mcp"), Valor),

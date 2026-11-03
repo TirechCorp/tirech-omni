@@ -24,7 +24,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tomni_ui::files::Live;
 
-use super::canal::{self, Abertura, Fluxo, PedidoDeAvisos, RespostaDaAbertura, RespostaDosAvisos};
+use super::canal::{
+    self, Abertura, Fluxo, PedidoDeAtencao, PedidoDeAvisos, RespostaDaAbertura, RespostaDosAvisos,
+};
 use crate::t;
 
 /// Um pedido de ferramenta, a caminho da interface.
@@ -77,6 +79,10 @@ impl Pedido {
 /// O nome do pedido interno dos avisos (o hook do Claude Code): não é ferramenta, e uma ponte
 /// que o pede ouve "ferramenta desconhecida". A interface responde só o texto (ou `null`).
 pub const AVISOS: &str = "#avisos";
+
+/// O nome do pedido interno de atenção (os hooks `Stop` e `Notification` do Claude Code): os
+/// `args` levam o `lancamento`, o `evento` e o `texto`, e ninguém espera a resposta.
+pub const ATENCAO: &str = "#atencao";
 
 /// A espera máxima pela interface no pedido de avisos: o hook segura a mensagem da pessoa.
 const ESPERA_DOS_AVISOS: Duration = Duration::from_secs(5);
@@ -367,6 +373,10 @@ fn atender_ligacao(fluxo: Fluxo, pid_do_sistema: Option<u32>, estado: &Arc<Estad
         atender_avisos(&pedido, &mut escrita, estado, fila);
         return;
     }
+    if let Ok(pedido) = serde_json::from_str::<PedidoDeAtencao>(&linha) {
+        atender_atencao(pedido, fila);
+        return;
+    }
     let abertura = match serde_json::from_str::<Abertura>(&linha) {
         Ok(a) if a.ponte == canal::VERSAO => a,
         _ => {
@@ -512,6 +522,30 @@ fn atender_avisos(pedido: &PedidoDeAvisos, escrita: &mut Fluxo, estado: &Estado,
     });
     let resposta = RespostaDosAvisos { texto };
     let _ = writeln!(escrita, "{}", json!(resposta)).and_then(|()| escrita.flush());
+}
+
+/// Passa à interface o pedido de atenção de um hook. Um hook de outra versão fica sem aviso.
+fn atender_atencao(pedido: PedidoDeAtencao, fila: &Fila) {
+    if pedido.versao != canal::VERSAO {
+        return;
+    }
+    let (envia, _) = mpsc::channel();
+    let pedido = Pedido {
+        ligacao: 0,
+        sessao: String::new(),
+        espaco: None,
+        id: Value::Null,
+        ferramenta: ATENCAO.to_owned(),
+        args: json!({
+            "lancamento": pedido.atencao,
+            "evento": pedido.evento,
+            "texto": pedido.texto,
+        }),
+        pid: 0,
+        cancelado: Arc::new(AtomicBool::new(false)),
+        responder: envia,
+    };
+    fila.update(|f| f.push(pedido));
 }
 
 #[cfg(test)]

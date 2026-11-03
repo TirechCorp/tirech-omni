@@ -197,6 +197,10 @@ config-terminal-duplicar_na_pasta = Duplicate in the current folder
     .descricao = The duplicated tab opens in the folder the original is in. Over SSH, the app types a cd when the prompt appears.
     .palavras = duplicate tab folder directory cd clone copy
 
+config-terminal-notificar_avisos = Notify program alerts
+    .descricao = When a terminal program asks for an alert (like the end of a build), it shows in the system notifications if you are not looking at the tab. Clicking the notification brings the tab.
+    .palavras = notification alert osc system desktop program finished
+
 config-terminal-links_com_ctrl = Open links with Ctrl+click
     .descricao = Ctrl+click opens the address on this computer; while Ctrl is held, links are underlined. When off, the right-click menu still has Copy link.
     .palavras = link url hyperlink browser ctrl click
@@ -878,6 +882,10 @@ config-ia-conversas_reabrir = Reopen the assistants when the app opens
 config-ia-conversas_ao_controlar = When the tab already had a conversation
     .descricao = What Control with does when the assistant already talked about that tab: ask, continue the latest or start another.
     .palavras = ai claude codex opencode conversation continue new ask control
+
+config-ia-avisar_ao_terminar = Notify when the assistant finishes or waits for you
+    .descricao = Claude Code, Codex and OpenCode opened by Control with tell when they finish an answer or ask for a permission. The alert shows in the system notifications if you are not looking at the tab, and clicking it brings the tab.
+    .palavras = ai claude codex opencode notification alert finished idle waiting permission
 
 config-acao-mcp_como = How to connect an assistant…
     .descricao = The commands for Claude Code and Codex, ready to copy.

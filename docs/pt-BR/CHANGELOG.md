@@ -7,6 +7,12 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- Notificações do sistema: o aviso de um programa do terminal (`OSC 9` e `OSC 777`, como o fim
+  de uma compilação) aparece nas notificações quando você não está vendo a aba, e o clique
+  traz a aba. O Claude Code, o Codex e o OpenCode abertos pelo Controlar com avisam quando
+  terminam uma resposta ou esperam por você. Duas opções, ligadas por padrão: Terminal ›
+  Notificar os avisos dos programas e Assistentes de IA › Avisar quando o assistente terminar
+  ou esperar por você.
 - As abas Processos e Disco na página Desempenho, para este computador ou para o servidor de uma
   conexão SSH aberta (Linux): todos os processos com a CPU, a memória, o estado, as threads e o
   comando, ou a leitura e a escrita no disco de cada um; filtro, ordem por coluna, a árvore de

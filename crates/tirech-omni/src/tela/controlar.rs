@@ -8,6 +8,7 @@
 //! liberação pelo clique, aba padrão) é de `tela/mcp*.rs`.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -27,8 +28,8 @@ use crate::ia::{Ferramenta, aspas_externas, ficha};
 use crate::janelas::Janela;
 use crate::links::DestinoDoLink;
 use crate::mcp::clientes::{
-    NOME_DA_ABA, conversa_claude, json_claude_na_aba, lancar_claude, lancar_codex, lancar_opencode,
-    notify_codex, settings_claude_avisos,
+    NOME_DA_ABA, atencao_codex, atencao_opencode, conversa_claude, json_claude_na_aba,
+    lancar_claude, lancar_codex, lancar_opencode, notify_codex, settings_claude_avisos,
 };
 use crate::modelo::{Connection, Kind};
 use crate::t;
@@ -86,6 +87,9 @@ pub(super) struct Estado {
     /// Enquanto as abas de um espaço abrem, as que já abriram esperam aqui para os assistentes
     /// voltarem só no fim: o painel novo à direita mexeria nos painéis que ainda vão encher.
     relancar_depois: RefCell<Option<Vec<AbaComAssistentes>>>,
+    /// A aba de cada lançamento: os hooks de atenção do Claude Code dizem o lançamento, e o
+    /// aviso vai para a aba do assistente.
+    abas_dos_lancamentos: RefCell<HashMap<String, (Session, Ferramenta)>>,
     /// O diálogo "Continuar a conversa?".
     pub(super) escolha: Escolha,
 }
@@ -121,6 +125,7 @@ impl Estado {
             rastros: RefCell::new(Vec::new()),
             a_relancar: RefCell::new(Vec::new()),
             relancar_depois: RefCell::new(None),
+            abas_dos_lancamentos: RefCell::new(HashMap::new()),
             escolha: Escolha {
                 aberto: signal(false),
                 texto: signal(String::new()),
@@ -223,6 +228,8 @@ struct Pedido<'a> {
     shell: &'a str,
     windows: bool,
     retomada: &'a Retomada,
+    /// Se o assistente avisa quando termina ou espera pela pessoa (`ia.avisar_ao_terminar`).
+    atencao: bool,
 }
 
 /// Monta a linha de comando do assistente (seção 3.3 do plano do M63).
@@ -257,12 +264,18 @@ fn montar_linha(p: &Pedido) -> Linha {
                 }
                 Retomada::Nenhuma | Retomada::NovaComId(_) => {}
             }
+            if p.atencao {
+                argumentos.extend(atencao_codex());
+            }
             (argumentos, Vec::new())
         }
         Ferramenta::OpenCode => {
-            let (mut argumentos, ambiente) = lancar_opencode(p.exe, ponte);
+            let (mut argumentos, mut ambiente) = lancar_opencode(p.exe, ponte);
             if let Retomada::Continuar(id) = p.retomada {
                 argumentos.extend(["--session".to_owned(), id.clone()]);
+            }
+            if p.atencao {
+                ambiente.extend(atencao_opencode());
             }
             (argumentos, ambiente)
         }
@@ -1009,6 +1022,14 @@ impl Tela {
         self.mostrar_terminais();
     }
 
+    /// A aba do assistente aberto pelo lançamento `lancamento`, e qual assistente é; `None` se a
+    /// aba já fechou ou o lançamento é de outra cópia do app.
+    pub(super) fn aba_do_lancamento(&self, lancamento: &str) -> Option<(Session, Ferramenta)> {
+        let mut todas = self.controlar.abas_dos_lancamentos.borrow_mut();
+        todas.retain(|_, (sessao, _)| !sessao.closed());
+        todas.get(lancamento).copied()
+    }
+
     /// Abre o assistente `f` numa aba de shell local em `encomenda.lugar`, já ligado ao app pela
     /// ponte. Devolve a aba e o código do lançamento, que a ponte manda ao app ao ligar; `None`
     /// se o programa não foi achado (o aviso já está na tela) ou o arquivo do Claude Code não
@@ -1053,8 +1074,9 @@ impl Tela {
         if f != Ferramenta::Claude {
             ponte.extend(["--instrucoes".to_owned(), encomenda.instrucoes.clone()]);
         }
+        let atencao = self.config.with_untracked(|c| c.ia.avisar_ao_terminar);
         if f == Ferramenta::Claude {
-            let settings = settings_claude_avisos(&exe, &lancamento, ambiente.windows);
+            let settings = settings_claude_avisos(&exe, &lancamento, ambiente.windows, atencao);
             let gravar = |caminho: &Path, conteudo: String| {
                 caminho
                     .parent()
@@ -1114,6 +1136,7 @@ impl Tela {
             shell: &shell,
             windows: ambiente.windows,
             retomada: &retomada,
+            atencao,
         });
         let mut conexao = Connection::new(
             t!("controlar-titulo", nome = ficha.nome, aba = rotulo),
@@ -1125,6 +1148,10 @@ impl Tela {
         conexao.local_pasta = pasta.clone();
         let sessao =
             self.abrir_e_devolver(&conexao, Senhas::default(), encomenda.lugar, false, false);
+        self.controlar
+            .abas_dos_lancamentos
+            .borrow_mut()
+            .insert(lancamento.clone(), (sessao, f));
         let (id, aviso) = match retomada {
             Retomada::NovaComId(id) | Retomada::Continuar(id) => (Some(id), None),
             Retomada::NovaComAviso { aviso, .. } => (None, Some(aviso)),
@@ -1507,6 +1534,7 @@ mod tests {
             shell: "/bin/zsh",
             windows,
             retomada: &Retomada::Nenhuma,
+            atencao: false,
         }
     }
 
@@ -1612,6 +1640,42 @@ mod tests {
         let comando = &json["mcp"]["tirech-omni"]["command"];
         assert_eq!(comando[3], "Claude Code · api");
         assert_eq!(comando[5], "7-2");
+    }
+
+    #[test]
+    fn com_a_atencao_o_codex_e_o_opencode_avisam_pelo_terminal() {
+        let ponte = ponte();
+        let codex = Onde::Nome("codex".to_owned());
+        let linha = montar_linha(&Pedido {
+            atencao: true,
+            ..pedido(Ferramenta::Codex, &codex, &[], false, &ponte)
+        });
+        let comando = &linha.argumentos[2];
+        assert!(comando.contains("'tui.notifications=true'"), "{comando}");
+        assert!(
+            comando.contains("'tui.notification_condition=\"always\"'"),
+            "{comando}"
+        );
+        assert!(linha.ambiente.is_empty());
+
+        let opencode = Onde::Nome("opencode".to_owned());
+        let linha = montar_linha(&Pedido {
+            atencao: true,
+            ..pedido(Ferramenta::OpenCode, &opencode, &[], false, &ponte)
+        });
+        let nomes: Vec<&str> = linha.ambiente.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(
+            nomes,
+            [
+                "OPENCODE_CONFIG_CONTENT",
+                "OPENCODE_CLI_CONFIG_CONTENT",
+                "OPENTUI_NOTIFICATION_PROTOCOL"
+            ]
+        );
+
+        // Sem a atenção, nada disso.
+        let linha = montar_linha(&pedido(Ferramenta::Codex, &codex, &[], false, &ponte));
+        assert!(!linha.argumentos[2].contains("tui.notifications"));
     }
 
     #[test]

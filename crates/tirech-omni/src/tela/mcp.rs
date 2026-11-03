@@ -21,12 +21,13 @@ use serde_json::Value;
 use tomni_ui::files::Live;
 use tomni_ui::mcp::{error_result, text_result};
 use tomni_ui::prelude::*;
-use tomni_ui::terminal::Session;
+use tomni_ui::terminal::{Notice, Session};
 
 use super::mcp_aprovacao::Aprovacao;
 use super::{Janela, Tela};
 use crate::configuracoes::{AbrirAbaIa, Configuracoes};
 use crate::espacos::id_da_chave;
+use crate::ia::ficha;
 use crate::mcp::alvo::achar_conexao;
 use crate::mcp::auditoria::{self, DecisaoRegistrada, Registro};
 use crate::mcp::bloqueio::{perigoso, perigoso_digitado};
@@ -546,6 +547,10 @@ impl Tela {
             pedido.responder(texto.map_or(Value::Null, |t| Value::String(redator.aplicar(&t))));
             return;
         }
+        if pedido.ferramenta == servidor::ATENCAO {
+            self.atender_atencao(&pedido.args);
+            return;
+        }
         let trabalho = Trabalho::novo(
             &pedido,
             self.mcp.geracao.get(),
@@ -570,6 +575,34 @@ impl Tela {
                 self.terminar_mcp(&trabalho, Saida::Erro(erro));
             }
         }
+    }
+
+    /// Os hooks de atenção do Claude Code: o assistente do lançamento terminou (`Stop`) ou pede
+    /// alguma coisa (`Notification`). O aviso vai para a aba dele, como os `OSC 9` do Codex e do
+    /// OpenCode, e acende o ponto da aba; o notificador decide se vira notificação do sistema.
+    fn atender_atencao(&self, args: &Value) {
+        let Some((sessao, f)) = args["lancamento"]
+            .as_str()
+            .and_then(|l| self.aba_do_lancamento(l))
+        else {
+            return;
+        };
+        let nome = ficha(f).nome;
+        let titulo = if args["evento"].as_str() == Some("Stop") {
+            t!("controlar-atencao-terminou", nome = nome)
+        } else {
+            t!("controlar-atencao-espera", nome = nome)
+        };
+        let texto = args["texto"].as_str().unwrap_or_default().trim();
+        let corpo = if texto.is_empty() {
+            sessao.title()
+        } else {
+            texto.to_owned()
+        };
+        sessao.notify(Notice {
+            title: Some(titulo),
+            body: corpo,
+        });
     }
 
     /// Acha o alvo e diz o que o pedido vai fazer. Valida só o que a decisão precisa; o resto os

@@ -14,7 +14,7 @@ use tirech_omni::abrir::RealOpener;
 use tirech_omni::armazenamento::{self, Armazenamento};
 use tirech_omni::configuracoes::Configuracoes;
 use tirech_omni::ferramentas::Ambiente;
-use tirech_omni::marca::ID_DO_APP;
+use tirech_omni::marca::{ID_DO_APP, NOME_DO_APP};
 use tirech_omni::{i18n, icone, migrar_nome, reinicio, sistema, t, tela};
 use tomni_ui::WindowIcon;
 use tomni_ui::platform::CrashReport;
@@ -86,6 +86,8 @@ fn main() -> Result<(), tomni_ui::platform::Error> {
     relatorio.clone().install();
     let guarda = pasta.join("desenho.txt");
     let travamentos = pasta.join("travamentos.log");
+    // O nome no cabeçalho das notificações do sistema (o título da janela muda com a aba).
+    tomni_ui::notification::set_app_name(NOME_DO_APP);
     let resultado = tomni_ui::App::new(move || {
         i18n::entregar_a_lib();
         // No modo portable, o `known_hosts` padrão fica na pasta, e não no `~/.ssh`.

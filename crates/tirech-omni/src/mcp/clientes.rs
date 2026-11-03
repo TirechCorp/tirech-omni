@@ -206,18 +206,29 @@ pub fn json_claude_na_aba(exe: &str, ponte: &[String]) -> String {
 /// ainda não sabe (arquivos soltos, abas dadas), sem esperar a próxima ferramenta. O Claude Code
 /// soma estes settings aos da pessoa. O comando roda pelo shell do Claude Code: o `sh` no Linux e
 /// no macOS (aspas simples), o Git Bash ou o `cmd` no Windows (aspas duplas servem aos dois).
-pub fn settings_claude_avisos(exe: &str, lancamento: &str, windows: bool) -> String {
+///
+/// Com `atencao`, os hooks `Stop` (terminou a resposta) e `Notification` (pede uma permissão ou
+/// uma resposta) chamam `tirech-omni mcp --atencao <lancamento>`, e o app avisa na aba.
+pub fn settings_claude_avisos(exe: &str, lancamento: &str, windows: bool, atencao: bool) -> String {
     let exe = if windows {
         format!("\"{exe}\"")
     } else {
         crate::ia::aspas_sh(exe)
     };
-    let settings = json!({
-        "hooks": { "UserPromptSubmit": [ { "hooks": [ {
-            "type": "command",
-            "command": format!("{exe} mcp --avisos {}", crate::ia::aspas_sh(lancamento)),
-        } ] } ] }
-    });
+    let lancamento = crate::ia::aspas_sh(lancamento);
+    let hook = |opcao: &str| {
+        json!([ { "hooks": [ {
+        "type": "command",
+        "command": format!("{exe} mcp {opcao} {lancamento}"),
+    } ] } ])
+    };
+    let mut hooks = serde_json::Map::new();
+    hooks.insert("UserPromptSubmit".into(), hook("--avisos"));
+    if atencao {
+        hooks.insert("Stop".into(), hook("--atencao"));
+        hooks.insert("Notification".into(), hook("--atencao"));
+    }
+    let settings = json!({ "hooks": hooks });
     serde_json::to_string_pretty(&settings).unwrap_or_default()
 }
 
@@ -256,6 +267,32 @@ pub fn lancar_codex(exe: &str, ponte: &[String]) -> Vec<String> {
         format!("mcp_servers.{NOME}.args=[{}]", args.join(", ")),
         "-c".into(),
         format!("mcp_servers.{NOME}.tool_timeout_sec={PRAZO_DAS_FERRAMENTAS}"),
+    ]
+}
+
+/// Os `-c` do `codex` que ligam os avisos do terminal: ao terminar a resposta ou ao pedir uma
+/// aprovação, o Codex manda um `OSC 9` mesmo com a aba à mostra (ele não sabe do foco), e o app
+/// decide se vira notificação do sistema.
+pub fn atencao_codex() -> Vec<String> {
+    [
+        "tui.notifications=true",
+        "tui.notification_method=\"osc9\"",
+        "tui.notification_condition=\"always\"",
+    ]
+    .into_iter()
+    .flat_map(|valor| ["-c".to_owned(), valor.to_owned()])
+    .collect()
+}
+
+/// As variáveis do `opencode` que ligam os avisos do terminal: `OPENCODE_CLI_CONFIG_CONTENT`
+/// soma `attention.notifications` às preferências da pessoa, e `OPENTUI_NOTIFICATION_PROTOCOL`
+/// escolhe o `OSC 777` (o OpenCode só avisa nos terminais que ele conhece pelo nome). Ele avisa
+/// quando a aba perde o foco (o relatório de foco, `ESC[?1004h`).
+pub fn atencao_opencode() -> Vec<(String, String)> {
+    let config = json!({ "attention": { "notifications": true } });
+    vec![
+        ("OPENCODE_CLI_CONFIG_CONTENT".into(), config.to_string()),
+        ("OPENTUI_NOTIFICATION_PROTOCOL".into(), "osc777".into()),
     ]
 }
 
@@ -516,7 +553,9 @@ mod tests {
     fn o_hook_dos_avisos_chama_a_ponte_com_o_lancamento() {
         let comando = |exe, windows| {
             let json: serde_json::Value =
-                serde_json::from_str(&settings_claude_avisos(exe, "4242-3", windows)).unwrap();
+                serde_json::from_str(&settings_claude_avisos(exe, "4242-3", windows, false))
+                    .unwrap();
+            assert!(json["hooks"].get("Stop").is_none());
             let hook = &json["hooks"]["UserPromptSubmit"][0]["hooks"][0];
             assert_eq!(hook["type"], "command");
             hook["command"].as_str().unwrap().to_owned()
@@ -528,6 +567,45 @@ mod tests {
         assert_eq!(
             comando(r"C:\Program Files\Tirech\tirech-omni.exe", true),
             r#""C:\Program Files\Tirech\tirech-omni.exe" mcp --avisos '4242-3'"#
+        );
+    }
+
+    #[test]
+    fn os_hooks_de_atencao_chamam_a_ponte_no_fim_e_nos_pedidos() {
+        let json: serde_json::Value =
+            serde_json::from_str(&settings_claude_avisos("/bin/t", "4242-3", false, true)).unwrap();
+        for evento in ["Stop", "Notification"] {
+            assert_eq!(
+                json["hooks"][evento][0]["hooks"][0]["command"], "'/bin/t' mcp --atencao '4242-3'",
+                "{evento}"
+            );
+        }
+        assert_eq!(
+            json["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+            "'/bin/t' mcp --avisos '4242-3'"
+        );
+    }
+
+    #[test]
+    fn os_avisos_do_codex_e_do_opencode_vao_pelo_terminal() {
+        assert_eq!(
+            atencao_codex(),
+            [
+                "-c",
+                "tui.notifications=true",
+                "-c",
+                "tui.notification_method=\"osc9\"",
+                "-c",
+                "tui.notification_condition=\"always\""
+            ]
+        );
+        let ambiente = atencao_opencode();
+        assert_eq!(ambiente[0].0, "OPENCODE_CLI_CONFIG_CONTENT");
+        let json: serde_json::Value = serde_json::from_str(&ambiente[0].1).unwrap();
+        assert_eq!(json["attention"]["notifications"], true);
+        assert_eq!(
+            ambiente[1],
+            ("OPENTUI_NOTIFICATION_PROTOCOL".into(), "osc777".into())
         );
     }
 

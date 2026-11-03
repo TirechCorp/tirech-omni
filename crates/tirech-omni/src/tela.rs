@@ -121,6 +121,7 @@ mod mcp_terminal;
 mod menus;
 mod mouse;
 mod notas_conexao;
+mod notificacoes;
 mod ocioso;
 mod openvpn_perguntas;
 mod pagina_logs;
@@ -4656,6 +4657,8 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, impl Fn() -> 
                 }
             });
         });
+        // Os avisos das abas que a pessoa não está vendo viram notificações do sistema.
+        tela.ligar_notificacoes();
     }
 
     Tela::vigiar_desbloqueio(&tela);

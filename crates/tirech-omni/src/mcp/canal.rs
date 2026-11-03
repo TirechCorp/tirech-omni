@@ -10,6 +10,9 @@
 //! - **Avisos:** o hook do Claude Code (`tirech-omni mcp --avisos <lançamento>`) liga, manda
 //!   [`PedidoDeAvisos`] no lugar da abertura, lê [`RespostaDosAvisos`] e sai. Um app antigo o
 //!   recusa como ponte de outra versão.
+//! - **Atenção:** os hooks `Stop` e `Notification` do Claude Code (`tirech-omni mcp --atencao
+//!   <lançamento>`) ligam, mandam [`PedidoDeAtencao`] e saem, sem esperar resposta: o app dá o
+//!   aviso na aba do assistente.
 
 #[cfg(unix)]
 use std::io;
@@ -66,6 +69,21 @@ pub struct Abertura {
 pub struct PedidoDeAvisos {
     /// O lançamento (o mesmo `--lancamento` da ponte).
     pub avisos: String,
+    /// A versão do canal ([`VERSAO`]).
+    pub versao: u64,
+}
+
+/// O pedido dos hooks de atenção: o assistente do lançamento `atencao` terminou ou espera pela
+/// pessoa.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PedidoDeAtencao {
+    /// O lançamento (o mesmo `--lancamento` da ponte).
+    pub atencao: String,
+    /// O evento do hook: `Stop` (terminou) ou `Notification` (pede alguma coisa).
+    pub evento: String,
+    /// O texto que o hook trouxe (a mensagem da notificação, ou o fim da resposta).
+    #[serde(default)]
+    pub texto: String,
     /// A versão do canal ([`VERSAO`]).
     pub versao: u64,
 }

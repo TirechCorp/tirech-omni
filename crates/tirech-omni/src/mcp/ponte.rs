@@ -22,7 +22,9 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tomni_ui::mcp::{McpError, McpTools, error_result, handle};
 
-use super::canal::{self, Abertura, Fluxo, PedidoDeAvisos, RespostaDaAbertura, RespostaDosAvisos};
+use super::canal::{
+    self, Abertura, Fluxo, PedidoDeAtencao, PedidoDeAvisos, RespostaDaAbertura, RespostaDosAvisos,
+};
 use super::{ferramentas, prompts};
 use crate::t;
 
@@ -58,6 +60,9 @@ pub enum Pedido {
     /// O hook do Claude Code (`--avisos <lançamento>`): escrever os avisos pendentes da sessão
     /// desse lançamento e sair.
     Avisos(String),
+    /// Os hooks `Stop` e `Notification` do Claude Code (`--atencao <lançamento>`): passar ao app
+    /// o JSON do hook, que chega pela entrada, e sair.
+    Atencao(String),
     /// O `notify` do Codex (`--conversa <arquivo> [-- <notify da pessoa>…] <json>`): gravar no
     /// arquivo o id da conversa que veio no JSON, chamar o `notify` que a pessoa tinha e sair.
     Conversa {
@@ -94,8 +99,8 @@ pub fn analisar(args: impl IntoIterator<Item = String>) -> Result<Pedido, String
                     json,
                 });
             }
-            "--espaco" | "--nome" | "--aba" | "--lancamento" | "--avisos" | "--canal"
-            | "--instrucoes" => {
+            "--espaco" | "--nome" | "--aba" | "--lancamento" | "--avisos" | "--atencao"
+            | "--canal" | "--instrucoes" => {
                 let valor = args
                     .next()
                     .filter(|v| !v.trim().is_empty())
@@ -105,6 +110,7 @@ pub fn analisar(args: impl IntoIterator<Item = String>) -> Result<Pedido, String
                     "--aba" => opcoes.aba = Some(valor),
                     "--lancamento" => opcoes.lancamento = Some(valor),
                     "--avisos" => return Ok(Pedido::Avisos(valor)),
+                    "--atencao" => return Ok(Pedido::Atencao(valor)),
                     "--canal" => opcoes.canal = Some(PathBuf::from(valor)),
                     "--instrucoes" => opcoes.instrucoes = Some(valor),
                     _ => opcoes.nome = Some(valor),
@@ -165,6 +171,16 @@ pub fn rodar_com(
             }
             return 0;
         }
+        Ok(Pedido::Atencao(lancamento)) => {
+            let mut entrada = entrada;
+            let mut json = String::new();
+            let _ = entrada.read_to_string(&mut json);
+            let hook = serde_json::from_str::<Value>(&json).unwrap_or(Value::Null);
+            if let Some(pedido) = pedido_de_atencao(&lancamento, &hook) {
+                enviar_atencao(endereco, &pedido);
+            }
+            return 0;
+        }
         Err(mensagem) => {
             let _ = writeln!(erro, "{mensagem}");
             return 2;
@@ -213,6 +229,65 @@ pub fn buscar_avisos(endereco: &Path, lancamento: &str) -> Option<String> {
         .ok()?
         .texto
         .filter(|t| !t.trim().is_empty())
+}
+
+/// As notificações do Claude Code que não pedem nada à pessoa: a de ocioso (que chega um minuto
+/// depois do `Stop`, que já avisou), o login que deu certo, o uso do computador e os diálogos que
+/// já acabaram.
+const NOTIFICACOES_SEM_ATENCAO: [&str; 7] = [
+    "idle_prompt",
+    "auth_success",
+    "agent_completed",
+    "computer_use_enter",
+    "computer_use_exit",
+    "elicitation_complete",
+    "elicitation_response",
+];
+
+/// O tamanho máximo do texto do aviso, em caracteres: a notificação mostra poucas linhas.
+const TAMANHO_DO_AVISO: usize = 200;
+
+/// O pedido de atenção do JSON que o Claude Code dá ao hook: o `Stop` (terminou a resposta,
+/// com o começo dela) e a `Notification` (pede uma permissão ou uma resposta, com a mensagem).
+/// `None` para os outros eventos e as notificações que não pedem nada.
+pub fn pedido_de_atencao(lancamento: &str, hook: &Value) -> Option<PedidoDeAtencao> {
+    let evento = hook["hook_event_name"].as_str()?;
+    let texto = match evento {
+        "Stop" => hook["last_assistant_message"].as_str().unwrap_or_default(),
+        "Notification" => {
+            let tipo = hook["notification_type"].as_str().unwrap_or_default();
+            if NOTIFICACOES_SEM_ATENCAO.contains(&tipo) {
+                return None;
+            }
+            hook["message"].as_str().unwrap_or_default()
+        }
+        _ => return None,
+    };
+    Some(PedidoDeAtencao {
+        atencao: lancamento.to_owned(),
+        evento: evento.to_owned(),
+        texto: resumo(texto),
+        versao: canal::VERSAO,
+    })
+}
+
+/// O `texto` numa linha só, com os espaços juntados, cortado em [`TAMANHO_DO_AVISO`] caracteres.
+fn resumo(texto: &str) -> String {
+    let linha = texto.split_whitespace().collect::<Vec<_>>().join(" ");
+    if linha.chars().count() <= TAMANHO_DO_AVISO {
+        return linha;
+    }
+    let mut cortado: String = linha.chars().take(TAMANHO_DO_AVISO - 1).collect();
+    cortado.push('…');
+    cortado
+}
+
+/// Manda o pedido de atenção ao app, sem esperar resposta. App fechado ou de outra versão: nada,
+/// em silêncio (o hook não atrapalha o assistente).
+pub fn enviar_atencao(endereco: &Path, pedido: &PedidoDeAtencao) {
+    if let Ok(mut fluxo) = canal::conectar(endereco) {
+        let _ = writeln!(fluxo, "{}", json!(pedido)).and_then(|()| fluxo.flush());
+    }
 }
 
 /// O que o hook `UserPromptSubmit` do Claude Code escreve: o `texto` como contexto somado à
@@ -619,7 +694,54 @@ mod tests {
             analisar(args(&["--avisos", "42-1"])),
             Ok(Pedido::Avisos("42-1".into()))
         );
+        assert_eq!(
+            analisar(args(&["--atencao", "42-1"])),
+            Ok(Pedido::Atencao("42-1".into()))
+        );
         assert_eq!(analisar(args(&["-h"])), Ok(Pedido::Ajuda));
+    }
+
+    #[test]
+    fn o_hook_de_atencao_avisa_o_fim_e_os_pedidos_mas_nao_o_ocioso() {
+        let fim = json!({
+            "hook_event_name": "Stop",
+            "last_assistant_message": "Pronto:\n  o   deploy acabou.",
+        });
+        assert_eq!(
+            pedido_de_atencao("42-1", &fim),
+            Some(PedidoDeAtencao {
+                atencao: "42-1".into(),
+                evento: "Stop".into(),
+                texto: "Pronto: o deploy acabou.".into(),
+                versao: canal::VERSAO,
+            })
+        );
+        let permissao = json!({
+            "hook_event_name": "Notification",
+            "notification_type": "permission_prompt",
+            "message": "Claude needs your permission to use Bash",
+        });
+        let pedido = pedido_de_atencao("42-1", &permissao).expect("a permissão avisa");
+        assert_eq!(pedido.evento, "Notification");
+        assert_eq!(pedido.texto, "Claude needs your permission to use Bash");
+        let ocioso = json!({
+            "hook_event_name": "Notification",
+            "notification_type": "idle_prompt",
+            "message": "Claude is waiting for your input",
+        });
+        assert_eq!(pedido_de_atencao("42-1", &ocioso), None);
+        assert_eq!(
+            pedido_de_atencao("42-1", &json!({ "hook_event_name": "UserPromptSubmit" })),
+            None
+        );
+        assert_eq!(pedido_de_atencao("42-1", &Value::Null), None);
+        // A resposta longa vira o começo dela.
+        let longa = json!({ "hook_event_name": "Stop", "last_assistant_message": "á".repeat(500) });
+        let texto = pedido_de_atencao("42-1", &longa)
+            .expect("o fim avisa")
+            .texto;
+        assert_eq!(texto.chars().count(), TAMANHO_DO_AVISO);
+        assert!(texto.ends_with('…'));
     }
 
     #[test]

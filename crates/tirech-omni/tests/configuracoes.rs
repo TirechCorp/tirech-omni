@@ -287,6 +287,11 @@ efeito_bool!(
     "terminal.duplicar_na_pasta",
     terminal.duplicar_na_pasta
 );
+efeito_bool!(
+    efeito_terminal__notificar_avisos,
+    "terminal.notificar_avisos",
+    terminal.notificar_avisos
+);
 efeito_texto!(
     efeito_terminal__pasta_colar,
     "terminal.pasta_colar",
@@ -1118,6 +1123,11 @@ efeito_escolha!(
     "ia.conversas_ao_controlar",
     ConversaAoControlar::TODAS,
     ia.conversas_ao_controlar
+);
+efeito_bool!(
+    efeito_ia__avisar_ao_terminar,
+    "ia.avisar_ao_terminar",
+    ia.avisar_ao_terminar
 );
 efeito_bool!(
     efeito_ia__shell_ao_sair,

@@ -1111,6 +1111,10 @@ fn secao_terminal(p: &Pagina) -> Expander {
                 campo!(p, terminal.duplicar_na_pasta),
             ))
             .child(p.interruptor(
+                "terminal.notificar_avisos",
+                campo!(p, terminal.notificar_avisos),
+            ))
+            .child(p.interruptor(
                 "terminal.links_com_ctrl",
                 campo!(p, terminal.links_com_ctrl),
             ))
@@ -2150,7 +2154,8 @@ fn secao_ia_local(p: &Pagina) -> Expander {
                 "ia.conversas_ao_controlar",
                 opcao_de!(p, ConversaAoControlar::TODAS, ia.conversas_ao_controlar),
                 ConversaAoControlar::nomes(),
-            )),
+            ))
+            .child(p.interruptor("ia.avisar_ao_terminar", campo!(p, ia.avisar_ao_terminar))),
     )
 }
 

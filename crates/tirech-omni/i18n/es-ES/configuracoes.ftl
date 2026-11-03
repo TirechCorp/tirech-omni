@@ -195,6 +195,10 @@ config-terminal-duplicar_na_pasta = Duplicar en la carpeta actual
     .descricao = La pestaña duplicada se abre en la carpeta en la que está la original. En SSH, la aplicación escribe un cd cuando aparece el prompt.
     .palavras = duplicar pestana carpeta directorio cd clonar copiar
 
+config-terminal-notificar_avisos = Notificar los avisos de los programas
+    .descricao = Cuando un programa de la terminal pide un aviso (como el final de una compilación), aparece en las notificaciones del sistema si no estás viendo la pestaña. El clic en la notificación trae la pestaña.
+    .palavras = notificacion aviso osc sistema escritorio alerta programa termino
+
 config-terminal-links_com_ctrl = Abrir vínculos con Ctrl+clic
     .descricao = Ctrl+clic abre la dirección en este equipo; con Ctrl presionado, los vínculos aparecen subrayados. Desactivado, el menú del clic derecho sigue teniendo Copiar vínculo.
     .palavras = link vinculo enlace url direccion hipervinculo navegador ctrl clic
@@ -875,6 +879,10 @@ config-ia-conversas_reabrir = Volver a abrir los asistentes al abrir la aplicaci
 config-ia-conversas_ao_controlar = Cuando la pestaña ya tuvo una conversación
     .descricao = Qué hace Controlar con cuando el asistente ya conversó sobre esa pestaña: preguntar, continuar la más reciente o empezar otra.
     .palavras = ia claude codex opencode conversacion continuar nueva preguntar controlar
+
+config-ia-avisar_ao_terminar = Avisar cuando el asistente termine o te espere
+    .descricao = Claude Code, Codex y OpenCode abiertos con Controlar con avisan cuando terminan una respuesta o piden un permiso. El aviso aparece en las notificaciones del sistema si no estás viendo la pestaña, y el clic trae la pestaña.
+    .palavras = ia claude codex opencode notificacion aviso termino inactivo esperando permiso
 
 config-acao-mcp_como = Cómo conectar un asistente…
     .descricao = Los comandos para Claude Code y Codex, listos para copiar.

@@ -125,6 +125,7 @@ mod notificacoes;
 mod ocioso;
 mod openvpn_perguntas;
 mod pagina_logs;
+mod perfis_locais;
 mod portas;
 mod processos;
 mod programas;
@@ -2877,13 +2878,14 @@ impl Tela {
             })?;
         }
         if com_ias {
-            salva.cluster_ia = self
-                .cluster_ia_da_janela(janela)
-                .map(|(f, painel, assistente)| ClusterIaSalvo {
-                    ferramenta: f.chave().to_owned(),
-                    painel,
-                    conversa: self.conversa_da_aba_de_assistente(assistente),
-                });
+            salva.cluster_ia =
+                self.cluster_ia_da_janela(janela)
+                    .map(|(quem, painel, assistente)| ClusterIaSalvo {
+                        ferramenta: quem.ferramenta.chave().to_owned(),
+                        perfil: Some(quem.perfil),
+                        painel,
+                        conversa: self.conversa_da_aba_de_assistente(assistente),
+                    });
         }
         Some(salva)
     }
@@ -5535,7 +5537,9 @@ fn painel_conexoes(tela: &Rc<Tela>) -> Column {
                                     && t.tem_terminal(alvo)
                                     && t.config.with(|c| {
                                         c.geral.mcp
-                                            && Ferramenta::TODAS.into_iter().any(|f| c.ia.mostra(f))
+                                            && Ferramenta::TODAS
+                                                .into_iter()
+                                                .any(|f| c.ia.mostra_local(f))
                                     })
                             }
                         })
@@ -6690,6 +6694,7 @@ pub fn tela_com_ferramentas(
         let (como, espacos) = (mcp_como::dialogos(&tela), mcp_espacos::dialogos(&tela));
         let portatil = cofre_portatil::dialogos(&tela);
         let importacao = importacao::dialogos(&tela);
+        let perfis = perfis_locais::dialogos(&tela);
         let t = Rc::clone(&tela);
         *tela.dialogos_gerais.borrow_mut() = Some(Rc::new(move || {
             Column::new()
@@ -6701,8 +6706,10 @@ pub fn tela_com_ferramentas(
                 .child(espacos())
                 .child(portatil())
                 .child(importacao())
+                .child(perfis())
         }));
     }
+    perfis_locais::ligar(&tela);
     wsl::ligar(&tela);
     instalar::ligar(&tela);
     ia::ligar(&tela);
@@ -7278,6 +7285,18 @@ fn contexto_das_configuracoes(
         espaco_editar: {
             let tela = Rc::clone(tela);
             Rc::new(move |nome| tela.editar_espaco_ia(&nome))
+        },
+        perfil_novo: {
+            let tela = Rc::clone(tela);
+            Rc::new(move || tela.novo_perfil_local())
+        },
+        perfil_editar: {
+            let tela = Rc::clone(tela);
+            Rc::new(move |id| tela.editar_perfil_local(id))
+        },
+        perfil_entrar: {
+            let tela = Rc::clone(tela);
+            Rc::new(move |id| tela.entrar_no_perfil(id))
         },
         abrir_instalacao: {
             let tela = Rc::clone(tela);

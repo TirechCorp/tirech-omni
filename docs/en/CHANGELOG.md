@@ -7,6 +7,19 @@ follow [SemVer](https://semver.org/).
 
 ### Added
 
+- Sensors: the Performance page's **Sensors** tab shows the temperature of the CPU, memory,
+  disk, motherboard and graphics card, with the last minute's chart, and the fans, for this
+  computer or the server of an open SSH connection (Linux). What has no sensor doesn't show up.
+  On Linux through `/sys/class/hwmon`, on macOS through the Apple Silicon sensors and on Windows
+  through the disks, the ACPI thermal zones and, with LibreHardwareMonitor running, its sensors.
+  The CPU temperature is also on the title bar meter, and a desktop notification fires when the
+  CPU goes over the limit (Settings › General › Warn when the CPU gets hot, on). Windows has not
+  been checked on a real machine yet.
+- Assistant profiles: two or more accounts, or two executables, of Claude Code, Codex and
+  OpenCode. In Settings › AI assistants › Assistants on this computer, **New assistant
+  profile…** picks the executable from the installations found (with the version) and the
+  account folder, and **Sign in** logs the profile in. Each profile becomes an item in Control
+  with.
 - Desktop notifications: a notice from a terminal program (`OSC 9` and `OSC 777`, such as the
   end of a build) shows up in the notifications when you are not looking at the tab, and
   clicking it brings the tab. Claude Code, Codex and OpenCode opened with "Control with" notify
@@ -97,6 +110,8 @@ follow [SemVer](https://semver.org/).
 
 ### Changed
 
+- The Claude Code, Codex and OpenCode Path and Arguments fields gave way to profiles; what was
+  in them becomes each assistant's default profile.
 - The read-only copy sends to the owner what changes in the connections, the settings, the AI
   providers and the vault, and the owner saves it. If the owner changed the same file at the
   same time, both changes are merged; the same field changed on both sides keeps the owner's,

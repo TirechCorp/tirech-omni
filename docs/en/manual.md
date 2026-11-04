@@ -202,6 +202,21 @@ tabs from the previous state does not count. Deleting a connection removes its r
   buttons, and the right-click menu, act on the selected ones (on Linux and macOS, `kill` with
   TERM or KILL; on Windows, `taskkill`, with `/F` to force; on the server, `kill` over the
   connection).
+- **Sensors (the machine's temperature)**: the Performance page's **Sensors** tab shows the
+  temperature of the CPU, memory, disk, motherboard and graphics card, each group with the last
+  minute's chart and the list of sensors (the value, high and critical), and the fans with their
+  speed. The selector picks **This computer** or the server of an open SSH connection (Linux).
+  What the machine doesn't have doesn't show up: with no sensor at all, the tab disappears. On
+  Linux the numbers come from `/sys/class/hwmon`, without root; on macOS, from the Apple Silicon
+  sensors; on Windows, from the disk temperatures and the ACPI thermal zones and, with
+  LibreHardwareMonitor running, from its sensors and fans (the CPU per core, memory, the
+  motherboard). The title bar meter also shows the CPU temperature, in orange above the sensor's
+  high limit and in red above the critical one (**CPU temperature on the meter**, in Settings ›
+  General, or **Show the temperature** in the meter's menu). **Warn when the CPU gets hot**
+  (on) sends a desktop notification when this computer's processor goes over the **Heat warning
+  limit** (0, automatic, is the sensor's critical value minus 10 °C, or 90 °C); another one only
+  after it cools down 5 °C and 10 minutes pass, and clicking it opens the Sensors tab. The
+  reading is light: every 5 seconds, and only while the number or the warning needs it.
 - **Retry after (reconnection that doesn't give up)**: when the tab reconnects automatically
   (Settings › Connections › When the connection drops set to **Reconnect automatically**, and
   always in an assistant's tab) and the attempts run out, it waits and starts another round,
@@ -1078,6 +1093,17 @@ menu, in the tab menu and in Tools › AI assistants (which controls the current
   isn't changed** (nothing is written to `~/.claude.json`, `~/.codex/config.toml`
   or `opencode.json`). In Claude Code the server is called `tirech-omni-aba`, so it doesn't
   collide with one the user already added by hand.
+- **Profiles (several accounts or executables of the same assistant)**: in Settings › AI
+  assistants › Assistants on this computer, **New assistant profile…** creates another Claude
+  Code, Codex or OpenCode profile, with a name, executable, account folder and extra arguments.
+  The executable is picked from the installations found on the computer, each with its version
+  (useful when there are two binaries of the same assistant), or **Search the PATH**, or
+  **Other…**. Each account folder is a separate account, with its own login, settings and
+  conversations (`CLAUDE_CONFIG_DIR` in Claude Code, `CODEX_HOME` in Codex, `XDG_DATA_HOME` and
+  `XDG_STATE_HOME` in OpenCode); empty, it uses the usual account. **Sign in** opens a tab with
+  the profile's login. Each profile becomes an item in **Control with ▸**, in the folder's
+  submenu and in the AI cluster, and the conversation log is per profile. The default is one
+  profile per assistant, and the earlier paths and arguments become those profiles.
 - Clicking again, on the same tab and with the same assistant still open, just brings its tab to the
   front. The submenu doesn't appear on the assistant's own tab.
 - **The conversation log**: the app keeps the id of each conversation an assistant had with a

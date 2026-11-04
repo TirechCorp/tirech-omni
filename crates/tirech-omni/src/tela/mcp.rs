@@ -27,7 +27,6 @@ use super::mcp_aprovacao::Aprovacao;
 use super::{Janela, Tela};
 use crate::configuracoes::{AbrirAbaIa, Configuracoes};
 use crate::espacos::id_da_chave;
-use crate::ia::ficha;
 use crate::mcp::alvo::achar_conexao;
 use crate::mcp::auditoria::{self, DecisaoRegistrada, Registro};
 use crate::mcp::bloqueio::{perigoso, perigoso_digitado};
@@ -581,13 +580,14 @@ impl Tela {
     /// alguma coisa (`Notification`). O aviso vai para a aba dele, como os `OSC 9` do Codex e do
     /// OpenCode, e acende o ponto da aba; o notificador decide se vira notificação do sistema.
     fn atender_atencao(&self, args: &Value) {
-        let Some((sessao, f)) = args["lancamento"]
+        let Some((sessao, quem)) = args["lancamento"]
             .as_str()
             .and_then(|l| self.aba_do_lancamento(l))
         else {
             return;
         };
-        let nome = ficha(f).nome;
+        let nome = self.perfil_de(quem).nome();
+        let nome = nome.as_str();
         let titulo = if args["evento"].as_str() == Some("Stop") {
             t!("controlar-atencao-terminou", nome = nome)
         } else {

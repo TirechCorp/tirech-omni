@@ -111,6 +111,18 @@ config-geral-origem_medidor = Origen del medidor de CPU
     .descricao = Lo que usa { -app } o el procesador entero de este equipo. El servidor de una conexión SSH abierta se elige en el menú del medidor (botón derecho) y vale hasta que la sesión se cierra.
     .palavras = cpu procesador equipo maquina servidor ssh medidor origen media uso
 
+config-geral-medidor_temperatura = Temperatura de la CPU en el medidor
+    .descricao = Muestra la temperatura del procesador junto al medidor, de su misma máquina, en naranja por encima del límite alto del sensor y en rojo por encima del crítico. Desaparece cuando la máquina no tiene sensor.
+    .palavras = temperatura calor grados celsius sensor cpu procesador caliente medidor
+
+config-geral-avisar_calor = Avisar cuando la CPU se caliente
+    .descricao = Una notificación del sistema cuando el procesador de este equipo pasa del límite. Otra solo después de que se enfríe 5 °C y de 10 minutos.
+    .palavras = temperatura calor caliente aviso notificacion sensor cpu procesador sobrecalentamiento
+
+config-geral-limite_calor = Límite del aviso de calor (°C)
+    .descricao = Por encima de esta temperatura, el aviso. 0 es el automático: el crítico del sensor menos 10 °C, o 90 °C.
+    .palavras = temperatura calor limite grados celsius aviso sensor
+
 config-geral-recentes_max = Recientes guardados
     .descricao = Cuántas conexiones guarda la lista de recientes, sin contar las ancladas.
     .palavras = historial ultimas
@@ -844,29 +856,9 @@ config-acao-ia_local_limpar = Limpiar la carpeta de trabajo…
     .descricao = Borra todo lo que hay dentro. Los asistentes abiertos siguen.
     .palavras = ia claude codex carpeta trabajo limpiar borrar basura
 
-config-ia-local_claude_caminho = Ruta de Claude Code
-    .descricao = El programa de este equipo. Vacío lo busca en las carpetas del sistema y de tu usuario.
-    .palavras = ia claude ruta ejecutable programa equipo local
-
-config-ia-local_claude_argumentos = Argumentos de Claude Code
-    .descricao = Van después del comando cuando usas Controlar con Claude Code. Aquí van las opciones que quieras.
-    .palavras = ia claude argumentos opciones parametros equipo local controlar
-
-config-ia-local_codex_caminho = Ruta de Codex
-    .descricao = El programa de este equipo. Vacío lo busca en las carpetas del sistema y de tu usuario.
-    .palavras = ia codex ruta ejecutable programa equipo local
-
-config-ia-local_codex_argumentos = Argumentos de Codex
-    .descricao = Van después del comando cuando usas Controlar con Codex. Aquí van las opciones que quieras.
-    .palavras = ia codex argumentos opciones parametros equipo local controlar
-
-config-ia-local_opencode_caminho = Ruta de OpenCode
-    .descricao = El programa de este equipo. Vacío lo busca en las carpetas del sistema y de tu usuario.
-    .palavras = ia opencode ruta ejecutable programa equipo local
-
-config-ia-local_opencode_argumentos = Argumentos de OpenCode
-    .descricao = Van después del comando cuando usas Controlar con OpenCode. Aquí van las opciones que quieras.
-    .palavras = ia opencode argumentos opciones parametros equipo local controlar
+config-acao-ia_perfil_local_novo = Nuevo perfil de asistente…
+    .descricao = Otra cuenta, otro ejecutable u otros argumentos de Claude Code, de Codex o de OpenCode. Cada perfil se convierte en un elemento de Controlar con.
+    .palavras = ia claude codex opencode perfil cuenta login ejecutable ruta argumentos version controlar
 
 config-ia-conversas_lembrar = Recordar las conversaciones de cada pestaña
     .descricao = Guarda el id de las conversaciones de Claude Code, Codex y OpenCode con cada pestaña, para continuar después. Desactivado, Controlar con siempre empieza una conversación nueva.
@@ -1157,7 +1149,6 @@ config-dica-redigir-extras = uno por línea; re:… para regex
 config-dica-bloqueio-mcp = uno por línea; re:… para regex
 config-dica-finais-prompt = uno por línea
 config-dica-argumentos-ia = por ejemplo --model sonnet
-config-dica-caminho-ia-local = buscar automáticamente
 config-dica-pasta-troca = Downloads/Tirech Omni
 config-dica-atalho = Ctrl+Shift+N
 atalho-nova-conexao = Nueva conexión
@@ -1245,3 +1236,31 @@ opcao-metodo-ia-automatico = Automático
 opcao-metodo-ia-nativo = Instalador oficial
 opcao-metodo-ia-npm = npm
 opcao-metodo-ia-homebrew = Homebrew
+
+## Los perfiles de asistente de este equipo (la lista y el editor).
+ia-perfis-vazio = Ningún perfil. Controlar con solo muestra los asistentes que tienen uno.
+ia-perfil-item = { $assistente } · { $executavel } · { $conta }
+ia-perfil-exe-path = Buscar en el PATH
+ia-perfil-exe-outro = Otro…
+ia-perfil-exe-achado = { $caminho } ({ $versao })
+ia-perfil-conta-de-sempre = cuenta de siempre
+ia-perfil-entrar = Iniciar sesión
+ia-perfil-editar = Editar…
+ia-perfil-apagado = Perfil “{ $nome }” borrado.
+ia-perfil-salvo = Perfil “{ $nome }” guardado.
+ia-perfil-titulo-novo = Nuevo perfil de asistente
+ia-perfil-titulo-editar = Editar el perfil de asistente
+ia-perfil-nome = Nombre
+ia-perfil-nome-dica = vacío usa el nombre del asistente
+ia-perfil-assistente = Asistente
+ia-perfil-executavel = Ejecutable
+ia-perfil-procurando = Buscando las instalaciones…
+ia-perfil-outro-dica = ruta del programa
+ia-perfil-conta = Carpeta de la cuenta
+ia-perfil-conta-dica = vacía usa la cuenta de siempre
+ia-perfil-conta-explicacao = Cada carpeta es una cuenta separada, con su inicio de sesión, su configuración y sus conversaciones. Usa Iniciar sesión para entrar con el perfil.
+ia-perfil-argumentos = Argumentos extra
+ia-perfil-erro-assistente = Elige el asistente.
+ia-perfil-erro-limite = { $assistente } ya tiene { $n } perfiles, el máximo.
+ia-perfil-nao-achado = No encontré el programa del perfil “{ $nome }” en este equipo.
+ia-perfil-entrar-titulo = Iniciar sesión · { $nome }

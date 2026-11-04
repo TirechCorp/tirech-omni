@@ -73,6 +73,7 @@ pub mod reinicio;
 pub mod relogio;
 pub mod retentar;
 pub mod scripts;
+pub mod sensores;
 pub mod shell_na_rede;
 pub mod sistema;
 pub mod ssh_config;

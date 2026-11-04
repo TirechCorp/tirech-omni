@@ -3055,12 +3055,10 @@ mod tests {
         let limite = Instant::now() + Duration::from_secs(10);
         loop {
             Session::poll_all();
-            // A resposta é a linha da pasta: sozinha, se o prompt chegou antes do comando, ou com
-            // o prompt na frente, se o comando chegou antes (o eco do terminal vem primeiro).
-            if sessao.text().lines().any(|l| {
-                let l = l.trim_end();
-                l == esperado || l.ends_with(&format!(" {esperado}"))
-            }) {
+            // A resposta é a linha da pasta, sozinha ou com o prompt na frente (se o comando
+            // chegou antes dele). Uma pasta mais larga que o terminal (a do macOS) quebra em duas
+            // linhas, que aqui se juntam.
+            if sessao.text().replace('\n', "").contains(&esperado) {
                 break;
             }
             assert!(

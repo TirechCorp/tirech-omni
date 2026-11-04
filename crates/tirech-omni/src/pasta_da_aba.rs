@@ -281,6 +281,9 @@ mod tests {
     fn o_prompt_command_manda_a_pasta_pelo_osc7() {
         let pasta = std::env::temp_dir().join(format!("tirech-osc7 50%41-{}", std::process::id()));
         std::fs::create_dir_all(&pasta).unwrap();
+        // No macOS a pasta temporária fica atrás de um link (`/var` é `/private/var`), e o bash
+        // dá a pasta real.
+        let pasta = pasta.canonicalize().unwrap();
         let saida = std::process::Command::new("bash")
             .args(["-c", r#"eval "$PROMPT_COMMAND""#])
             .env("PROMPT_COMMAND", PROMPT_COMMAND_DO_OSC7)

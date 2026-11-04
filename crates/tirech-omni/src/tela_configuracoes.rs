@@ -23,9 +23,9 @@ use crate::configuracoes::catalogo::{self, Tipo, id_do_valor};
 use crate::configuracoes::{
     AbrirAbaAuto, AbrirAbaIa, AbrirEm, AbrirEspaco, AbrirIa, AoFechar, AssistentePreferido,
     BotaoDireito, Campainha, ChaveNova, ColarArquivos, Configuracoes, ConflitoCfg,
-    ConversaAoControlar, Cursor, EnviarEditado, Esquema, Idioma, MetodoIa, ModoComparar, ModoNotas,
-    ModoReconectar, OrigemDoMedidor, PaginaInicial, RECENTES_MAX, RECENTES_MIN, Tema, TipoChave,
-    TmuxAoFechar, ValidadeLink, X11Padrao,
+    ConversaAoControlar, Cursor, EnviarEditado, Esquema, Idioma, LIMITE_CALOR_MAX, MetodoIa,
+    ModoComparar, ModoNotas, ModoReconectar, OrigemDoMedidor, PaginaInicial, RECENTES_MAX,
+    RECENTES_MIN, Tema, TipoChave, TmuxAoFechar, ValidadeLink, X11Padrao,
 };
 use crate::i18n;
 use crate::modelo::{FtpCodificacao, FtpModo, FtpSeguranca, FtpTls, S3Estilo};
@@ -87,6 +87,12 @@ pub struct Contexto {
     pub espaco_novo: Rc<dyn Fn()>,
     /// Abre o diálogo para editar o espaço de trabalho de nome dado.
     pub espaco_editar: Rc<dyn Fn(String)>,
+    /// Abre o editor de um perfil de assistente novo.
+    pub perfil_novo: Rc<dyn Fn()>,
+    /// Abre o editor do perfil de assistente de id dado.
+    pub perfil_editar: Rc<dyn Fn(u64)>,
+    /// O "Entrar" do perfil de id dado: abre a aba com o login do assistente.
+    pub perfil_entrar: Rc<dyn Fn(u64)>,
     /// Abre o diálogo "Instalar no computador" (M65).
     pub abrir_instalacao: Rc<dyn Fn()>,
     /// A linha de resumo da instalação ("Instalado em …" ou "Não instalado"; lê signals).
@@ -810,6 +816,17 @@ fn secao_geral(p: &Pagina) -> Expander {
                 "geral.origem_medidor",
                 opcao_de!(p, OrigemDoMedidor::TODAS, geral.origem_medidor),
                 OrigemDoMedidor::nomes(),
+            ))
+            .child(p.interruptor(
+                "geral.medidor_temperatura",
+                campo!(p, geral.medidor_temperatura),
+            ))
+            .child(p.interruptor("geral.avisar_calor", campo!(p, geral.avisar_calor)))
+            .child(p.numero(
+                "geral.limite_calor",
+                numero_de!(p, 0, LIMITE_CALOR_MAX, geral.limite_calor),
+                0.0,
+                f64::from(LIMITE_CALOR_MAX),
             ))
             .child(p.numero(
                 "geral.recentes_max",
@@ -2089,8 +2106,9 @@ fn secao_ia_servidor(p: &Pagina) -> Expander {
     )
 }
 
-/// Os assistentes deste computador (M63): o caminho e os argumentos extras de cada um, usados
-/// pelo "Controlar com" do menu do terminal.
+/// Os assistentes deste computador (M63): a pasta de trabalho e os perfis (o assistente, o
+/// executável, a conta e os argumentos extras de cada um), usados pelo "Controlar com" do menu
+/// do terminal, e o diário das conversas.
 fn secao_ia_local(p: &Pagina) -> Expander {
     secao(
         p,
@@ -2115,39 +2133,11 @@ fn secao_ia_local(p: &Pagina) -> Expander {
                 let p = p.clone();
                 move || p.pedir_para_limpar_a_pasta()
             }))
-            .child(p.caminho(
-                "ia.local_claude_caminho",
-                campo!(p, ia.local_claude_caminho),
-                tk!("config-dica-caminho-ia-local"),
-                Escolher::Arquivo,
-            ))
-            .child(p.texto(
-                "ia.local_claude_argumentos",
-                campo!(p, ia.local_claude_argumentos),
-                tk!("config-dica-argumentos-ia"),
-            ))
-            .child(p.caminho(
-                "ia.local_codex_caminho",
-                campo!(p, ia.local_codex_caminho),
-                tk!("config-dica-caminho-ia-local"),
-                Escolher::Arquivo,
-            ))
-            .child(p.texto(
-                "ia.local_codex_argumentos",
-                campo!(p, ia.local_codex_argumentos),
-                tk!("config-dica-argumentos-ia"),
-            ))
-            .child(p.caminho(
-                "ia.local_opencode_caminho",
-                campo!(p, ia.local_opencode_caminho),
-                tk!("config-dica-caminho-ia-local"),
-                Escolher::Arquivo,
-            ))
-            .child(p.texto(
-                "ia.local_opencode_argumentos",
-                campo!(p, ia.local_opencode_argumentos),
-                tk!("config-dica-argumentos-ia"),
-            ))
+            .child(p.acao("acao.ia_perfil_local_novo", Symbol::Add, {
+                let ctx = Rc::clone(&p.ctx);
+                move || (ctx.perfil_novo)()
+            }))
+            .child(lista_de_perfis(p))
             .child(p.interruptor("ia.conversas_lembrar", campo!(p, ia.conversas_lembrar)))
             .child(p.interruptor("ia.conversas_reabrir", campo!(p, ia.conversas_reabrir)))
             .child(p.escolha(
@@ -2333,6 +2323,87 @@ fn em_linhas(texto: &str) -> Vec<String> {
     } else {
         texto.split('\n').map(str::to_owned).collect()
     }
+}
+
+/// A lista dos perfis de assistente: um cartão por perfil, com "Entrar", "Editar…" e "Apagar".
+fn lista_de_perfis(p: &Pagina) -> Column {
+    let config = p.config;
+    let pagina = p.clone();
+    Column::new()
+        .id("perfis-locais")
+        .gap(4)
+        .visible(p.achou_alguma(&["acao.ia_perfil_local_novo"]))
+        .child(
+            Text::new(t!("ia-perfis-vazio"))
+                .id("perfis-locais-vazio")
+                .secondary()
+                .visible(move || config.with(|c| c.ia.perfis_locais.is_empty())),
+        )
+        .child(For::each(
+            move || config.with(|c| c.ia.perfis_locais.clone()),
+            |perfil| format!("{perfil:?}"),
+            move |perfil| cartao_do_perfil(&pagina, &perfil),
+        ))
+}
+
+/// O cartão de um perfil de assistente: o nome e, embaixo, o assistente, o executável e a conta.
+fn cartao_do_perfil(
+    p: &Pagina,
+    perfil: &crate::configuracoes::perfis_locais::PerfilLocal,
+) -> SettingsCard {
+    let id = perfil.id;
+    let assistente = crate::ia::ficha(perfil.ferramenta()).nome;
+    let executavel = match perfil.executavel.trim() {
+        "" => t!("ia-perfil-exe-path"),
+        caminho => caminho.to_owned(),
+    };
+    let conta = match perfil.conta.trim() {
+        "" => t!("ia-perfil-conta-de-sempre"),
+        pasta => pasta.to_owned(),
+    };
+    let entrar = {
+        let ctx = Rc::clone(&p.ctx);
+        move || (ctx.perfil_entrar)(id)
+    };
+    let editar = {
+        let ctx = Rc::clone(&p.ctx);
+        move || (ctx.perfil_editar)(id)
+    };
+    let apagar = {
+        let (p, nome) = (p.clone(), perfil.nome());
+        move || {
+            let mut nova = p.config.get_untracked();
+            nova.ia.perfis_locais.retain(|perfil| perfil.id != id);
+            p.trocar(nova, t!("ia-perfil-apagado", nome = nome.as_str()));
+        }
+    };
+    SettingsCard::new(perfil.nome())
+        .description(t!(
+            "ia-perfil-item",
+            assistente = assistente,
+            executavel = executavel.as_str(),
+            conta = conta.as_str()
+        ))
+        .id(format!("perfil-local-{id}"))
+        .content(
+            Row::new()
+                .gap(8)
+                .child(
+                    Button::new(t!("ia-perfil-entrar"))
+                        .id(format!("perfil-local-entrar-{id}"))
+                        .on_click(entrar),
+                )
+                .child(
+                    Button::new(t!("ia-perfil-editar"))
+                        .id(format!("perfil-local-editar-{id}"))
+                        .on_click(editar),
+                )
+                .child(
+                    Button::new(t!("comum-apagar"))
+                        .id(format!("perfil-local-apagar-{id}"))
+                        .on_click(apagar),
+                ),
+        )
 }
 
 /// A lista dos espaços de trabalho: um cartão por espaço, com "Editar…", "Como ligar…" e "Apagar".

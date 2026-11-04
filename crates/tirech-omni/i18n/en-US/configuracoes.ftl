@@ -111,6 +111,18 @@ config-geral-origem_medidor = CPU meter source
     .descricao = How much { -app } uses or the whole processor of this computer. The server of an open SSH connection is chosen in the meter's menu (right-click) and lasts until the session closes.
     .palavras = cpu processor computer machine server ssh meter source average usage
 
+config-geral-medidor_temperatura = CPU temperature on the meter
+    .descricao = Shows the processor temperature next to the meter, from the same machine, in orange above the sensor's high limit and in red above the critical one. Hidden when the machine has no sensor.
+    .palavras = temperature heat degrees celsius sensor cpu processor hot meter
+
+config-geral-avisar_calor = Warn when the CPU gets hot
+    .descricao = A system notification when this computer's processor goes above the limit. Another one only after it cools down 5 °C and 10 minutes pass.
+    .palavras = temperature heat hot warning notification sensor cpu processor overheating
+
+config-geral-limite_calor = Heat warning limit (°C)
+    .descricao = Above this temperature, the warning. 0 is automatic: the sensor's critical limit minus 10 °C, or 90 °C.
+    .palavras = temperature heat limit degrees celsius warning sensor
+
 config-geral-recentes_max = Recents kept
     .descricao = How many connections the recents list keeps, not counting pinned ones.
     .palavras = history latest
@@ -847,29 +859,9 @@ config-acao-ia_local_limpar = Clean the working folder…
     .descricao = Deletes everything inside it. Open assistants keep running.
     .palavras = ai claude codex folder working clean delete junk
 
-config-ia-local_claude_caminho = Claude Code path
-    .descricao = The program on this computer. Empty searches the system folders and yours.
-    .palavras = ai claude path executable program computer local
-
-config-ia-local_claude_argumentos = Claude Code arguments
-    .descricao = They go after the command when you use Control with Claude Code. Put any options you like here.
-    .palavras = ai claude arguments options parameters computer local control
-
-config-ia-local_codex_caminho = Codex path
-    .descricao = The program on this computer. Empty searches the system folders and yours.
-    .palavras = ai codex path executable program computer local
-
-config-ia-local_codex_argumentos = Codex arguments
-    .descricao = They go after the command when you use Control with Codex. Put any options you like here.
-    .palavras = ai codex arguments options parameters computer local control
-
-config-ia-local_opencode_caminho = OpenCode path
-    .descricao = The program on this computer. Empty searches the system folders and yours.
-    .palavras = ai opencode path executable program computer local
-
-config-ia-local_opencode_argumentos = OpenCode arguments
-    .descricao = They go after the command when you use Control with OpenCode. Put any options you like here.
-    .palavras = ai opencode arguments options parameters computer local control
+config-acao-ia_perfil_local_novo = New assistant profile…
+    .descricao = Another account, executable or set of arguments for Claude Code, Codex or OpenCode. Each profile becomes an item in Control with.
+    .palavras = ai claude codex opencode profile account login executable path arguments version control
 
 config-ia-conversas_lembrar = Remember each tab's conversations
     .descricao = Keeps the id of the Claude Code, Codex and OpenCode conversations with each tab, to continue later. Off, Control with always starts a new conversation.
@@ -1160,7 +1152,6 @@ config-dica-redigir-extras = one per line; re:… for a regex
 config-dica-bloqueio-mcp = one per line; re:… for a regex
 config-dica-finais-prompt = one per line
 config-dica-argumentos-ia = for example --model sonnet
-config-dica-caminho-ia-local = search automatically
 config-dica-pasta-troca = Downloads/Tirech Omni
 config-dica-atalho = Ctrl+Shift+N
 atalho-nova-conexao = New connection
@@ -1248,3 +1239,31 @@ opcao-metodo-ia-automatico = Automatic
 opcao-metodo-ia-nativo = Official installer
 opcao-metodo-ia-npm = npm
 opcao-metodo-ia-homebrew = Homebrew
+
+## The assistant profiles on this computer (the list and the editor).
+ia-perfis-vazio = No profiles. Control with only shows the assistants that have one.
+ia-perfil-item = { $assistente } · { $executavel } · { $conta }
+ia-perfil-exe-path = Search the PATH
+ia-perfil-exe-outro = Other…
+ia-perfil-exe-achado = { $caminho } ({ $versao })
+ia-perfil-conta-de-sempre = usual account
+ia-perfil-entrar = Sign in
+ia-perfil-editar = Edit…
+ia-perfil-apagado = Profile “{ $nome }” deleted.
+ia-perfil-salvo = Profile “{ $nome }” saved.
+ia-perfil-titulo-novo = New assistant profile
+ia-perfil-titulo-editar = Edit assistant profile
+ia-perfil-nome = Name
+ia-perfil-nome-dica = empty uses the assistant's name
+ia-perfil-assistente = Assistant
+ia-perfil-executavel = Executable
+ia-perfil-procurando = Looking for installations…
+ia-perfil-outro-dica = path to the program
+ia-perfil-conta = Account folder
+ia-perfil-conta-dica = empty uses the usual account
+ia-perfil-conta-explicacao = Each folder is a separate account, with its own login, settings and conversations. Use Sign in to log the profile in.
+ia-perfil-argumentos = Extra arguments
+ia-perfil-erro-assistente = Choose the assistant.
+ia-perfil-erro-limite = { $assistente } already has { $n } profiles, the maximum.
+ia-perfil-nao-achado = Could not find the program of profile “{ $nome }” on this computer.
+ia-perfil-entrar-titulo = Sign in · { $nome }

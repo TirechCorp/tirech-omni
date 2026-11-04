@@ -356,6 +356,7 @@ fn salvar_a_janela_como_espaco_guarda_o_cluster_sem_a_aba_do_assistente_e_reabri
         ferramenta,
         painel: 2,
         conversa: Some(conversa),
+        ..
     }) = &janela.cluster_ia
     else {
         panic!("{:?}", janela.cluster_ia);

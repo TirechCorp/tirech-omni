@@ -7,6 +7,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- Sensores: a aba **Sensores** do Desempenho mostra a temperatura da CPU, da memória, do disco,
+  da placa-mãe e da placa de vídeo, com o gráfico do último minuto, e as ventoinhas, deste
+  computador ou do servidor de uma conexão SSH aberta (Linux). O que não tem sensor não aparece.
+  No Linux pelo `/sys/class/hwmon`, no macOS pelos sensores do Apple Silicon e no Windows pelos
+  discos, pelas zonas térmicas do ACPI e, com o LibreHardwareMonitor aberto, pelos sensores
+  dele. A temperatura da CPU também no medidor da barra de título, e uma notificação do sistema
+  quando a CPU passa do limite (Configurações › Geral › Avisar quando a CPU esquentar, ligado).
+  O Windows ainda não foi conferido numa máquina de verdade.
+- Perfis de assistente: duas ou mais contas, ou dois executáveis, do Claude Code, do Codex e do
+  OpenCode. Em Configurações › Assistentes de IA › Assistentes neste computador, **Novo perfil
+  de assistente…** escolhe o executável entre as instalações achadas (com a versão) e a pasta da
+  conta, e **Entrar** faz o login do perfil. Cada perfil vira um item no Controlar com.
 - Notificações do sistema: o aviso de um programa do terminal (`OSC 9` e `OSC 777`, como o fim
   de uma compilação) aparece nas notificações quando você não está vendo a aba, e o clique
   traz a aba. O Claude Code, o Codex e o OpenCode abertos pelo Controlar com avisam quando
@@ -94,6 +106,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Mudado
 
+- Os campos Caminho e Argumentos do Claude Code, do Codex e do OpenCode deram lugar aos perfis;
+  o que estava neles vira o perfil padrão de cada assistente.
 - A cópia só de leitura manda para a dona o que muda nas conexões, nas configurações, nos
   provedores de IA e no cofre, e a dona grava. Se a dona mudou o mesmo arquivo ao mesmo tempo, as
   duas mudanças se juntam; o mesmo campo dos dois lados fica com o da dona, com aviso.

@@ -236,7 +236,7 @@ fn ponte_instrucoes(argumentos: &str) -> String {
 }
 
 #[test]
-fn o_caminho_e_os_argumentos_das_configuracoes_valem() {
+fn o_caminho_e_os_argumentos_de_antes_viram_o_perfil_padrao() {
     let pasta = Pasta::nova("controlar-configurado");
     let mut tree = Tree::default();
     tree.add_connection(None, Connection::new("salva", Kind::Local));
@@ -266,6 +266,51 @@ fn o_caminho_e_os_argumentos_das_configuracoes_valem() {
     let trabalho = pasta.0.join("obra/ia");
     assert_eq!(locais[0].local_pasta, trabalho.display().to_string());
     assert!(trabalho.is_dir());
+}
+
+#[test]
+fn um_segundo_perfil_abre_com_a_conta_dele() {
+    let (pasta, mut m) = cenario_com("controlar-segundo-perfil", true, |pasta| {
+        pasta.configurar(
+            "ia",
+            "perfis_locais",
+            json!([
+                {"id": 1, "ferramenta": "claude"},
+                {"id": 2, "ferramenta": "codex"},
+                {"id": 3, "ferramenta": "opencode"},
+                {"id": 7, "ferramenta": "claude", "nome": "Claude B", "conta": "~/contas/b",
+                 "argumentos": "--model opus"}
+            ]),
+        );
+    });
+    controlar_pelo_terminal(&mut m, "1-1", "claude-2");
+
+    let locais = lancados(&m);
+    let [conexao] = locais.as_slice() else {
+        panic!("{} shells lançados", locais.len());
+    };
+    assert_eq!(conexao.name, "Claude B → salva");
+    let conta = pasta.0.join("contas/b");
+    assert!(
+        conexao
+            .local_ambiente
+            .contains(&("CLAUDE_CONFIG_DIR".to_owned(), conta.display().to_string())),
+        "{:?}",
+        conexao.local_ambiente
+    );
+    assert!(conta.is_dir());
+    assert!(conexao.local_argumentos.contains("opus"));
+
+    // O primeiro perfil continua sem a conta.
+    controlar_pelo_terminal(&mut m, "1-1", "claude");
+    let locais = lancados(&m);
+    assert_eq!(locais.len(), 2);
+    assert!(
+        locais[1]
+            .local_ambiente
+            .iter()
+            .all(|(nome, _)| nome != "CLAUDE_CONFIG_DIR")
+    );
 }
 
 #[test]

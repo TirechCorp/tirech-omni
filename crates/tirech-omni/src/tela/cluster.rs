@@ -14,13 +14,13 @@ use std::rc::Rc;
 use tomni_ui::prelude::*;
 use tomni_ui::terminal::Session;
 
-use super::controlar::{Conversar, Encomenda};
+use super::controlar::{Conversar, Encomenda, Quem};
 use super::{Lugar, Tela, geometria_de, icone_do_cartao, paineis_de};
 use crate::abrir_em::AlvoAbrir;
 use crate::cluster::{self, grade_do_cluster};
 use crate::comandos::tem_terminal;
 use crate::espacos::{Aba, ClusterIaSalvo, JanelaSalva, Resolvida, id_da_chave};
-use crate::ia::{Ferramenta, ficha};
+use crate::ia::Ferramenta;
 use crate::janelas::Janela;
 use crate::mcp::clientes::NOME_DA_ABA;
 use crate::mcp::servidor::SessaoLigada;
@@ -39,7 +39,7 @@ pub(super) struct Estado {
     linhas: Signal<Vec<DataGridRow>>,
     /// O diálogo abriu para o cluster com IA.
     com_ia: Signal<bool>,
-    /// O nome do assistente escolhido no diálogo, como a ficha dele dá.
+    /// O perfil de assistente escolhido no diálogo, pelo rótulo (o nome do perfil).
     assistente: Signal<String>,
     /// Os clusters com IA abertos.
     ias: RefCell<Vec<ClusterIa>>,
@@ -53,8 +53,8 @@ pub(super) struct ClusterIa {
     ids: Vec<u64>,
     /// As abas que já estavam na janela antes do cluster (na principal, onde só cabe uma).
     ja_havia: Vec<Session>,
-    /// O assistente.
-    pub(super) ferramenta: Ferramenta,
+    /// O assistente e o perfil.
+    pub(super) quem: Quem,
     /// A aba do assistente.
     pub(super) assistente: Session,
     /// O código do lançamento, que a ponte do assistente manda ao ligar.
@@ -79,13 +79,11 @@ impl Tela {
     /// Abre o diálogo com `previas` já escolhidas; `com_ia` para o cluster com IA.
     pub(super) fn abrir_dialogo_do_cluster(&self, previas: &[u64], com_ia: bool) {
         if com_ia {
-            let mostrados = self.assistentes_mostrados();
+            let mostrados = self.perfis_mostrados();
             let atual = self.cluster.assistente.get_untracked();
-            if !mostrados.iter().any(|f| ficha(*f).nome == atual) {
-                let primeiro = mostrados.first().map(|f| ficha(*f).nome);
-                self.cluster
-                    .assistente
-                    .set(primeiro.unwrap_or_default().to_owned());
+            if !mostrados.iter().any(|(rotulo, _)| *rotulo == atual) {
+                let primeiro = mostrados.into_iter().next().map(|(rotulo, _)| rotulo);
+                self.cluster.assistente.set(primeiro.unwrap_or_default());
             }
         }
         self.cluster.com_ia.set(com_ia);
@@ -117,14 +115,38 @@ impl Tela {
         self.abrir_dialogo_do_cluster(&previas, com_ia);
     }
 
-    /// Os assistentes que as Configurações mostram, na ordem de sempre.
-    fn assistentes_mostrados(&self) -> Vec<Ferramenta> {
-        self.config.with_untracked(|c| {
+    /// Os perfis dos assistentes que as Configurações mostram, na ordem dos assistentes e,
+    /// dentro de cada um, na da lista, com o rótulo do diálogo (o nome, com um número quando
+    /// repete).
+    fn perfis_mostrados(&self) -> Vec<(String, Quem)> {
+        let perfis: Vec<(String, Quem)> = self.config.with_untracked(|c| {
             Ferramenta::TODAS
                 .into_iter()
                 .filter(|f| c.ia.mostra(*f))
+                .flat_map(|f| {
+                    c.ia.perfis_de(f)
+                        .map(move |p| {
+                            (
+                                p.nome(),
+                                Quem {
+                                    ferramenta: f,
+                                    perfil: p.id,
+                                },
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
                 .collect()
-        })
+        });
+        let mut rotulos: Vec<String> = Vec::new();
+        perfis
+            .into_iter()
+            .map(|(nome, quem)| {
+                let rotulo = super::controlar::sem_repetir(&rotulos, nome);
+                rotulos.push(rotulo.clone());
+                (rotulo, quem)
+            })
+            .collect()
     }
 
     /// O botão "Abrir" do diálogo: abre as conexões escolhidas na ordem da árvore.
@@ -142,12 +164,13 @@ impl Tela {
             self.abrir_cluster(ids);
             return;
         }
-        let nome = self.cluster.assistente.get_untracked();
-        if let Some(f) = Ferramenta::TODAS
+        let rotulo = self.cluster.assistente.get_untracked();
+        if let Some((_, quem)) = self
+            .perfis_mostrados()
             .into_iter()
-            .find(|f| ficha(*f).nome == nome)
+            .find(|(r, _)| *r == rotulo)
         {
-            self.pedir_cluster_ia(ids, f);
+            self.pedir_cluster_ia(ids, quem);
         }
     }
 
@@ -199,7 +222,7 @@ impl Tela {
 
     /// O cluster com IA de `ids` com o assistente `f`. Com o controle por assistentes desligado,
     /// passa antes pelo aviso de ligar, como o "Controlar com".
-    pub(super) fn pedir_cluster_ia(self: &Rc<Self>, ids: Vec<u64>, f: Ferramenta) {
+    pub(super) fn pedir_cluster_ia(self: &Rc<Self>, ids: Vec<u64>, f: Quem) {
         let depois = {
             let ids = ids.clone();
             move |t: &Rc<Tela>| t.abrir_cluster_ia(ids, f)
@@ -211,7 +234,7 @@ impl Tela {
 
     /// "Abrir todas controladas por IA ▸ {assistente}" da pasta `id`: o cluster com IA das
     /// conexões de terminal dela, direto, sem o diálogo.
-    pub(super) fn abrir_pasta_com_ia(self: &Rc<Self>, id: u64, f: Ferramenta) {
+    pub(super) fn abrir_pasta_com_ia(self: &Rc<Self>, id: u64, f: Quem) {
         let ids = self.previas_do_cluster(id);
         if !ids.is_empty() {
             self.pedir_cluster_ia(ids, f);
@@ -221,7 +244,7 @@ impl Tela {
     /// Abre `ids` lado a lado numa janela nova, sem envio para todas, com o assistente `f` no
     /// último painel. Onde só cabe uma janela, usa a principal, e as abas que já estavam lá
     /// não vão para o assistente.
-    fn abrir_cluster_ia(self: &Rc<Self>, ids: Vec<u64>, f: Ferramenta) {
+    fn abrir_cluster_ia(self: &Rc<Self>, ids: Vec<u64>, f: Quem) {
         let ids = self.so_terminais(ids);
         if ids.is_empty() {
             return;
@@ -231,7 +254,7 @@ impl Tela {
         let titulo = t!(
             "cluster-ia-titulo-da-janela",
             n = ids.len() as i64,
-            nome = ficha(f).nome
+            nome = self.perfil_de(f).nome()
         );
         let janela = match self.abrir_janela_titulada(
             Some(titulo),
@@ -268,7 +291,12 @@ impl Tela {
         let Some(f) = Ferramenta::da_chave(&ia.ferramenta) else {
             return;
         };
-        let conversa = self.conversa_salva(f, ia.conversa.as_deref(), &self.verificador(false));
+        let f = self.quem_salvo(f, ia.perfil);
+        let conversa = self.conversa_salva(
+            f.ferramenta,
+            ia.conversa.as_deref(),
+            &self.verificador(f, false),
+        );
         let ids: Vec<u64> = resolvida
             .paineis
             .iter()
@@ -281,7 +309,7 @@ impl Tela {
         let titulo = t!(
             "cluster-ia-titulo-da-janela",
             n = ids.len() as i64,
-            nome = ficha(f).nome
+            nome = self.perfil_de(f).nome()
         );
         let (colunas, linhas) = salva.grade;
         let janela = match self.abrir_janela_titulada(
@@ -327,7 +355,7 @@ impl Tela {
         janela: Janela,
         ids: Vec<u64>,
         ja_havia: Vec<Session>,
-        f: Ferramenta,
+        f: Quem,
         painel: usize,
         conversa: Conversar,
     ) {
@@ -357,17 +385,14 @@ impl Tela {
             janela,
             ids,
             ja_havia,
-            ferramenta: f,
+            quem: f,
             assistente,
             lancamento,
         });
     }
 
     /// O cluster com IA vivo de `janela`, se ela tem um: o assistente, o painel e a aba dele.
-    pub(super) fn cluster_ia_da_janela(
-        &self,
-        janela: Janela,
-    ) -> Option<(Ferramenta, usize, Session)> {
+    pub(super) fn cluster_ia_da_janela(&self, janela: Janela) -> Option<(Quem, usize, Session)> {
         let ias = self.cluster.ias.borrow();
         let ia = ias
             .iter()
@@ -376,7 +401,7 @@ impl Tela {
             .layout
             .try_with_untracked(|l| l.pane_of(ia.assistente))
             .flatten()?;
-        Some((ia.ferramenta, painel, ia.assistente))
+        Some((ia.quem, painel, ia.assistente))
     }
 
     /// Dá ao assistente de cada cluster com IA as abas das máquinas que já abriram na janela
@@ -469,9 +494,9 @@ pub(super) fn dialogo(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
                 move || aberto.get() && com_ia.get(),
                 move || {
                     let nomes: Vec<String> = t
-                        .assistentes_mostrados()
+                        .perfis_mostrados()
                         .into_iter()
-                        .map(|f| ficha(f).nome.to_owned())
+                        .map(|(rotulo, _)| rotulo)
                         .collect();
                     Row::new()
                         .gap(8)
@@ -530,20 +555,12 @@ pub(super) fn dialogo(tela: &Rc<Tela>) -> impl Fn() -> ContentDialog + use<> {
     }
 }
 
-/// O submenu "Abrir todas controladas por IA ▸" da pasta `id`, com os assistentes que as
-/// Configurações mostram. `prefixo` abre os ids (`{prefixo}-claude`, `-codex` e `-opencode`).
+/// O submenu "Abrir todas controladas por IA ▸" da pasta `id`, com os perfis dos assistentes
+/// que as Configurações mostram. `prefixo` abre os ids, como no "Controlar com ▸"
+/// ([`super::controlar::id_do_perfil`]).
 pub(super) fn submenu_da_pasta(tela: &Rc<Tela>, prefixo: &str, id: u64) -> MenuFlyout {
-    let mut menu = MenuFlyout::new().id(format!("{prefixo}-menu"));
-    for (ferramenta, icone) in super::controlar::ICONES {
-        let (abrir, visivel) = (Rc::clone(tela), Rc::clone(tela));
-        menu = menu
-            .item(
-                format!("{prefixo}-{}", ferramenta.chave()),
-                ficha(ferramenta).nome.to_owned(),
-                move || abrir.abrir_pasta_com_ia(id, ferramenta),
-            )
-            .icon(icone)
-            .item_visible(move || visivel.config.with(|c| c.ia.mostra(ferramenta)));
-    }
-    menu
+    let menu = MenuFlyout::new().id(format!("{prefixo}-menu"));
+    super::controlar::itens_dos_perfis(tela, menu, prefixo, move |t, quem| {
+        t.abrir_pasta_com_ia(id, quem);
+    })
 }

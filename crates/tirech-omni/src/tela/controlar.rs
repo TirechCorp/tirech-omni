@@ -18,10 +18,12 @@ use tomni_ui::terminal::{PaneDirection, Session};
 use super::mcp_sessoes::LUGARES;
 use super::{Lugar, Tela};
 use crate::abrir::{Senhas, dividir_argumentos, juntar_argumentos};
+use crate::configuracoes::perfis_locais::{PERFIS_POR_ASSISTENTE, PerfilLocal};
 use crate::configuracoes::{Configuracoes, ConversaAoControlar};
 use crate::conversas::{
-    self, Conversa, Diario, SessaoDoOpenCode, chave_da_aba, conversa_do_claude, conversa_do_codex,
-    ler_aviso_do_codex, notify_da_pessoa, sessao_do_lancamento, sessoes_do_opencode,
+    self, Conversa, Diario, Dono, SessaoDoOpenCode, chave_da_aba, conversa_do_claude,
+    conversa_do_codex, ler_aviso_do_codex, notify_da_pessoa, sessao_do_lancamento,
+    sessoes_do_opencode,
 };
 use crate::espacos::{AssistenteSalvo, id_da_chave};
 use crate::ia::{Ferramenta, aspas_externas, ficha};
@@ -37,6 +39,16 @@ use crate::t;
 /// Os fim de mensagem que o shell de login dá quando o programa não existe.
 const SAIDA_NAO_ENCONTRADO: &str = "código 127";
 
+/// A versão maior de um programa pela saída do `--version` (`2.2.0`, `v1.0.3`, `opencode 2.1`).
+fn versao_maior(saida: &str) -> Option<u32> {
+    saida.split_whitespace().find_map(|palavra| {
+        let palavra = palavra.trim_start_matches(['v', 'V']);
+        let (maior, resto) = palavra.split_once('.')?;
+        (resto.starts_with(|c: char| c.is_ascii_digit())).then_some(())?;
+        maior.parse().ok()
+    })
+}
+
 /// O começo do comando quando o assistente vem pelo nome: as pastas onde os instaladores põem o
 /// programa vão no fim do `PATH` do shell de login. O instalador do OpenCode (e o do npm sem
 /// sudo, e outros) escreve o `PATH` no `~/.bashrc`, depois da linha que sai quando o shell não é
@@ -51,17 +63,25 @@ const EXEC_COM_O_PATH: &str = "exec env PATH=\"$PATH:$HOME/.local/bin:$HOME/.ope
 const PASTA_DOS_ARQUIVOS: &str = "mcp";
 
 /// As extensões que o Windows tenta, na ordem, quando o nome do programa não tem uma.
-const EXTENSOES_DO_WINDOWS: [&str; 3] = [".exe", ".cmd", ".bat"];
+pub(super) const EXTENSOES_DO_WINDOWS: [&str; 3] = [".exe", ".cmd", ".bat"];
 
 /// Quantas conversas anteriores o diálogo de escolha mostra.
 const CONVERSAS_NO_DIALOGO: usize = 5;
+
+/// Quem o "Controlar com" abre: o assistente e o perfil dele (`ia.perfis_locais`). Um perfil
+/// que foi apagado continua valendo pelo id, com tudo vazio.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Quem {
+    pub(super) ferramenta: Ferramenta,
+    pub(super) perfil: u64,
+}
 
 /// Uma aba de assistente aberta pelo "Controlar com".
 #[derive(Clone, Copy)]
 struct Lancada {
     /// A aba que o assistente controla; `None` no cluster com IA, que controla várias.
     alvo: Option<Session>,
-    ferramenta: Ferramenta,
+    quem: Quem,
     /// A aba do próprio assistente.
     sessao: Session,
 }
@@ -72,8 +92,8 @@ pub(super) struct Estado {
     lancadas: Signal<Vec<Lancada>>,
     /// O que espera o aviso de ligar o controle pela primeira vez.
     pendente: RefCell<Option<Pendente>>,
-    /// O assistente que o último lançamento não achou neste computador.
-    nao_achado: Signal<Option<Ferramenta>>,
+    /// O assistente que o último lançamento não achou neste computador, e o nome do perfil.
+    nao_achado: Signal<Option<(Ferramenta, String)>>,
     /// Se o aviso "O controle foi ligado" está à mostra.
     ligado_agora: Signal<bool>,
     /// As abas que o "Reconectar" pode reabrir: o arquivo de configuração do Claude Code de cada
@@ -89,16 +109,20 @@ pub(super) struct Estado {
     relancar_depois: RefCell<Option<Vec<AbaComAssistentes>>>,
     /// A aba de cada lançamento: os hooks de atenção do Claude Code dizem o lançamento, e o
     /// aviso vai para a aba do assistente.
-    abas_dos_lancamentos: RefCell<HashMap<String, (Session, Ferramenta)>>,
+    abas_dos_lancamentos: RefCell<HashMap<String, (Session, Quem)>>,
+    /// Se cada programa do OpenCode já visto é da versão 2 ou maior (o `--version` roda uma vez).
+    versoes: RefCell<HashMap<String, bool>>,
     /// O diálogo "Continuar a conversa?".
     pub(super) escolha: Escolha,
+    /// O editor dos perfis de assistente (Configurações).
+    pub(super) perfil: super::perfis_locais::SinaisPerfil,
 }
 
 /// Uma aba aberta pela restauração e os assistentes que voltam com ela.
 type AbaComAssistentes = (Session, Vec<AssistenteSalvo>);
 
 /// O que o diálogo abre com a resposta: a janela, a aba, o assistente e a conversa de cada opção.
-type PedidoDeConversa = (Janela, Session, Ferramenta, Vec<Conversar>);
+type PedidoDeConversa = (Janela, Session, Quem, Vec<Conversar>);
 
 /// O diálogo que pergunta qual conversa o "Controlar com" abre.
 pub(super) struct Escolha {
@@ -126,6 +150,7 @@ impl Estado {
             a_relancar: RefCell::new(Vec::new()),
             relancar_depois: RefCell::new(None),
             abas_dos_lancamentos: RefCell::new(HashMap::new()),
+            versoes: RefCell::new(HashMap::new()),
             escolha: Escolha {
                 aberto: signal(false),
                 texto: signal(String::new()),
@@ -134,6 +159,7 @@ impl Estado {
                 lembrar: signal(false),
                 pedido: RefCell::new(None),
             },
+            perfil: super::perfis_locais::SinaisPerfil::novos(),
         }
     }
 }
@@ -165,7 +191,7 @@ struct Rastro {
     sessao: Session,
     /// A chave da aba controlada no diário; `None` no cluster com IA.
     chave: Option<String>,
-    ferramenta: Ferramenta,
+    quem: Quem,
     /// O id da conversa, quando já se sabe.
     id: Option<String>,
     /// Quando o assistente abriu, em segundos desde 1970.
@@ -199,10 +225,10 @@ impl Onde {
 
 /// Como o assistente é aberto: o programa, os argumentos e o ambiente da aba de shell local.
 #[derive(Debug, PartialEq, Eq)]
-struct Linha {
-    programa: String,
-    argumentos: Vec<String>,
-    ambiente: Vec<(String, String)>,
+pub(super) struct Linha {
+    pub(super) programa: String,
+    pub(super) argumentos: Vec<String>,
+    pub(super) ambiente: Vec<(String, String)>,
 }
 
 /// O que a montagem da linha precisa de fora.
@@ -222,8 +248,12 @@ struct Pedido<'a> {
     /// O arquivo dos settings com o hook dos avisos (só o Claude Code usa).
     avisos: &'a Path,
     onde: &'a Onde,
-    /// Os argumentos extras das Configurações, já divididos.
+    /// Os argumentos extras do perfil, já divididos.
     extras: &'a [String],
+    /// O ambiente que põe o assistente na conta do perfil.
+    conta: &'a [(String, String)],
+    /// O OpenCode roda com o servidor dele (`--standalone`): o serviço de fundo é de uma conta só.
+    standalone: bool,
     /// O shell de login do Linux e do macOS.
     shell: &'a str,
     windows: bool,
@@ -277,16 +307,21 @@ fn montar_linha(p: &Pedido) -> Linha {
             if p.atencao {
                 ambiente.extend(atencao_opencode());
             }
+            if p.standalone {
+                argumentos.push("--standalone".to_owned());
+            }
             (argumentos, ambiente)
         }
     };
+    let mut ambiente = ambiente;
+    ambiente.extend(p.conta.iter().cloned());
     argumentos.extend(p.extras.iter().cloned());
     linha_do_programa(&p.onde.texto(), argumentos, ambiente, p.shell, p.windows)
 }
 
 /// A linha que roda `programa` com `argumentos`: pelo shell de login no Linux e no macOS; no
 /// Windows, direto, ou por `cmd /c` se for um `.cmd` ou `.bat`.
-fn linha_do_programa(
+pub(super) fn linha_do_programa(
     programa: &str,
     argumentos: Vec<String>,
     ambiente: Vec<(String, String)>,
@@ -331,6 +366,35 @@ fn linha_do_programa(
         ],
         ambiente,
     }
+}
+
+/// Põe `ambiente` na frente do comando de `linha` (a do shell de login do Linux e do macOS),
+/// para quem roda sem poder passar o ambiente: `export K=V && …` dentro do `-c`.
+fn prefixar_ambiente(linha: &mut Linha, ambiente: &[(String, String)]) {
+    if ambiente.is_empty() {
+        return;
+    }
+    if let Some(comando) = linha.argumentos.last_mut() {
+        let pares: Vec<String> = ambiente
+            .iter()
+            .map(|(chave, valor)| format!("{chave}={}", aspas_externas(valor)))
+            .collect();
+        *comando = format!("export {} && {comando}", pares.join(" "));
+    }
+}
+
+/// Os argumentos do login de cada assistente (o "Entrar" do perfil). O OpenCode 2 com conta
+/// própria entra com `--standalone`, o mesmo modo com que ele abre depois.
+fn argumentos_do_login(f: Ferramenta, standalone: bool) -> Vec<String> {
+    let mut argumentos: Vec<String> = match f {
+        Ferramenta::Claude => vec!["auth".into(), "login".into()],
+        Ferramenta::Codex => vec!["login".into()],
+        Ferramenta::OpenCode => vec!["auth".into(), "login".into()],
+    };
+    if standalone {
+        argumentos.push("--standalone".into());
+    }
+    argumentos
 }
 
 /// Procura `nome` nas `pastas`, com as extensões do Windows quando ele não tem uma.
@@ -399,16 +463,17 @@ fn chave_do_alvo(alvo: Session) -> Option<String> {
     id_da_chave(&alvo.key_str()).map(chave_da_aba)
 }
 
-/// O `notify` que a pessoa pôs no `config.toml` do Codex, para o do app chamar depois.
-fn notify_do_codex(pessoal: Option<&Path>) -> Vec<String> {
-    conversas::config_do_codex(pessoal)
+/// O `notify` que a pessoa pôs no `config.toml` do Codex (o da pasta `config`), para o do app
+/// chamar depois.
+fn notify_do_codex(config: Option<PathBuf>) -> Vec<String> {
+    config
         .and_then(|pasta| std::fs::read_to_string(pasta.join("config.toml")).ok())
         .and_then(|texto| notify_da_pessoa(&texto))
         .unwrap_or_default()
 }
 
 /// `rotulo`, com um número no fim se já está em `rotulos` (as opções do diálogo são os rótulos).
-fn sem_repetir(rotulos: &[String], rotulo: String) -> String {
+pub(super) fn sem_repetir(rotulos: &[String], rotulo: String) -> String {
     if !rotulos.contains(&rotulo) {
         return rotulo;
     }
@@ -449,6 +514,50 @@ impl Verificador {
 }
 
 impl Tela {
+    /// O perfil de `quem`; o apagado volta vazio, com o mesmo id.
+    pub(super) fn perfil_de(&self, quem: Quem) -> PerfilLocal {
+        self.config
+            .with_untracked(|c| {
+                c.ia.perfil_local(quem.perfil)
+                    .filter(|p| p.ferramenta() == quem.ferramenta)
+                    .cloned()
+            })
+            .unwrap_or_else(|| PerfilLocal::novo(quem.perfil, quem.ferramenta))
+    }
+
+    /// Quem um assistente gravado (sem perfil, ou com um que já foi apagado) abre: o perfil,
+    /// se ainda existe, ou o primeiro do assistente.
+    pub(super) fn quem_salvo(&self, ferramenta: Ferramenta, perfil: Option<u64>) -> Quem {
+        let perfil = self.config.with_untracked(|c| {
+            c.ia.perfil_ou_padrao(perfil, ferramenta)
+                .map_or(perfil.unwrap_or(0), |p| p.id)
+        });
+        Quem { ferramenta, perfil }
+    }
+
+    /// Quem o `n`-ésimo item do assistente nos menus abre agora (o 0 é o primeiro perfil).
+    pub(super) fn quem_n(&self, ferramenta: Ferramenta, n: usize) -> Option<Quem> {
+        self.config.with_untracked(|c| {
+            c.ia.perfil_n(ferramenta, n).map(|p| Quem {
+                ferramenta,
+                perfil: p.id,
+            })
+        })
+    }
+
+    /// O dono das conversas de `quem` no diário.
+    fn dono(&self, quem: Quem) -> Dono<'static> {
+        let padrao = self.config.with_untracked(|c| {
+            c.ia.perfil_n(quem.ferramenta, 0)
+                .map_or(quem.perfil, |p| p.id)
+        });
+        Dono {
+            ferramenta: quem.ferramenta.chave(),
+            perfil: quem.perfil,
+            padrao,
+        }
+    }
+
     /// A janela e a sessão que `alvo` indica agora.
     fn resolver_controle(&self, alvo: Alvo) -> Option<(Janela, Session)> {
         match alvo {
@@ -467,8 +576,8 @@ impl Tela {
             .with(|todas| todas.iter().any(|l| l.sessao == sessao))
     }
 
-    /// O clique em "Controlar com ▸ {ferramenta}" (seção 3 do plano do M63).
-    pub(super) fn controlar_com(self: &Rc<Self>, janela: Janela, alvo: Session, f: Ferramenta) {
+    /// O clique em "Controlar com ▸ {perfil}" (seção 3 do plano do M63).
+    pub(super) fn controlar_com(self: &Rc<Self>, janela: Janela, alvo: Session, f: Quem) {
         if alvo.closed() || self.e_aba_de_assistente(alvo) {
             return;
         }
@@ -488,7 +597,7 @@ impl Tela {
 
     /// Escolhe a conversa do assistente `f` para `alvo` e o abre. Se a aba já teve conversas com
     /// ele, pergunta qual (ou segue o que as Configurações mandam); senão, abre uma nova.
-    fn escolher_conversa(self: &Rc<Self>, janela: Janela, alvo: Session, f: Ferramenta) {
+    fn escolher_conversa(self: &Rc<Self>, janela: Janela, alvo: Session, f: Quem) {
         let (lembrar, modo) = self
             .config
             .with_untracked(|c| (c.ia.conversas_lembrar, c.ia.conversas_ao_controlar));
@@ -513,9 +622,11 @@ impl Tela {
     /// As conversas de `f` com a aba `chave` que ainda existem, a mais recente primeiro, com o
     /// título de agora. As que sumiram saem do diário; as que um assistente aberto está usando
     /// ficam nele, mas não na lista.
-    fn conversas_da_aba(&self, chave: &str, f: Ferramenta) -> Vec<Conversa> {
-        self.resolver_conversas(f == Ferramenta::OpenCode);
-        let verificador = self.verificador(f == Ferramenta::OpenCode);
+    fn conversas_da_aba(&self, chave: &str, f: Quem) -> Vec<Conversa> {
+        let opencode = f.ferramenta == Ferramenta::OpenCode;
+        self.resolver_conversas(opencode);
+        let verificador = self.verificador(f, opencode);
+        let dono = self.dono(f);
         let abertas: Vec<String> = self
             .controlar
             .rastros
@@ -527,12 +638,12 @@ impl Tela {
         let mut diario = Diario::ler(&self.armazenamento);
         let mut ficam = Vec::new();
         let mut vivas = Vec::new();
-        for mut conversa in diario.da_aba(chave, f.chave()) {
+        for mut conversa in diario.da_aba(chave, dono) {
             if abertas.contains(&conversa.id) {
                 ficam.push(conversa.id);
                 continue;
             }
-            let Some(titulo) = verificador.titulo(f, &conversa.id) else {
+            let Some(titulo) = verificador.titulo(f.ferramenta, &conversa.id) else {
                 continue;
             };
             if !titulo.is_empty() {
@@ -541,7 +652,7 @@ impl Tela {
             ficam.push(conversa.id.clone());
             vivas.push(conversa);
         }
-        diario.esquecer_sumidas(chave, f.chave(), &ficam);
+        diario.esquecer_sumidas(chave, dono, &ficam);
         diario.atualizar_titulos(chave, &vivas);
         diario.gravar(&self.armazenamento);
         vivas
@@ -549,13 +660,7 @@ impl Tela {
 
     /// Mostra o diálogo "Continuar a conversa?" com as `anteriores` (as primeiras) e "Nova
     /// conversa".
-    fn perguntar_conversa(
-        &self,
-        janela: Janela,
-        alvo: Session,
-        f: Ferramenta,
-        anteriores: &[Conversa],
-    ) {
+    fn perguntar_conversa(&self, janela: Janela, alvo: Session, f: Quem, anteriores: &[Conversa]) {
         let formato = t!("conversas-formato-da-data");
         let mut rotulos: Vec<String> = Vec::new();
         let mut opcoes = Vec::new();
@@ -579,7 +684,7 @@ impl Tela {
         let aba = alvo.title();
         escolha.texto.set(t!(
             "conversas-texto",
-            nome = ficha(f).nome,
+            nome = self.perfil_de(f).nome(),
             aba = aba.as_str()
         ));
         escolha.marcada.set(rotulos[0].clone());
@@ -617,17 +722,21 @@ impl Tela {
         }
     }
 
-    /// Quem confere se as conversas ainda existem. `listar_opencode` roda o
-    /// `opencode session list` (devagar); sem ele, as do OpenCode valem.
-    pub(super) fn verificador(&self, listar_opencode: bool) -> Verificador {
+    /// Quem confere se as conversas de `quem` ainda existem, na conta do perfil.
+    /// `listar_opencode` roda o `opencode session list` (devagar); sem ele, as do OpenCode
+    /// valem.
+    pub(super) fn verificador(&self, quem: Quem, listar_opencode: bool) -> Verificador {
         let pessoal = self.ferramentas.ambiente().pessoal.clone();
         let pasta =
             crate::armazenamento::expandir_til_em(&self.pasta_de_trabalho(), pessoal.as_deref());
+        let conta = self.perfil_de(quem).pasta_da_conta(pessoal.as_deref());
         Verificador {
-            claude: conversas::config_do_claude(pessoal.as_deref()),
-            codex: conversas::config_do_codex(pessoal.as_deref()),
-            opencode: if listar_opencode {
-                self.sessoes_do_opencode_em(&pasta)
+            claude: conta
+                .clone()
+                .or_else(|| conversas::config_do_claude(pessoal.as_deref())),
+            codex: conta.or_else(|| conversas::config_do_codex(pessoal.as_deref())),
+            opencode: if listar_opencode && quem.ferramenta == Ferramenta::OpenCode {
+                self.sessoes_do_opencode_em(quem, &pasta)
             } else {
                 None
             },
@@ -635,18 +744,29 @@ impl Tela {
         }
     }
 
-    /// As sessões do OpenCode na pasta de trabalho `pasta` (`opencode session list --format
-    /// json`, rodado nela). `None` se não deu para rodar.
-    fn sessoes_do_opencode_em(&self, pasta: &Path) -> Option<Vec<SessaoDoOpenCode>> {
-        let onde = self.onde_esta(Ferramenta::OpenCode)?;
+    /// As sessões do OpenCode de `quem` na pasta de trabalho `pasta` (`opencode session list
+    /// --format json`, rodado nela, na conta do perfil). `None` se não deu para rodar.
+    fn sessoes_do_opencode_em(&self, quem: Quem, pasta: &Path) -> Option<Vec<SessaoDoOpenCode>> {
+        let onde = self.onde_esta(quem)?;
         let ambiente = self.ferramentas.ambiente();
         let shell = ambiente
             .shell
             .clone()
             .unwrap_or_else(|| "/bin/sh".to_owned());
-        let argumentos = ["session", "list", "--format", "json"]
+        let conta = self
+            .perfil_de(quem)
+            .ambiente_da_conta(ambiente.pessoal.as_deref());
+        // O executor não passa ambiente, e o `set` do `cmd` não aceita um caminho com espaço
+        // no meio de uma linha: no Windows, a conta própria fica sem conferir.
+        if ambiente.windows && !conta.is_empty() {
+            return None;
+        }
+        let mut argumentos = ["session", "list", "--format", "json"]
             .map(str::to_owned)
             .to_vec();
+        if !conta.is_empty() && self.opencode_novo(&onde) {
+            argumentos.push("--standalone".to_owned());
+        }
         let mut linha = linha_do_programa(
             &onde.texto(),
             argumentos,
@@ -654,6 +774,8 @@ impl Tela {
             &shell,
             ambiente.windows,
         );
+        // O executor não recebe ambiente: a conta vai na frente do comando.
+        prefixar_ambiente(&mut linha, &conta);
         // A lista é a do projeto da pasta onde roda.
         let pasta = pasta.to_string_lossy().into_owned();
         if ambiente.windows {
@@ -672,6 +794,34 @@ impl Tela {
         saida.contains('[').then(|| sessoes_do_opencode(&saida))
     }
 
+    /// Se o OpenCode de `onde` é da versão 2 ou maior, que tem o `--standalone`. Roda o
+    /// `--version` uma vez por programa.
+    fn opencode_novo(&self, onde: &Onde) -> bool {
+        let texto = onde.texto();
+        if let Some(novo) = self.controlar.versoes.borrow().get(&texto) {
+            return *novo;
+        }
+        let ambiente = self.ferramentas.ambiente();
+        let shell = ambiente
+            .shell
+            .clone()
+            .unwrap_or_else(|| "/bin/sh".to_owned());
+        let linha = linha_do_programa(
+            &texto,
+            vec!["--version".to_owned()],
+            Vec::new(),
+            &shell,
+            ambiente.windows,
+        );
+        let argumentos: Vec<&str> = linha.argumentos.iter().map(String::as_str).collect();
+        let novo = (ambiente.executor)(&linha.programa, &argumentos)
+            .ok()
+            .and_then(|saida| versao_maior(&saida))
+            .is_some_and(|maior| maior >= 2);
+        self.controlar.versoes.borrow_mut().insert(texto, novo);
+        novo
+    }
+
     /// Descobre o id das conversas que ainda não se sabe: o do Codex pelo arquivo do `notify`
     /// (barato) e, com `com_opencode`, o do OpenCode pela lista de sessões. As achadas entram no
     /// diário. Os rastros de abas fechadas que já têm o id saem.
@@ -681,12 +831,13 @@ impl Tela {
         {
             let mut rastros = self.controlar.rastros.borrow_mut();
             rastros.retain(|r| r.id.is_none() || !r.sessao.closed());
-            let mut listas: Vec<(PathBuf, Vec<SessaoDoOpenCode>)> = Vec::new();
+            let mut listas: Vec<(Quem, PathBuf, Vec<SessaoDoOpenCode>)> = Vec::new();
             for n in 0..rastros.len() {
                 if rastros[n].id.is_some() {
                     continue;
                 }
-                let achada = match rastros[n].ferramenta {
+                let quem = rastros[n].quem;
+                let achada = match quem.ferramenta {
                     Ferramenta::Codex => rastros[n]
                         .aviso
                         .as_deref()
@@ -694,19 +845,21 @@ impl Tela {
                         .map(|a| (a.id, a.titulo)),
                     Ferramenta::OpenCode if com_opencode => {
                         let pasta = rastros[n].pasta.clone();
-                        if !listas.iter().any(|(p, _)| *p == pasta) {
-                            let lista = self.sessoes_do_opencode_em(&pasta).unwrap_or_default();
-                            listas.push((pasta.clone(), lista));
+                        if !listas.iter().any(|(q, p, _)| *q == quem && *p == pasta) {
+                            let lista = self
+                                .sessoes_do_opencode_em(quem, &pasta)
+                                .unwrap_or_default();
+                            listas.push((quem, pasta.clone(), lista));
                         }
                         let pegas: Vec<String> = rastros
                             .iter()
-                            .filter(|r| r.ferramenta == Ferramenta::OpenCode)
+                            .filter(|r| r.quem.ferramenta == Ferramenta::OpenCode)
                             .filter_map(|r| r.id.clone())
                             .collect();
                         listas
                             .iter()
-                            .find(|(p, _)| *p == pasta)
-                            .and_then(|(_, lista)| {
+                            .find(|(q, p, _)| *q == quem && *p == pasta)
+                            .and_then(|(_, _, lista)| {
                                 sessao_do_lancamento(
                                     lista,
                                     &pasta.to_string_lossy(),
@@ -727,10 +880,11 @@ impl Tela {
                     achadas.push((
                         chave.clone(),
                         Conversa {
-                            ferramenta: rastro.ferramenta.chave().to_owned(),
+                            ferramenta: rastro.quem.ferramenta.chave().to_owned(),
                             id,
                             quando: rastro.inicio,
                             titulo,
+                            perfil: Some(rastro.quem.perfil),
                         },
                     ));
                 }
@@ -754,7 +908,8 @@ impl Tela {
                 .iter()
                 .filter(|l| l.alvo == Some(alvo) && !l.sessao.closed())
                 .map(|l| AssistenteSalvo {
-                    ferramenta: l.ferramenta.chave().to_owned(),
+                    ferramenta: l.quem.ferramenta.chave().to_owned(),
+                    perfil: Some(l.quem.perfil),
                     conversa: self.conversa_da_aba_de_assistente(l.sessao),
                 })
                 .collect()
@@ -869,15 +1024,17 @@ impl Tela {
         else {
             return;
         };
-        let verificador = self.verificador(false);
         for salvo in assistentes {
             let Some(f) = Ferramenta::da_chave(&salvo.ferramenta) else {
                 continue;
             };
+            let f = self.quem_salvo(f, salvo.perfil);
             if alvo.closed() || self.trazer_assistente(alvo, f) {
                 continue;
             }
-            let conversa = self.conversa_salva(f, salvo.conversa.as_deref(), &verificador);
+            let verificador = self.verificador(f, false);
+            let conversa =
+                self.conversa_salva(f.ferramenta, salvo.conversa.as_deref(), &verificador);
             self.lancar_assistente(janela, alvo, f, conversa);
         }
     }
@@ -916,12 +1073,7 @@ impl Tela {
 
     /// Anota `sessao` como a aba de um assistente: o "Controlar com" não aparece nela, ela não
     /// entra nos espaços de trabalho e o código 127 do shell vira o aviso de não instalado.
-    pub(super) fn anotar_assistente(
-        &self,
-        alvo: Option<Session>,
-        ferramenta: Ferramenta,
-        sessao: Session,
-    ) {
+    pub(super) fn anotar_assistente(&self, alvo: Option<Session>, quem: Quem, sessao: Session) {
         let vivas: Vec<Session> = self
             .sessoes_das_janelas(None)
             .into_iter()
@@ -929,11 +1081,7 @@ impl Tela {
             .collect();
         self.controlar.lancadas.update(|todas| {
             todas.retain(|l| vivas.contains(&l.sessao));
-            todas.push(Lancada {
-                alvo,
-                ferramenta,
-                sessao,
-            });
+            todas.push(Lancada { alvo, quem, sessao });
         });
     }
 
@@ -948,15 +1096,15 @@ impl Tela {
         })
     }
 
-    /// Traz para a frente a aba do assistente `f` que já controla `alvo`, se há uma viva.
-    fn trazer_assistente(&self, alvo: Session, f: Ferramenta) -> bool {
+    /// Traz para a frente a aba do perfil `f` que já controla `alvo`, se há uma viva.
+    fn trazer_assistente(&self, alvo: Session, f: Quem) -> bool {
         let existente = self
             .controlar
             .lancadas
             .with_untracked(|todas| {
                 todas
                     .iter()
-                    .find(|l| l.alvo == Some(alvo) && l.ferramenta == f && !l.sessao.closed())
+                    .find(|l| l.alvo == Some(alvo) && l.quem == f && !l.sessao.closed())
                     .map(|l| l.sessao)
             })
             .and_then(|sessao| {
@@ -973,14 +1121,12 @@ impl Tela {
         true
     }
 
-    /// Onde está o programa de `f`: o caminho das Configurações vence a procura.
-    fn onde_esta(&self, f: Ferramenta) -> Option<Onde> {
-        let configurado = self
-            .config
-            .with_untracked(|c| c.ia.caminho_local_de(f).trim().to_owned());
+    /// Onde está o programa do perfil `f`: o executável dele vence a procura.
+    fn onde_esta(&self, f: Quem) -> Option<Onde> {
+        let configurado = self.perfil_de(f).executavel.trim().to_owned();
         let ambiente = self.ferramentas.ambiente();
         let nome = if configurado.is_empty() {
-            ficha(f).binario.to_owned()
+            ficha(f.ferramenta).binario.to_owned()
         } else if configurado.contains(['/', '\\']) || configurado.starts_with('~') {
             let caminho = crate::armazenamento::expandir_til(&configurado);
             return caminho.is_file().then_some(Onde::Arquivo(caminho));
@@ -999,7 +1145,7 @@ impl Tela {
         self: &Rc<Self>,
         janela: Janela,
         alvo: Session,
-        f: Ferramenta,
+        f: Quem,
         conversa: Conversar,
     ) {
         let titulo_do_alvo = alvo.title();
@@ -1024,7 +1170,7 @@ impl Tela {
 
     /// A aba do assistente aberto pelo lançamento `lancamento`, e qual assistente é; `None` se a
     /// aba já fechou ou o lançamento é de outra cópia do app.
-    pub(super) fn aba_do_lancamento(&self, lancamento: &str) -> Option<(Session, Ferramenta)> {
+    pub(super) fn aba_do_lancamento(&self, lancamento: &str) -> Option<(Session, Quem)> {
         let mut todas = self.controlar.abas_dos_lancamentos.borrow_mut();
         todas.retain(|_, (sessao, _)| !sessao.closed());
         todas.get(lancamento).copied()
@@ -1036,22 +1182,44 @@ impl Tela {
     /// foi gravado.
     pub(super) fn lancar_local(
         self: &Rc<Self>,
-        f: Ferramenta,
+        quem: Quem,
         encomenda: Encomenda,
     ) -> Option<(Session, String)> {
-        let ficha = ficha(f);
-        let Some(onde) = self.onde_esta(f) else {
-            self.controlar.nao_achado.set(Some(f));
+        let f = quem.ferramenta;
+        let perfil = self.perfil_de(quem);
+        let Some(onde) = self.onde_esta(quem) else {
+            self.controlar.nao_achado.set(Some((f, perfil.nome())));
             return None;
         };
         self.controlar.nao_achado.set(None);
         let ambiente = self.ferramentas.ambiente();
+        let conta = perfil.ambiente_da_conta(ambiente.pessoal.as_deref());
+        for pasta in perfil.pastas_a_criar(ambiente.pessoal.as_deref()) {
+            if let Err(erro) = std::fs::create_dir_all(&pasta) {
+                self.avisar(
+                    InfoBarSeverity::Error,
+                    t!(
+                        "comum-nao-consegui-gravar",
+                        arquivo = pasta.display().to_string(),
+                        erro = erro.to_string()
+                    ),
+                );
+                return None;
+            }
+        }
+        let standalone =
+            f == Ferramenta::OpenCode && !conta.is_empty() && self.opencode_novo(&onde);
         let exe = ambiente
             .exe
             .as_ref()
             .map_or_else(|| "tirech-omni".to_owned(), |c| c.display().to_string());
         let rotulo = encomenda.rotulo.as_str();
-        let nome = t!("controlar-nome-da-sessao", nome = ficha.nome, aba = rotulo);
+        let nome_do_perfil = perfil.nome();
+        let nome = t!(
+            "controlar-nome-da-sessao",
+            nome = nome_do_perfil.as_str(),
+            aba = rotulo
+        );
         let n = self.contador.get_untracked() + 1;
         // Único entre as cópias do app e as aberturas: o hook e o cluster acham a sessão por ele,
         // e os arquivos de uma cópia não passam por cima dos da outra.
@@ -1102,11 +1270,7 @@ impl Tela {
                 .borrow_mut()
                 .extend([arquivo.clone(), avisos.clone()]);
         }
-        let extras = dividir_argumentos(
-            &self
-                .config
-                .with_untracked(|c| c.ia.argumentos_locais_de(f).to_owned()),
-        );
+        let extras = dividir_argumentos(&perfil.argumentos);
         let shell = ambiente
             .shell
             .clone()
@@ -1118,7 +1282,11 @@ impl Tela {
             (Conversar::Nova, Ferramenta::Claude) => Retomada::NovaComId(conversas::uuid_novo()),
             (Conversar::Nova, Ferramenta::Codex) => Retomada::NovaComAviso {
                 aviso: arquivo.with_file_name(format!("conversa-{lancamento}.json")),
-                notify: notify_do_codex(ambiente.pessoal.as_deref()),
+                notify: notify_do_codex(
+                    perfil
+                        .pasta_da_conta(ambiente.pessoal.as_deref())
+                        .or_else(|| conversas::config_do_codex(ambiente.pessoal.as_deref())),
+                ),
             },
             (Conversar::Nova, Ferramenta::OpenCode) => Retomada::Nenhuma,
         };
@@ -1133,13 +1301,19 @@ impl Tela {
             avisos: &avisos,
             onde: &onde,
             extras: &extras,
+            conta: &conta,
+            standalone,
             shell: &shell,
             windows: ambiente.windows,
             retomada: &retomada,
             atencao,
         });
         let mut conexao = Connection::new(
-            t!("controlar-titulo", nome = ficha.nome, aba = rotulo),
+            t!(
+                "controlar-titulo",
+                nome = nome_do_perfil.as_str(),
+                aba = rotulo
+            ),
             Kind::Local,
         );
         conexao.local_programa = linha.programa;
@@ -1151,7 +1325,7 @@ impl Tela {
         self.controlar
             .abas_dos_lancamentos
             .borrow_mut()
-            .insert(lancamento.clone(), (sessao, f));
+            .insert(lancamento.clone(), (sessao, quem));
         let (id, aviso) = match retomada {
             Retomada::NovaComId(id) | Retomada::Continuar(id) => (Some(id), None),
             Retomada::NovaComAviso { aviso, .. } => (None, Some(aviso)),
@@ -1168,6 +1342,7 @@ impl Tela {
                         id: id.clone(),
                         quando: inicio,
                         titulo: String::new(),
+                        perfil: Some(quem.perfil),
                     },
                 );
                 diario.gravar(&self.armazenamento);
@@ -1175,7 +1350,7 @@ impl Tela {
             self.controlar.rastros.borrow_mut().push(Rastro {
                 sessao,
                 chave: encomenda.chave,
-                ferramenta: f,
+                quem,
                 id,
                 inicio,
                 aviso,
@@ -1183,6 +1358,66 @@ impl Tela {
             });
         }
         Some((sessao, lancamento))
+    }
+
+    /// O "Entrar" do perfil `id` (Configurações): abre uma aba local com o login do assistente,
+    /// no ambiente da conta do perfil.
+    pub(super) fn entrar_no_perfil(self: &Rc<Self>, id: u64) {
+        let Some(perfil) = self
+            .config
+            .with_untracked(|c| c.ia.perfil_local(id).cloned())
+        else {
+            return;
+        };
+        let f = perfil.ferramenta();
+        let quem = Quem {
+            ferramenta: f,
+            perfil: id,
+        };
+        let Some(onde) = self.onde_esta(quem) else {
+            self.avisar(
+                InfoBarSeverity::Error,
+                t!("ia-perfil-nao-achado", nome = perfil.nome()),
+            );
+            return;
+        };
+        let ambiente = self.ferramentas.ambiente();
+        let conta = perfil.ambiente_da_conta(ambiente.pessoal.as_deref());
+        for pasta in perfil.pastas_a_criar(ambiente.pessoal.as_deref()) {
+            if let Err(erro) = std::fs::create_dir_all(&pasta) {
+                self.avisar(
+                    InfoBarSeverity::Error,
+                    t!(
+                        "comum-nao-consegui-gravar",
+                        arquivo = pasta.display().to_string(),
+                        erro = erro.to_string()
+                    ),
+                );
+                return;
+            }
+        }
+        let standalone =
+            f == Ferramenta::OpenCode && !conta.is_empty() && self.opencode_novo(&onde);
+        let shell = ambiente
+            .shell
+            .clone()
+            .unwrap_or_else(|| "/bin/sh".to_owned());
+        let linha = linha_do_programa(
+            &onde.texto(),
+            argumentos_do_login(f, standalone),
+            conta,
+            &shell,
+            ambiente.windows,
+        );
+        let mut conexao = Connection::new(
+            t!("ia-perfil-entrar-titulo", nome = perfil.nome()),
+            Kind::Local,
+        );
+        conexao.local_programa = linha.programa;
+        conexao.local_argumentos = juntar_argumentos(&linha.argumentos);
+        conexao.local_ambiente = linha.ambiente;
+        self.abrir_e_devolver(&conexao, Senhas::default(), Lugar::default(), false, false);
+        self.mostrar_terminais();
     }
 
     /// A pasta onde o assistente começa: a de `ia.local_pasta`, criada se falta. Sem ela (não deu
@@ -1250,7 +1485,10 @@ impl Tela {
 
     /// Fecha a aba de um assistente que o shell de login não achou (código 127) e avisa.
     fn assistente_nao_achado(&self, lancada: Lancada) {
-        self.controlar.nao_achado.set(Some(lancada.ferramenta));
+        let nome = self.perfil_de(lancada.quem).nome();
+        self.controlar
+            .nao_achado
+            .set(Some((lancada.quem.ferramenta, nome)));
         self.controlar
             .lancadas
             .update(|todas| todas.retain(|l| l.sessao != lancada.sessao));
@@ -1330,12 +1568,12 @@ pub(super) fn avisos(tela: &Rc<Tela>) -> impl View {
                 InfoBar::new(InfoBarSeverity::Warning)
                     .id("controlar-aviso-nao-achado")
                     .message(move || match nao_achado.get() {
-                        Some(f) => t!("controlar-nao-achado", nome = ficha(f).nome),
+                        Some((_, nome)) => t!("controlar-nao-achado", nome = nome.as_str()),
                         None => String::new(),
                     })
                     .on_close(move || nao_achado.set(None))
                     .action(t!("controlar-como-instalar"), move || {
-                        if let Some(f) = nao_achado.get_untracked() {
+                        if let Some((f, _)) = nao_achado.get_untracked() {
                             nao_achado.set(None);
                             agir.abrir_instalacao(f);
                         }
@@ -1401,26 +1639,63 @@ pub(super) const ICONES: [(Ferramenta, Symbol); 3] = [
     (Ferramenta::OpenCode, Symbol::WindowConsole),
 ];
 
-/// O submenu "Controlar com ▸" com os três assistentes. `prefixo` abre os ids
-/// (`{prefixo}-claude`, `-codex` e `-opencode`).
-pub(super) fn submenu(tela: &Rc<Tela>, prefixo: &str, alvo: Alvo) -> MenuFlyout {
-    let mut menu = MenuFlyout::new().id(format!("{prefixo}-menu"));
+/// O id do item do `n`-ésimo perfil de `ferramenta` num submenu: `{prefixo}-claude` para o
+/// primeiro, `{prefixo}-claude-2` para o segundo, e assim por diante.
+pub(super) fn id_do_perfil(prefixo: &str, ferramenta: Ferramenta, n: usize) -> String {
+    match n {
+        0 => format!("{prefixo}-{}", ferramenta.chave()),
+        n => format!("{prefixo}-{}-{}", ferramenta.chave(), n + 1),
+    }
+}
+
+/// Os itens dos perfis de assistente num submenu: as vagas fixas de cada assistente
+/// ([`PERFIS_POR_ASSISTENTE`]), com o nome do perfil e o ícone do assistente, à mostra só as que
+/// têm perfil. O clique roda `abrir` com o perfil da vaga naquela hora.
+pub(super) fn itens_dos_perfis(
+    tela: &Rc<Tela>,
+    mut menu: MenuFlyout,
+    prefixo: &str,
+    abrir: impl Fn(&Rc<Tela>, Quem) + Clone + 'static,
+) -> MenuFlyout {
     for (ferramenta, icone) in ICONES {
-        let (abrir, visivel) = (Rc::clone(tela), Rc::clone(tela));
-        menu = menu
-            .item(
-                format!("{prefixo}-{}", ferramenta.chave()),
-                ficha(ferramenta).nome.to_owned(),
-                move || {
-                    if let Some((janela, sessao)) = abrir.resolver_controle(alvo) {
-                        abrir.controlar_com(janela, sessao, ferramenta);
-                    }
-                },
-            )
-            .icon(icone)
-            .item_visible(move || visivel.config.with(|c| c.ia.mostra(ferramenta)));
+        for n in 0..PERFIS_POR_ASSISTENTE {
+            let (rotulo, clique, visivel) = (Rc::clone(tela), Rc::clone(tela), Rc::clone(tela));
+            let abrir = abrir.clone();
+            menu = menu
+                .item(
+                    id_do_perfil(prefixo, ferramenta, n),
+                    move || {
+                        rotulo.config.with(|c| {
+                            c.ia.perfil_n(ferramenta, n)
+                                .map_or_else(String::new, PerfilLocal::nome)
+                        })
+                    },
+                    move || {
+                        if let Some(quem) = clique.quem_n(ferramenta, n) {
+                            abrir(&clique, quem);
+                        }
+                    },
+                )
+                .icon(icone)
+                .item_visible(move || {
+                    visivel
+                        .config
+                        .with(|c| c.ia.mostra(ferramenta) && c.ia.perfil_n(ferramenta, n).is_some())
+                });
+        }
     }
     menu
+}
+
+/// O submenu "Controlar com ▸" com os perfis dos assistentes. `prefixo` abre os ids (veja
+/// [`id_do_perfil`]).
+pub(super) fn submenu(tela: &Rc<Tela>, prefixo: &str, alvo: Alvo) -> MenuFlyout {
+    let menu = MenuFlyout::new().id(format!("{prefixo}-menu"));
+    itens_dos_perfis(tela, menu, prefixo, move |t, quem| {
+        if let Some((janela, sessao)) = t.resolver_controle(alvo) {
+            t.controlar_com(janela, sessao, quem);
+        }
+    })
 }
 
 /// Se o submenu "Controlar com ▸" aparece para `alvo`: o controle por assistentes está ligado em
@@ -1433,7 +1708,7 @@ pub(super) fn aparece(tela: &Rc<Tela>, alvo: Alvo) -> bool {
     !tela.e_aba_de_assistente(sessao)
         && tela
             .config
-            .with(|c| c.geral.mcp && Ferramenta::TODAS.into_iter().any(|f| c.ia.mostra(f)))
+            .with(|c| c.geral.mcp && Ferramenta::TODAS.into_iter().any(|f| c.ia.mostra_local(f)))
 }
 
 impl Tela {
@@ -1531,11 +1806,100 @@ mod tests {
             avisos: Path::new("/cfg/mcp/lancar-3-avisos.json"),
             onde,
             extras,
+            conta: &[],
+            standalone: false,
             shell: "/bin/zsh",
             windows,
             retomada: &Retomada::Nenhuma,
             atencao: false,
         }
+    }
+
+    #[test]
+    fn a_conta_vai_no_ambiente_e_o_opencode_2_vai_sozinho() {
+        let ponte = ponte();
+        let conta = vec![("CLAUDE_CONFIG_DIR".to_owned(), "/home/ana/b".to_owned())];
+        let claude = Onde::Nome("claude".to_owned());
+        let linha = montar_linha(&Pedido {
+            conta: &conta,
+            ..pedido(Ferramenta::Claude, &claude, &[], false, &ponte)
+        });
+        assert_eq!(linha.ambiente, conta);
+
+        let opencode = Onde::Nome("opencode".to_owned());
+        let extras = vec!["--extra".to_owned()];
+        let linha = montar_linha(&Pedido {
+            standalone: true,
+            ..pedido(Ferramenta::OpenCode, &opencode, &extras, false, &ponte)
+        });
+        assert!(
+            linha.argumentos[2].ends_with("'--standalone' '--extra'"),
+            "{}",
+            linha.argumentos[2]
+        );
+        let linha = montar_linha(&pedido(Ferramenta::OpenCode, &opencode, &[], false, &ponte));
+        assert!(!linha.argumentos[2].contains("--standalone"));
+    }
+
+    #[test]
+    fn o_ambiente_entra_na_frente_do_comando_do_shell() {
+        let mut linha =
+            linha_do_programa("/opt/oc", vec!["-v".into()], Vec::new(), "/bin/sh", false);
+        prefixar_ambiente(&mut linha, &[]);
+        assert_eq!(linha.argumentos[2], "exec '/opt/oc' '-v'");
+        prefixar_ambiente(
+            &mut linha,
+            &[
+                (
+                    "XDG_DATA_HOME".to_owned(),
+                    "/home/ana/conta b/data".to_owned(),
+                ),
+                ("A".to_owned(), "it's".to_owned()),
+            ],
+        );
+        assert_eq!(
+            linha.argumentos[2],
+            format!(
+                "export XDG_DATA_HOME={} A={} && exec '/opt/oc' '-v'",
+                aspas_externas("/home/ana/conta b/data"),
+                aspas_externas("it's")
+            )
+        );
+    }
+
+    #[test]
+    fn a_versao_maior_sai_da_primeira_palavra_com_numero() {
+        assert_eq!(versao_maior("2.1.317 (Claude Code)"), Some(2));
+        assert_eq!(versao_maior("codex-cli 0.164.0"), Some(0));
+        assert_eq!(versao_maior("v2.2.0"), Some(2));
+        assert_eq!(versao_maior("opencode 1.14.3\n"), Some(1));
+        assert_eq!(versao_maior("sem versão"), None);
+    }
+
+    #[test]
+    fn o_login_de_cada_assistente() {
+        assert_eq!(
+            argumentos_do_login(Ferramenta::Claude, false),
+            ["auth", "login"]
+        );
+        assert_eq!(argumentos_do_login(Ferramenta::Codex, false), ["login"]);
+        assert_eq!(
+            argumentos_do_login(Ferramenta::OpenCode, true),
+            ["auth", "login", "--standalone"]
+        );
+    }
+
+    #[test]
+    fn o_primeiro_perfil_guarda_o_id_de_sempre() {
+        assert_eq!(
+            id_do_perfil("controlar", Ferramenta::Codex, 0),
+            "controlar-codex"
+        );
+        assert_eq!(
+            id_do_perfil("controlar", Ferramenta::Codex, 1),
+            "controlar-codex-2"
+        );
+        assert_eq!(sem_repetir(&["Codex".into()], "Codex".into()), "Codex (2)");
     }
 
     #[test]

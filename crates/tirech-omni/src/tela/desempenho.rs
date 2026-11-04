@@ -13,9 +13,10 @@ use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tomni_ui::files::Live;
+use tomni_ui::notification::Notification;
 use tomni_ui::prelude::*;
 
 use super::Tela;
@@ -26,6 +27,7 @@ use crate::desempenho::{self as conta, Amostra, Amostrador, PONTOS, RITMO};
 use crate::espacos::id_da_chave;
 use crate::janelas::Janela;
 use crate::processos::Evento;
+use crate::sensores::{AvisoDeCalor, Grupo, LeitorDeSensores, Nivel, Sensor, limite_de_calor};
 use crate::t;
 
 /// O id da página na navegação.
@@ -98,6 +100,12 @@ pub(super) struct Desempenho {
     cpu_da_maquina: Signal<Option<f64>>,
     /// Sobe a cada entrega do leitor do medidor.
     pronto: Signal<u64>,
+    /// O sensor da CPU deste computador, do leitor leve (`None` sem sensor ou sem leitor).
+    cpu_daqui: Signal<Option<Sensor>>,
+    /// O sensor da CPU do servidor do medidor, da leitura mais nova do leitor dele.
+    cpu_do_servidor: Signal<Option<Sensor>>,
+    /// Sobe a cada entrega do leitor leve dos sensores.
+    pronto_dos_sensores: Signal<u64>,
 }
 
 /// Se a amostragem deve correr: o medidor ligado mostrando o app ou a página aberta em alguma
@@ -138,8 +146,12 @@ pub(super) fn ligar(tela: &Rc<Tela>) -> Desempenho {
         servidor: signal(None),
         cpu_da_maquina: signal(None),
         pronto: signal(0),
+        cpu_daqui: signal(None),
+        cpu_do_servidor: signal(None),
+        pronto_dos_sensores: signal(0),
     };
     ligar_a_origem(tela, d);
+    ligar_os_sensores(tela, d);
     let medicao = tela.ferramentas.ambiente().medicao.clone();
     let ativo = ativo(tela, d.origem);
     let batida = match medicao.batida {
@@ -281,6 +293,7 @@ fn ligar_a_origem(tela: &Rc<Tela>, d: Desempenho) {
         untrack(|| {
             leitor.borrow_mut().take();
             d.cpu_da_maquina.set(None);
+            d.cpu_do_servidor.set(None);
             let Some(rotulo) = maquina else {
                 return;
             };
@@ -308,13 +321,109 @@ fn ligar_a_origem(tela: &Rc<Tela>, d: Desempenho) {
             };
             for evento in eventos {
                 match evento {
-                    Evento::Leitura(Ok(leitura)) => d.cpu_da_maquina.set(Some(leitura.cpu())),
-                    Evento::Leitura(Err(_)) => d.cpu_da_maquina.set(None),
+                    Evento::Leitura(Ok(leitura)) => {
+                        d.cpu_da_maquina.set(Some(leitura.cpu()));
+                        let cpu = leitura.sensores.principal(Grupo::Cpu).cloned();
+                        if d.cpu_do_servidor.get_untracked() != cpu {
+                            d.cpu_do_servidor.set(cpu);
+                        }
+                    }
+                    Evento::Leitura(Err(_)) => {
+                        d.cpu_da_maquina.set(None);
+                        d.cpu_do_servidor.set(None);
+                    }
                     Evento::Encerrado(_) => {}
                 }
             }
         });
     });
+}
+
+/// O leitor leve dos sensores deste computador (o [`LeitorDeSensores`], a cada
+/// [`crate::sensores::RITMO`]): corre só se este computador tem sensores e alguém pede: o
+/// medidor com a temperatura fora de um servidor, ou o aviso de calor. A cada leitura, o sensor
+/// da CPU vai para o medidor e passa pelo aviso.
+fn ligar_os_sensores(tela: &Rc<Tela>, d: Desempenho) {
+    let config = tela.config;
+    let ambiente = tela.ferramentas.ambiente();
+    let (ler, ritmo) = (Arc::clone(&ambiente.sensores), ambiente.ritmo_dos_sensores);
+    let aqui = d.processos.sensores_aqui;
+    let leitor: Rc<RefCell<Option<LeitorDeSensores>>> = Rc::default();
+
+    let l = Rc::clone(&leitor);
+    effect(move || {
+        let do_servidor = matches!(d.origem.get(), Origem::Servidor(_));
+        let pedido = aqui
+            && config.with(|c| {
+                (c.geral.medidor_cpu && c.geral.medidor_temperatura && !do_servidor)
+                    || c.geral.avisar_calor
+            });
+        if pedido == l.borrow().is_some() {
+            return;
+        }
+        untrack(|| {
+            if pedido {
+                *l.borrow_mut() =
+                    Some(LeitorDeSensores::novo(Arc::clone(&ler), ritmo, move || {
+                        crate::agente::acordar(d.pronto_dos_sensores)
+                    }));
+            } else {
+                l.borrow_mut().take();
+                d.cpu_daqui.set(None);
+            }
+        });
+    });
+
+    let t = Rc::clone(tela);
+    let aviso = RefCell::new(AvisoDeCalor::default());
+    effect(move || {
+        ler_contador(d.pronto_dos_sensores);
+        untrack(|| {
+            let Some(sensores) = leitor
+                .borrow()
+                .as_ref()
+                .and_then(LeitorDeSensores::recolher)
+            else {
+                return;
+            };
+            let cpu = sensores.principal(Grupo::Cpu).cloned();
+            if d.cpu_daqui.get_untracked() != cpu {
+                d.cpu_daqui.set(cpu.clone());
+            }
+            let (avisar, configurado) =
+                config.with_untracked(|c| (c.geral.avisar_calor, c.geral.limite_calor));
+            let Some(cpu) = cpu.filter(|_| avisar) else {
+                return;
+            };
+            let limite = limite_de_calor(&cpu, configurado);
+            if aviso.borrow_mut().ver(cpu.mili, limite, Instant::now()) {
+                avisar_do_calor(&t, &cpu, limite, d);
+            }
+        });
+    });
+}
+
+/// A notificação do calor, com a temperatura e o limite. O clique abre a aba Sensores deste
+/// computador na janela principal.
+fn avisar_do_calor(tela: &Rc<Tela>, cpu: &Sensor, limite: i32, d: Desempenho) {
+    let janelas = tela.janelas.clone();
+    let temperatura = processos::graus_mili(cpu.mili);
+    let limite = processos::graus_mili(limite);
+    Notification::new(t!("sensores-calor-titulo"))
+        .body(t!(
+            "sensores-calor-corpo",
+            temperatura = temperatura.as_str(),
+            limite = limite.as_str()
+        ))
+        .tag("calor")
+        .on_click(move || {
+            let janela = janelas.principal();
+            processos::mostrar_sensores_daqui(d.processos);
+            janela.pagina.set(PAGINA.to_owned());
+            janela.handle.show();
+            janela.handle.focus();
+        })
+        .show();
 }
 
 /// A batida de verdade: uma thread que sobe o contador a cada [`RITMO`] enquanto `ativo()`.
@@ -440,28 +549,81 @@ pub(super) fn medidor(tela: &Rc<Tela>, janela: Janela, d: Desempenho) -> impl Vi
         Origem::App => Some(d.cpu.with(|s| s.last().copied().unwrap_or(0.0))),
         _ => d.cpu_da_maquina.get(),
     };
-    LevelMeter::new(move || atual().unwrap_or(0.0) / 100.0)
-        .id("barra-de-titulo-cpu")
-        .tooltip(move || {
-            let cpu = atual().map_or_else(|| "—".to_owned(), conta::cpu);
-            match d.origem.get() {
-                Origem::App => t!("desempenho-medidor-dica", cpu = cpu.as_str()),
-                Origem::Computador => {
-                    t!("desempenho-medidor-dica-computador", cpu = cpu.as_str())
-                }
-                Origem::Servidor(_) => {
-                    let nome = d.servidor.get().unwrap_or_default();
-                    t!(
-                        "desempenho-medidor-dica-servidor",
-                        nome = nome.as_str(),
-                        cpu = cpu.as_str()
-                    )
-                }
+    // A temperatura da CPU da máquina do medidor: a do servidor vem do leitor dele; a deste
+    // computador (também na origem "Este app"), do leitor leve.
+    let temperatura = move || {
+        if !config.with(|c| c.geral.medidor_cpu && c.geral.medidor_temperatura) {
+            return None;
+        }
+        match d.origem.get() {
+            Origem::Servidor(_) => d.cpu_do_servidor.get(),
+            _ => d.cpu_daqui.get(),
+        }
+    };
+    let dica = move || {
+        let cpu = atual().map_or_else(|| "—".to_owned(), conta::cpu);
+        let dica = match d.origem.get() {
+            Origem::App => t!("desempenho-medidor-dica", cpu = cpu.as_str()),
+            Origem::Computador => {
+                t!("desempenho-medidor-dica-computador", cpu = cpu.as_str())
             }
-        })
+            Origem::Servidor(_) => {
+                let nome = d.servidor.get().unwrap_or_default();
+                t!(
+                    "desempenho-medidor-dica-servidor",
+                    nome = nome.as_str(),
+                    cpu = cpu.as_str()
+                )
+            }
+        };
+        match temperatura() {
+            Some(sensor) => {
+                let graus = processos::graus_mili(sensor.mili);
+                format!(
+                    "{dica}\n{}",
+                    t!(
+                        "desempenho-medidor-dica-temperatura",
+                        temperatura = graus.as_str()
+                    )
+                )
+            }
+            None => dica,
+        }
+    };
+    let medidor = LevelMeter::new(move || atual().unwrap_or(0.0) / 100.0)
+        .id("barra-de-titulo-cpu")
+        .tooltip(dica)
         .visible(move || config.with(|c| c.geral.medidor_cpu))
         .on_click(move || janela.pagina.set(PAGINA.to_owned()))
-        .context_flyout(menu_do_medidor(tela, janela, d))
+        .context_flyout(menu_do_medidor(tela, janela, d));
+    // O número some sem temperatura; a cor segue a da lista da aba Sensores e só muda com o
+    // nível, que remonta o texto.
+    let numero = For::each(
+        move || {
+            temperatura()
+                .map(|s| s.nivel())
+                .into_iter()
+                .collect::<Vec<_>>()
+        },
+        |nivel: &Nivel| *nivel as u8,
+        move |nivel: Nivel| {
+            let texto = Text::new(move || {
+                temperatura().map_or_else(String::new, |s| processos::graus_mili(s.mili))
+            })
+            .id("barra-de-titulo-temperatura")
+            .tooltip(dica);
+            match nivel {
+                Nivel::Normal => texto,
+                Nivel::Alto => texto.color(Token::SystemFillColorCaution),
+                Nivel::Critico => texto.color(Token::SystemFillColorCritical),
+            }
+        },
+    );
+    Row::new()
+        .gap(6)
+        .align(Align::Center)
+        .child(medidor)
+        .child(numero)
 }
 
 /// O menu do medidor: de onde vem o número (o app, este computador ou um dos servidores SSH
@@ -509,11 +671,22 @@ fn menu_do_medidor(tela: &Rc<Tela>, janela: Janela, d: Desempenho) -> MenuFlyout
             )
             .item_visible(move || existe().len() > n);
     }
-    menu.separator().item(
-        "barra-de-titulo-cpu-abrir",
-        t!("desempenho-medidor-abrir"),
-        move || janela.pagina.set(PAGINA.to_owned()),
-    )
+    let mostrar_temperatura = crate::tela_configuracoes::ligar(
+        tela.config,
+        |c| c.geral.medidor_temperatura,
+        |c, v| c.geral.medidor_temperatura = v,
+    );
+    menu.separator()
+        .toggle(
+            "barra-de-titulo-cpu-temperatura",
+            t!("desempenho-medidor-temperatura"),
+            mostrar_temperatura,
+        )
+        .item(
+            "barra-de-titulo-cpu-abrir",
+            t!("desempenho-medidor-abrir"),
+            move || janela.pagina.set(PAGINA.to_owned()),
+        )
 }
 
 /// Uma curva dos painéis: o item da coluna da esquerda e o gráfico grande dela.
@@ -794,6 +967,7 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
         .empty_text(t!("desempenho-sem-abas"))
         .on_invoke(move |chave| ir.ir_para_a_aba_da_chave(&chave));
 
+    let com_sessoes = Rc::clone(tela);
     Column::new()
         .id("desempenho-pagina")
         .grow(1)
@@ -836,7 +1010,18 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
                     processos::REDE,
                     t!("processos-aba-rede"),
                     processos::aba_rede(tela, d.processos),
-                ),
+                )
+                .tab(
+                    processos::SENSORES,
+                    t!("processos-aba-sensores"),
+                    processos::aba_sensores(tela, d.processos),
+                )
+                // Sem sensores aqui e sem servidor para escolher, a aba não tem o que mostrar.
+                .tab_visible(move |chave| {
+                    chave != processos::SENSORES
+                        || d.processos.sensores_aqui
+                        || processos::maquinas(&com_sessoes).len() > 1
+                }),
         )
 }
 

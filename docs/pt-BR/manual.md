@@ -199,6 +199,21 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   botões **Encerrar** e **Forçar encerramento**, e o menu do botão direito, agem nos
   selecionados (no Linux e no macOS, `kill` com TERM ou KILL; no Windows, `taskkill`, com `/F`
   para forçar; no servidor, `kill` pela conexão).
+- **Sensores (a temperatura da máquina)**: a aba **Sensores** do Desempenho mostra a
+  temperatura da CPU, da memória, do disco, da placa-mãe e da placa de vídeo, cada grupo com o
+  gráfico do último minuto e a lista dos sensores (o valor, o alto e o crítico), e as ventoinhas
+  com as rotações. O seletor escolhe **Este computador** ou o servidor de uma conexão SSH aberta
+  (Linux). O que a máquina não tem não aparece: sem sensor nenhum, a aba some. No Linux os
+  números vêm do `/sys/class/hwmon`, sem root; no macOS, dos sensores do Apple Silicon; no
+  Windows, da temperatura dos discos e das zonas térmicas do ACPI e, com o LibreHardwareMonitor
+  aberto, dos sensores e das ventoinhas dele (a CPU por núcleo, a memória, a placa-mãe). O
+  medidor da barra de título mostra também a temperatura da CPU, em laranja acima do limite alto
+  do sensor e em vermelho acima do crítico (**Temperatura da CPU no medidor**, em Configurações ›
+  Geral, ou **Mostrar a temperatura** no menu do medidor). **Avisar quando a CPU esquentar**
+  (ligado) manda uma notificação do sistema quando o processador deste computador passa do
+  **Limite do aviso de calor** (0, o automático, é o crítico do sensor menos 10 °C, ou 90 °C);
+  outra só depois de ele esfriar 5 °C e de 10 minutos, e o clique abre a aba Sensores. A leitura
+  é leve: a cada 5 segundos, e só enquanto o número ou o aviso a pedem.
 - **Tentar de novo após (reconexão que não desiste)**: quando a aba reconecta sozinha (Configurações
   › Conexões › Ao cair a conexão em **Reconectar sozinho**, e sempre na aba de um assistente)
   e as tentativas acabam, ela espera e começa outra rodada, até a conexão voltar; a aba avisa
@@ -1072,6 +1087,17 @@ terminal, no menu da aba e em Ferramentas › Assistentes de IA (que controla a 
   assistente não é alterada** (nada é gravado no `~/.claude.json`, no `~/.codex/config.toml`
   nem no `opencode.json`). No Claude Code o servidor se chama `tirech-omni-aba`, para não
   colidir com o que a pessoa já ligou à mão.
+- **Perfis (várias contas ou executáveis do mesmo assistente)**: em Configurações › Assistentes
+  de IA › Assistentes neste computador, **Novo perfil de assistente…** cria outro perfil do
+  Claude Code, do Codex ou do OpenCode, com nome, executável, pasta da conta e argumentos
+  extras. O executável é escolhido entre as instalações achadas no computador, cada uma com a
+  versão (útil quando há dois binários do mesmo assistente), ou **Procurar no PATH**, ou
+  **Outro…**. Cada pasta da conta é uma conta separada, com o login, as configurações e as
+  conversas dela (`CLAUDE_CONFIG_DIR` no Claude Code, `CODEX_HOME` no Codex, `XDG_DATA_HOME` e
+  `XDG_STATE_HOME` no OpenCode); vazia, usa a conta de sempre. **Entrar** abre uma aba com o
+  login do perfil. Cada perfil vira um item no **Controlar com ▸**, no submenu da pasta e no
+  cluster com IA, e o diário das conversas é por perfil. O padrão é um perfil por assistente,
+  e os caminhos e argumentos de antes viram esses perfis.
 - Clicar de novo, na mesma aba e com o mesmo assistente ainda aberto, só traz a aba dele para a
   frente. O submenu não aparece na aba do próprio assistente.
 - **O diário das conversas**: o app guarda o id de cada conversa que um assistente teve com uma

@@ -7,6 +7,7 @@
 //! máximo o id do item (`rclone.credencial`). É isso que deixa exportar sem segredos.
 
 pub mod catalogo;
+pub mod perfis_locais;
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -24,13 +25,8 @@ use crate::{t, tk};
 pub const RECENTES_MIN: u32 = 5;
 /// Ver [`RECENTES_MIN`].
 pub const RECENTES_MAX: u32 = 100;
-
-/// Os caminhos dos assistentes deste computador (M63): são da máquina e não vão na exportação.
-const CAMINHOS_LOCAIS_DA_IA: [&str; 3] = [
-    "local_claude_caminho",
-    "local_codex_caminho",
-    "local_opencode_caminho",
-];
+/// O maior limite do aviso de calor, em °C (`geral.limite_calor`).
+pub const LIMITE_CALOR_MAX: u32 = 120;
 
 /// A versão do formato do arquivo (o da casca, sem `versao`, era a 1).
 pub const VERSAO: u32 = 2;
@@ -588,6 +584,13 @@ categoria! {
         medidor_cpu: bool = true,
         /// De onde vem o número do medidor: o app ou este computador.
         origem_medidor: OrigemDoMedidor = OrigemDoMedidor::App,
+        /// A temperatura da CPU ao lado do medidor (some sem sensor).
+        medidor_temperatura: bool = true,
+        /// A notificação do sistema quando a CPU deste computador passa de `limite_calor`.
+        avisar_calor: bool = true,
+        /// O limite do aviso de calor, em °C (de 0 a 120); 0 é o automático: o crítico do
+        /// sensor menos 10 °C, ou 90 °C.
+        limite_calor: u32 = 0,
         /// O aviso "este sistema não mostra ícones na bandeja" já foi visto.
         aviso_sem_bandeja: bool = false,
         /// Quantos recentes guardar, sem contar os fixados (de 5 a 100).
@@ -1108,18 +1111,9 @@ categoria! {
         /// A pasta onde o "Controlar com" abre os assistentes deste computador; vazia é a do app,
         /// na pasta de cache do sistema (veja `Ambiente::pasta_dos_assistentes_padrao`).
         local_pasta: String = String::new(),
-        /// O caminho do `claude` deste computador; vazio procura no `PATH` (M63).
-        local_claude_caminho: String = String::new(),
-        /// Os argumentos do `claude` deste computador, numa linha (M63).
-        local_claude_argumentos: String = String::new(),
-        /// O caminho do `codex` deste computador; vazio procura no `PATH` (M63).
-        local_codex_caminho: String = String::new(),
-        /// Os argumentos do `codex` deste computador, numa linha (M63).
-        local_codex_argumentos: String = String::new(),
-        /// O caminho do `opencode` deste computador; vazio procura no `PATH` (M63).
-        local_opencode_caminho: String = String::new(),
-        /// Os argumentos do `opencode` deste computador, numa linha (M63).
-        local_opencode_argumentos: String = String::new(),
+        /// Os perfis dos assistentes deste computador: o executável, a conta e os argumentos
+        /// de cada um (o "Controlar com ▸" mostra um item por perfil).
+        perfis_locais: Vec<perfis_locais::PerfilLocal> = perfis_locais::perfis_padrao(),
         /// Guarda o id das conversas dos assistentes deste computador com cada aba, no
         /// `conversas.json`; desligado não guarda, não pergunta e não reabre.
         conversas_lembrar: bool = true,
@@ -1158,36 +1152,53 @@ impl IaCfg {
     /// Copia de `outra` só os ajustes dos assistentes deste computador (M63).
     fn copiar_local_de(&mut self, outra: &IaCfg) {
         self.local_pasta = outra.local_pasta.clone();
-        self.local_claude_caminho = outra.local_claude_caminho.clone();
-        self.local_claude_argumentos = outra.local_claude_argumentos.clone();
-        self.local_codex_caminho = outra.local_codex_caminho.clone();
-        self.local_codex_argumentos = outra.local_codex_argumentos.clone();
-        self.local_opencode_caminho = outra.local_opencode_caminho.clone();
-        self.local_opencode_argumentos = outra.local_opencode_argumentos.clone();
+        self.perfis_locais = outra.perfis_locais.clone();
         self.conversas_lembrar = outra.conversas_lembrar;
         self.conversas_reabrir = outra.conversas_reabrir;
         self.conversas_ao_controlar = outra.conversas_ao_controlar;
         self.avisar_ao_terminar = outra.avisar_ao_terminar;
     }
 
-    /// O caminho do executável da ferramenta neste computador, pelas Configurações (M63).
-    pub fn caminho_local_de(&self, ferramenta: crate::ia::Ferramenta) -> &str {
-        use crate::ia::Ferramenta;
-        match ferramenta {
-            Ferramenta::Claude => &self.local_claude_caminho,
-            Ferramenta::Codex => &self.local_codex_caminho,
-            Ferramenta::OpenCode => &self.local_opencode_caminho,
-        }
+    /// O perfil de assistente deste computador com o id.
+    pub fn perfil_local(&self, id: u64) -> Option<&perfis_locais::PerfilLocal> {
+        self.perfis_locais.iter().find(|p| p.id == id)
     }
 
-    /// Os argumentos extras da ferramenta neste computador, pelas Configurações (M63).
-    pub fn argumentos_locais_de(&self, ferramenta: crate::ia::Ferramenta) -> &str {
-        use crate::ia::Ferramenta;
-        match ferramenta {
-            Ferramenta::Claude => &self.local_claude_argumentos,
-            Ferramenta::Codex => &self.local_codex_argumentos,
-            Ferramenta::OpenCode => &self.local_opencode_argumentos,
-        }
+    /// Os perfis do assistente, na ordem da lista.
+    pub fn perfis_de(
+        &self,
+        ferramenta: crate::ia::Ferramenta,
+    ) -> impl Iterator<Item = &perfis_locais::PerfilLocal> {
+        self.perfis_locais
+            .iter()
+            .filter(move |p| p.ferramenta() == ferramenta)
+    }
+
+    /// O `n`-ésimo perfil do assistente (o 0 é o padrão dele).
+    pub fn perfil_n(
+        &self,
+        ferramenta: crate::ia::Ferramenta,
+        n: usize,
+    ) -> Option<&perfis_locais::PerfilLocal> {
+        self.perfis_de(ferramenta).nth(n)
+    }
+
+    /// O perfil gravado (no diário, no `estado.json`, num espaço): o do id, se ainda existe e
+    /// é do mesmo assistente; senão o primeiro do assistente (o que foi gravado antes dos
+    /// perfis, ou com o perfil já apagado).
+    pub fn perfil_ou_padrao(
+        &self,
+        id: Option<u64>,
+        ferramenta: crate::ia::Ferramenta,
+    ) -> Option<&perfis_locais::PerfilLocal> {
+        id.and_then(|id| self.perfil_local(id))
+            .filter(|p| p.ferramenta() == ferramenta)
+            .or_else(|| self.perfil_n(ferramenta, 0))
+    }
+
+    /// O id de um perfil novo.
+    pub fn proximo_perfil_local(&self) -> u64 {
+        self.perfis_locais.iter().map(|p| p.id).max().unwrap_or(0) + 1
     }
 
     /// Se a ferramenta aparece nos menus.
@@ -1198,6 +1209,11 @@ impl IaCfg {
             Ferramenta::Codex => self.mostrar_codex,
             Ferramenta::OpenCode => self.mostrar_opencode,
         }
+    }
+
+    /// Se o "Controlar com" mostra a ferramenta: à mostra nos menus e com ao menos um perfil.
+    pub fn mostra_local(&self, ferramenta: crate::ia::Ferramenta) -> bool {
+        self.mostra(ferramenta) && self.perfis_de(ferramenta).next().is_some()
     }
 
     /// Como instalar a ferramenta, pelas Configurações.
@@ -1363,6 +1379,7 @@ impl Configuracoes {
             &armazenamento.arquivo_agente(),
         );
         migrou |= migrar_rclone(armazenamento, &mut raiz);
+        migrou |= perfis_locais::migrar(&mut raiz);
 
         let (mut config, mut avisos_do_mescla) = mesclar(raiz);
         avisos.append(&mut avisos_do_mescla);
@@ -1409,6 +1426,12 @@ impl Configuracoes {
             &mut self.geral.recentes_max,
             RECENTES_MIN,
             RECENTES_MAX,
+        );
+        prender(
+            "geral.limite_calor",
+            &mut self.geral.limite_calor,
+            0,
+            LIMITE_CALOR_MAX,
         );
         prender(
             "terminal.tamanho_fonte",
@@ -1558,6 +1581,7 @@ impl Configuracoes {
             }
             ruim.is_none()
         });
+        perfis_locais::arrumar(&mut self.ia.perfis_locais);
         avisos
     }
 
@@ -1644,7 +1668,7 @@ impl Configuracoes {
 
     /// O JSON da exportação (`tirech-omni-configuracoes.json`): tudo, menos o que liga a um
     /// segredo ou à máquina (`rclone.credencial`, `agente.chaves`, `agente.socket`,
-    /// `ia.espacos`, `ia.mcp_avisado` e os caminhos dos assistentes deste computador).
+    /// `ia.espacos`, `ia.mcp_avisado` e o executável e a conta dos perfis dos assistentes deste computador).
     pub fn exportar(&self) -> String {
         let mut valor = self.para_json();
         if let Some(rclone) = valor.get_mut("rclone").and_then(Value::as_object_mut) {
@@ -1661,8 +1685,12 @@ impl Configuracoes {
         if let Some(ia) = valor.get_mut("ia").and_then(Value::as_object_mut) {
             ia.remove("espacos");
             ia.remove("mcp_avisado");
-            for chave in CAMINHOS_LOCAIS_DA_IA {
-                ia.remove(chave);
+            // O executável e a conta de cada perfil são deste computador.
+            if let Some(Value::Array(perfis)) = ia.get_mut("perfis_locais") {
+                for perfil in perfis.iter_mut().filter_map(Value::as_object_mut) {
+                    perfil.remove("executavel");
+                    perfil.remove("conta");
+                }
             }
         }
         let mut texto = serde_json::to_string_pretty(&valor).unwrap_or_default();
@@ -1672,8 +1700,8 @@ impl Configuracoes {
 
     /// Lê um arquivo exportado e devolve as configurações novas, mais os avisos do que voltou
     /// ao padrão. O que a exportação não leva (`rclone.credencial`, `agente.chaves`,
-    /// `agente.socket`, `ia.espacos`, `ia.mcp_avisado` e os caminhos dos assistentes deste
-    /// computador) fica como está aqui, mesmo que o
+    /// `agente.socket`, `ia.espacos`, `ia.mcp_avisado` e o executável e a conta dos perfis dos
+    /// assistentes deste computador) fica como está aqui, mesmo que o
     /// arquivo traga.
     pub fn importar(&self, texto: &str) -> Result<(Self, Vec<String>), String> {
         let valor = serde_json::from_str::<Value>(texto)
@@ -1689,9 +1717,15 @@ impl Configuracoes {
         nova.agente.socket = self.agente.socket.clone();
         nova.ia.espacos = self.ia.espacos.clone();
         nova.ia.mcp_avisado = self.ia.mcp_avisado;
-        nova.ia.local_claude_caminho = self.ia.local_claude_caminho.clone();
-        nova.ia.local_codex_caminho = self.ia.local_codex_caminho.clone();
-        nova.ia.local_opencode_caminho = self.ia.local_opencode_caminho.clone();
+        for perfil in &mut nova.ia.perfis_locais {
+            if let Some(daqui) = self.ia.perfil_local(perfil.id) {
+                perfil.executavel = daqui.executavel.clone();
+                perfil.conta = daqui.conta.clone();
+            } else {
+                perfil.executavel.clear();
+                perfil.conta.clear();
+            }
+        }
         nova.instalacao = self.instalacao.clone();
         Ok((nova, avisos))
     }
@@ -2349,40 +2383,69 @@ mod tests {
     }
 
     #[test]
-    fn a_exportacao_nao_leva_os_caminhos_dos_assistentes_deste_computador() {
+    fn a_exportacao_nao_leva_o_executavel_nem_a_conta_dos_perfis() {
         let mut origem = Configuracoes::default();
-        origem.ia.local_claude_caminho = "/home/ana/.local/bin/claude".into();
-        origem.ia.local_codex_caminho = "/home/ana/bin/codex".into();
-        origem.ia.local_opencode_caminho = "/home/ana/bin/opencode".into();
-        origem.ia.local_claude_argumentos = "--model sonnet".into();
+        origem.ia.perfis_locais[0].executavel = "/home/ana/.local/bin/claude".into();
+        origem.ia.perfis_locais[0].argumentos = "--model sonnet".into();
+        origem.ia.perfis_locais[2].executavel = "/home/ana/bin/opencode".into();
+        let mut segunda = perfis_locais::PerfilLocal::novo(4, crate::ia::Ferramenta::Claude);
+        segunda.nome = "Claude B".into();
+        segunda.conta = "/home/ana/contas/b".into();
+        origem.ia.perfis_locais.push(segunda);
         let texto = origem.exportar();
         assert!(!texto.contains("/home/ana"), "{texto}");
-        assert!(!texto.contains("local_claude_caminho"), "{texto}");
-        // Os argumentos são preferência e vão.
-        assert!(texto.contains("local_claude_argumentos"), "{texto}");
+        // O nome e os argumentos são preferência e vão.
+        assert!(texto.contains("--model sonnet"), "{texto}");
+        assert!(texto.contains("Claude B"), "{texto}");
 
         let mut aqui = Configuracoes::default();
-        aqui.ia.local_claude_caminho = "/usr/bin/claude".into();
+        aqui.ia.perfis_locais[0].executavel = "/usr/bin/claude".into();
         let (nova, _) = aqui.importar(&texto).unwrap();
-        assert_eq!(nova.ia.local_claude_caminho, "/usr/bin/claude");
-        assert_eq!(nova.ia.local_claude_argumentos, "--model sonnet");
+        assert_eq!(nova.ia.perfis_locais.len(), 4);
+        assert_eq!(nova.ia.perfis_locais[0].executavel, "/usr/bin/claude");
+        assert_eq!(nova.ia.perfis_locais[0].argumentos, "--model sonnet");
+        assert_eq!(nova.ia.perfis_locais[3].nome, "Claude B");
+        assert!(nova.ia.perfis_locais[3].conta.is_empty());
     }
 
     #[test]
     fn restaurar_os_assistentes_deste_computador_mexe_so_neles() {
         let mut c = Configuracoes::default();
-        c.ia.local_claude_caminho = "/opt/claude".into();
-        c.ia.local_codex_argumentos = "--model o3".into();
+        c.ia.perfis_locais[0].executavel = "/opt/claude".into();
+        c.ia.perfis_locais.push(perfis_locais::PerfilLocal::novo(
+            4,
+            crate::ia::Ferramenta::Codex,
+        ));
         c.ia.argumentos_claude = "--model sonnet".into();
         c.ia.redigir = false;
         assert!(c.restaurar_categoria("ia_local"));
-        assert!(c.ia.local_claude_caminho.is_empty());
-        assert!(c.ia.local_codex_argumentos.is_empty());
+        assert_eq!(c.ia.perfis_locais, perfis_locais::perfis_padrao());
         assert_eq!(
             c.ia.argumentos_claude, "--model sonnet",
             "os do servidor ficam"
         );
         assert!(!c.ia.redigir, "os ajustes da IA do terminal ficam");
+    }
+
+    #[test]
+    fn o_arquivo_do_m63_vira_os_perfis() {
+        let pasta = PastaTemporaria::nova("cfg-perfis");
+        fs::create_dir_all(&pasta.0).unwrap();
+        let armazenamento = Armazenamento::new(&pasta.0);
+        std::fs::write(
+            armazenamento.arquivo_configuracoes(),
+            r#"{"versao": 2, "ia": {"local_codex_caminho": "/opt/codex",
+                "local_codex_argumentos": "--model o3", "local_claude_caminho": ""}}"#,
+        )
+        .unwrap();
+        let (c, avisos) = Configuracoes::carregar(&armazenamento);
+        assert!(avisos.is_empty(), "{avisos:?}");
+        assert_eq!(c.ia.perfis_locais.len(), 3);
+        assert_eq!(c.ia.perfis_locais[1].executavel, "/opt/codex");
+        assert_eq!(c.ia.perfis_locais[1].argumentos, "--model o3");
+        let gravado = std::fs::read_to_string(armazenamento.arquivo_configuracoes()).unwrap();
+        assert!(!gravado.contains("local_codex_caminho"), "{gravado}");
+        assert!(gravado.contains("perfis_locais"), "{gravado}");
     }
 
     #[test]

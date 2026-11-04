@@ -1,7 +1,8 @@
-//! As abas Processos, Disco e Rede da página Desempenho: os processos deste computador ou do
+//! As abas Processos, Disco, Rede e Sensores da página Desempenho: os processos deste computador ou do
 //! servidor de uma conexão SSH aberta, com a CPU, a memória e o disco de cada um, a árvore pelos
 //! pais e os botões de encerrar; a CPU por núcleo com o tempo de kernel; as operações por
-//! segundo de cada disco; e o tráfego de cada interface de rede. As leituras estão em [`crate::processos`].
+//! segundo de cada disco; o tráfego de cada interface de rede; e as temperaturas (em
+//! [`sensores`]). As leituras estão em [`crate::processos`].
 //!
 //! O leitor só corre com a página aberta numa das abas novas; trocar de máquina troca o leitor.
 
@@ -20,7 +21,12 @@ use crate::desempenho as conta;
 use crate::espacos::id_da_chave;
 use crate::portas::descobrir::AbridorCompartilhado;
 use crate::processos::{Evento, Leitor, Leitura, Linha, Maquina, PONTOS, UsoDoDisco, UsoDoNucleo};
+use crate::sensores::Grupo;
 use crate::t;
+
+mod sensores;
+
+pub(super) use sensores::{aba_sensores, graus_mili, mostrar_sensores_daqui};
 
 /// A aba do que o próprio app gasta (a de antes das abas novas).
 pub(super) const APP: &str = "app";
@@ -30,11 +36,13 @@ pub(super) const PROCESSOS: &str = "processos";
 pub(super) const DISCO: &str = "disco";
 /// A aba da rede por interface.
 pub(super) const REDE: &str = "rede";
+/// A aba das temperaturas.
+pub(super) const SENSORES: &str = "sensores";
 
 /// O estado das abas novas.
 #[derive(Clone, Copy)]
 pub(super) struct Processos {
-    /// A aba escolhida na página: [`APP`], [`PROCESSOS`], [`DISCO`] ou [`REDE`].
+    /// A aba escolhida na página: [`APP`], [`PROCESSOS`], [`DISCO`], [`REDE`] ou [`SENSORES`].
     pub(super) aba: Signal<String>,
     /// O rótulo da máquina escolhida no seletor.
     maquina: Signal<String>,
@@ -92,6 +100,18 @@ pub(super) struct Processos {
     grafico: Signal<usize>,
     grafico_do_disco: Signal<usize>,
     grafico_da_rede: Signal<usize>,
+    /// Este computador tem sensores de temperatura (lido uma vez, ao abrir).
+    pub(super) sensores_aqui: bool,
+    /// A série de cada grupo de sensores, em °C, na ordem de [`Grupo::TODOS`]: o sensor
+    /// principal do grupo.
+    temperaturas: [Signal<Vec<f64>>; 6],
+    /// As ventoinhas (chip e número) que já giraram nesta máquina; as paradas desde o começo
+    /// não aparecem.
+    ventoinhas_vistas: Signal<BTreeSet<(String, u32)>>,
+    grafico_dos_sensores: Signal<usize>,
+    linhas_dos_sensores: Signal<Vec<DataGridRow>>,
+    escolhidos_dos_sensores: Signal<BTreeSet<String>>,
+    ordem_dos_sensores: Signal<Option<(String, SortDirection)>>,
 }
 
 /// O leitor que corre e, numa máquina remota, a sessão e o abridor dela (renovado a cada
@@ -215,6 +235,15 @@ pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static)
         grafico: signal(0),
         grafico_do_disco: signal(0),
         grafico_da_rede: signal(0),
+        sensores_aqui: !(tela.ferramentas.ambiente().sensores)()
+            .temperaturas
+            .is_empty(),
+        temperaturas: std::array::from_fn(|_| signal(Vec::new())),
+        ventoinhas_vistas: signal(BTreeSet::new()),
+        grafico_dos_sensores: signal(0),
+        linhas_dos_sensores: signal(Vec::new()),
+        escolhidos_dos_sensores: signal(BTreeSet::new()),
+        ordem_dos_sensores: signal(None),
     };
     // O leitor: nasce quando a aba aparece, troca com a máquina e para quando some.
     let t = Rc::clone(tela);
@@ -241,9 +270,13 @@ pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static)
                 p.operacoes,
                 p.recebido,
                 p.enviado,
-            ] {
+            ]
+            .into_iter()
+            .chain(p.temperaturas)
+            {
                 serie.set(Vec::new());
             }
+            p.ventoinhas_vistas.set(BTreeSet::new());
             p.nucleos.set(Vec::new());
             p.nucleos_sistema.set(Vec::new());
             p.trafego.set(HashMap::new());
@@ -342,12 +375,37 @@ pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static)
             p.linhas_da_rede.set(linhas);
         });
     });
+    sensores::ligar(p);
     p
 }
 
 impl Processos {
     /// Põe a leitura nas séries dos gráficos. A primeira foto não tem taxas e fica de fora.
     fn empurrar(&self, leitura: &Leitura) {
+        // As temperaturas não são taxas: entram desde a primeira foto.
+        let sensores = &leitura.sensores;
+        for grupo in Grupo::TODOS {
+            let serie = self.temperaturas[grupo as usize];
+            match sensores.principal(grupo) {
+                Some(sensor) => serie.update(|s| por_no_fim(s, sensor.celsius())),
+                None if !serie.with_untracked(Vec::is_empty) => serie.set(Vec::new()),
+                None => {}
+            }
+        }
+        let girando: Vec<(String, u32)> = sensores
+            .ventoinhas
+            .iter()
+            .filter(|v| v.rpm > 0)
+            .map(|v| (v.chip.clone(), v.numero))
+            .collect();
+        if girando.iter().any(|v| {
+            !self
+                .ventoinhas_vistas
+                .with_untracked(|vistas| vistas.contains(v))
+        }) {
+            self.ventoinhas_vistas
+                .update(|vistas| vistas.extend(girando));
+        }
         let tem_taxa = leitura
             .linhas
             .iter()
@@ -737,17 +795,21 @@ fn barra(
         .wrap()
         .gap(8)
         .align(Align::Center)
-        .child(Column::new().child(seletor))
-        .child(
-            Edit::bind(p.filtro)
-                .id(format!("desempenho-{aba}-filtro"))
-                .placeholder(if aba == REDE {
-                    t!("processos-filtrar-interfaces")
-                } else {
-                    t!("processos-filtrar")
-                })
-                .width(200),
-        );
+        .child(Column::new().child(seletor));
+    // Os sensores são poucos: nada de filtro.
+    if aba == SENSORES {
+        return linha;
+    }
+    let linha = linha.child(
+        Edit::bind(p.filtro)
+            .id(format!("desempenho-{aba}-filtro"))
+            .placeholder(if aba == REDE {
+                t!("processos-filtrar-interfaces")
+            } else {
+                t!("processos-filtrar")
+            })
+            .width(200),
+    );
     // A rede não tem processos para encerrar.
     if aba == REDE {
         return linha;

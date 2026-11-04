@@ -204,6 +204,13 @@ pub const CATALOGO: &[Definicao] = &[
     def!("geral.atalho_no_menu", tk!("config-secao-geral"), Valor),
     def!("geral.medidor_cpu", tk!("config-secao-geral"), Valor),
     def!("geral.origem_medidor", tk!("config-secao-geral"), Valor),
+    def!(
+        "geral.medidor_temperatura",
+        tk!("config-secao-geral"),
+        Valor
+    ),
+    def!("geral.avisar_calor", tk!("config-secao-geral"), Valor),
+    def!("geral.limite_calor", tk!("config-secao-geral"), Valor),
     def!("geral.recentes_max", tk!("config-secao-geral"), Valor),
     def!("acao.limpar_recentes", tk!("config-secao-geral"), Acao),
     def!("geral.assistente_ia", tk!("config-secao-geral"), Valor),
@@ -592,34 +599,9 @@ pub const CATALOGO: &[Definicao] = &[
     ),
     def!("acao.ia_local_limpar", tk!("config-secao-ia-local"), Acao),
     def!(
-        "ia.local_claude_caminho",
+        "acao.ia_perfil_local_novo",
         tk!("config-secao-ia-local"),
-        Valor
-    ),
-    def!(
-        "ia.local_claude_argumentos",
-        tk!("config-secao-ia-local"),
-        Valor
-    ),
-    def!(
-        "ia.local_codex_caminho",
-        tk!("config-secao-ia-local"),
-        Valor
-    ),
-    def!(
-        "ia.local_codex_argumentos",
-        tk!("config-secao-ia-local"),
-        Valor
-    ),
-    def!(
-        "ia.local_opencode_caminho",
-        tk!("config-secao-ia-local"),
-        Valor
-    ),
-    def!(
-        "ia.local_opencode_argumentos",
-        tk!("config-secao-ia-local"),
-        Valor
+        Acao
     ),
     def!("ia.conversas_lembrar", tk!("config-secao-ia-local"), Valor),
     def!("ia.conversas_reabrir", tk!("config-secao-ia-local"), Valor),

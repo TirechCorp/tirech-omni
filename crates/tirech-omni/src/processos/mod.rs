@@ -144,6 +144,8 @@ pub struct Foto {
     pub interfaces: Vec<Interface>,
     /// Os discos inteiros (sem as partições); vazio quando a fonte não diz.
     pub discos: Vec<Disco>,
+    /// As temperaturas, as ventoinhas e o nome da CPU; vazio quando a máquina não mostra.
+    pub sensores: crate::sensores::Sensores,
 }
 
 /// Um processo com o que gastou desde a foto de antes.
@@ -210,6 +212,8 @@ pub struct Leitura {
     pub interfaces: Vec<UsoDaInterface>,
     /// Os discos que já fizeram alguma operação.
     pub discos: Vec<UsoDoDisco>,
+    /// Os sensores da foto, como vieram.
+    pub sensores: crate::sensores::Sensores,
 }
 
 impl Leitura {
@@ -375,6 +379,7 @@ impl Comparador {
             cpus,
             interfaces,
             discos,
+            sensores,
         } = foto;
         let nucleos = nucleos.max(1);
         let anterior = self.anterior.take();
@@ -482,6 +487,7 @@ impl Comparador {
             nucleos_uso,
             interfaces: uso_das_interfaces,
             discos: uso_dos_discos,
+            sensores,
         }
     }
 }
@@ -725,6 +731,7 @@ pub fn foto_de_exemplo(n: u64) -> Foto {
                 fisico: nome == "sda",
             })
             .collect(),
+        sensores: crate::sensores::Sensores::default(),
     }
 }
 

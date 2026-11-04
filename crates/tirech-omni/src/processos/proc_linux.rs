@@ -32,6 +32,8 @@ echo @virtual; ls /sys/devices/virtual/net 2>/dev/null
 echo @diskstats; cat /proc/diskstats 2>/dev/null
 echo @blocos; ls /sys/block 2>/dev/null
 echo @virtuais-bloco; ls /sys/devices/virtual/block 2>/dev/null
+echo @hwmon; (cd /sys/class/hwmon && grep -H . hwmon*/name hwmon*/temp*_input hwmon*/temp*_label hwmon*/temp*_max hwmon*/temp*_crit hwmon*/fan*_input hwmon*/fan*_label hwmon*/device/model) 2>/dev/null
+echo @cpuinfo; grep -E '^(model name|Hardware|Model)[[:space:]]*:' /proc/cpuinfo 2>/dev/null
 echo @cmdline; head -v -c 1024 /proc/[0-9]*/cmdline 2>/dev/null
 echo
 echo @fim
@@ -377,6 +379,8 @@ pub fn da_saida_do_script(saida: &str) -> Result<Foto, String> {
                     | "diskstats"
                     | "blocos"
                     | "virtuais-bloco"
+                    | "hwmon"
+                    | "cpuinfo"
                     | "cmdline"
                     | "fim"
             )
@@ -419,6 +423,10 @@ pub fn da_saida_do_script(saida: &str) -> Result<Foto, String> {
         interfaces: da_net_dev(&juntar("netdev"), &virtuais),
         discos,
         processos: montar(arquivos, &usuarios(&juntar("passwd"))),
+        sensores: crate::sensores::do_hwmon(
+            &juntar("hwmon"),
+            crate::sensores::nome_da_cpu(&juntar("cpuinfo")),
+        ),
     })
 }
 
@@ -481,6 +489,7 @@ pub fn deste_computador(usuarios: &HashMap<u32, String>) -> Result<Foto, String>
         interfaces: da_net_dev(&ler("/proc/net/dev").unwrap_or_default(), &virtuais),
         discos,
         processos: montar(arquivos, usuarios),
+        sensores: crate::sensores::deste_computador(),
     })
 }
 
@@ -701,5 +710,17 @@ mod testes {
         assert!(!foto.cpus.is_empty());
         // Este computador já leu e escreveu num disco desde o boot.
         assert!(foto.discos.iter().any(|d| d.leituras > 0 && d.lidos > 0));
+        // Os sensores pelo script são os mesmos da leitura direta (os valores mudam, os nomes
+        // não).
+        let nomes = |s: &crate::sensores::Sensores| {
+            s.temperaturas
+                .iter()
+                .map(|t| (t.grupo, t.nome.clone()))
+                .collect::<Vec<_>>()
+        };
+        let direto = crate::sensores::deste_computador();
+        assert_eq!(nomes(&foto.sensores), nomes(&direto));
+        assert_eq!(foto.sensores.cpu, direto.cpu);
+        assert_eq!(foto.sensores.ventoinhas.len(), direto.ventoinhas.len());
     }
 }

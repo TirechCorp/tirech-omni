@@ -148,6 +148,7 @@ impl FonteLocal {
             interfaces,
             discos,
             processos,
+            sensores: crate::sensores::deste_computador(),
         })
     }
 
@@ -255,6 +256,7 @@ impl FonteLocal {
             interfaces,
             discos,
             processos,
+            sensores: crate::sensores::deste_computador(),
         })
     }
 

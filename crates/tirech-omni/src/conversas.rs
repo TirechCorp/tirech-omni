@@ -45,6 +45,27 @@ pub struct Conversa {
     /// A primeira mensagem, já encurtada (vazia enquanto não se sabe).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub titulo: String,
+    /// O perfil do assistente que conversou (`ia.perfis_locais`). A conversa gravada antes dos
+    /// perfis não tem, e é do primeiro perfil do assistente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perfil: Option<u64>,
+}
+
+/// De quem são as conversas que se procura: o assistente e o perfil. `padrao` é o primeiro
+/// perfil do assistente, o dono das conversas gravadas antes dos perfis.
+#[derive(Clone, Copy, Debug)]
+pub struct Dono<'a> {
+    pub ferramenta: &'a str,
+    pub perfil: u64,
+    pub padrao: u64,
+}
+
+impl Dono<'_> {
+    /// Se `conversa` é deste dono.
+    pub fn tem(&self, conversa: &Conversa) -> bool {
+        conversa.ferramenta == self.ferramenta
+            && conversa.perfil.unwrap_or(self.padrao) == self.perfil
+    }
 }
 
 /// O `conversas.json`: as conversas de cada aba, pela chave de [`chave_da_aba`].
@@ -96,25 +117,19 @@ impl Diario {
             .position(|c| c.quando <= conversa.quando)
             .unwrap_or(lista.len());
         lista.insert(lugar, conversa);
-        let mut vistas = BTreeMap::<String, usize>::new();
+        let mut vistas = BTreeMap::<(String, Option<u64>), usize>::new();
         lista.retain(|c| {
-            let n = vistas.entry(c.ferramenta.clone()).or_default();
+            let n = vistas.entry((c.ferramenta.clone(), c.perfil)).or_default();
             *n += 1;
             *n <= POR_ABA
         });
     }
 
-    /// As conversas de `ferramenta` na aba `chave`, a mais recente primeiro.
-    pub fn da_aba(&self, chave: &str, ferramenta: &str) -> Vec<Conversa> {
+    /// As conversas de `dono` na aba `chave`, a mais recente primeiro.
+    pub fn da_aba(&self, chave: &str, dono: Dono) -> Vec<Conversa> {
         self.abas
             .get(chave)
-            .map(|lista| {
-                lista
-                    .iter()
-                    .filter(|c| c.ferramenta == ferramenta)
-                    .cloned()
-                    .collect()
-            })
+            .map(|lista| lista.iter().filter(|c| dono.tem(c)).cloned().collect())
             .unwrap_or_default()
     }
 
@@ -133,10 +148,11 @@ impl Diario {
         }
     }
 
-    /// Tira da aba `chave` as conversas de `ferramenta` cujo id não está em `vivas`.
-    pub fn esquecer_sumidas(&mut self, chave: &str, ferramenta: &str, vivas: &[String]) {
+    /// Tira da aba `chave` as conversas de `dono` cujo id não está em `vivas`. As dos outros
+    /// perfis ficam: a verificação de um perfil não enxerga a conta do outro.
+    pub fn esquecer_sumidas(&mut self, chave: &str, dono: Dono, vivas: &[String]) {
         if let Some(lista) = self.abas.get_mut(chave) {
-            lista.retain(|c| c.ferramenta != ferramenta || vivas.contains(&c.id));
+            lista.retain(|c| !dono.tem(c) || vivas.contains(&c.id));
             if lista.is_empty() {
                 self.abas.remove(chave);
             }
@@ -487,6 +503,16 @@ mod testes {
             id: id.into(),
             quando: 10,
             titulo: String::new(),
+            perfil: None,
+        }
+    }
+
+    /// O dono de sempre de `f`: o primeiro perfil, que fica com as conversas sem perfil.
+    fn dono(f: &str) -> Dono<'_> {
+        Dono {
+            ferramenta: f,
+            perfil: 1,
+            padrao: 1,
         }
     }
 
@@ -503,13 +529,17 @@ mod testes {
             },
         );
         d.anotar("4", conversa("claude", "a"));
-        let ids: Vec<_> = d.da_aba("4", "claude").into_iter().map(|c| c.id).collect();
+        let ids: Vec<_> = d
+            .da_aba("4", dono("claude"))
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
         assert_eq!(ids, ["a", "b"]);
-        assert_eq!(d.da_aba("4", "codex").len(), 1);
-        assert!(d.da_aba("5", "claude").is_empty());
+        assert_eq!(d.da_aba("4", dono("codex")).len(), 1);
+        assert!(d.da_aba("5", dono("claude")).is_empty());
         // O título já sabido não se perde quando a mesma conversa volta sem ele.
         d.anotar("4", conversa("claude", "b"));
-        assert_eq!(d.da_aba("4", "claude")[0].titulo, "olá");
+        assert_eq!(d.da_aba("4", dono("claude"))[0].titulo, "olá");
         assert!(d.conhece("claude", "b") && !d.conhece("codex", "b"));
     }
 
@@ -525,12 +555,15 @@ mod testes {
         // Uma que chega atrasada (resolvida depois) entra no lugar da sua hora.
         d.anotar("2", em("meio", 200));
         let ids = |d: &Diario| -> Vec<String> {
-            d.da_aba("2", "codex").into_iter().map(|c| c.id).collect()
+            d.da_aba("2", dono("codex"))
+                .into_iter()
+                .map(|c| c.id)
+                .collect()
         };
         assert_eq!(ids(&d), ["nova", "meio", "velha"]);
         d.anotar("2", em("velha", 400));
         assert_eq!(ids(&d), ["velha", "nova", "meio"]);
-        assert_eq!(d.da_aba("2", "codex")[0].quando, 400);
+        assert_eq!(d.da_aba("2", dono("codex"))[0].quando, 400);
     }
 
     #[test]
@@ -559,7 +592,7 @@ mod testes {
             ],
         );
         let titulos: Vec<_> = d
-            .da_aba("3", "claude")
+            .da_aba("3", dono("claude"))
             .into_iter()
             .map(|c| c.titulo)
             .collect();
@@ -585,9 +618,9 @@ mod testes {
             d.anotar("1", conversa("claude", &n.to_string()));
         }
         d.anotar("1", conversa("codex", "x"));
-        assert_eq!(d.da_aba("1", "claude").len(), POR_ABA);
-        assert_eq!(d.da_aba("1", "claude")[0].id, "24");
-        assert_eq!(d.da_aba("1", "codex").len(), 1);
+        assert_eq!(d.da_aba("1", dono("claude")).len(), POR_ABA);
+        assert_eq!(d.da_aba("1", dono("claude"))[0].id, "24");
+        assert_eq!(d.da_aba("1", dono("codex")).len(), 1);
     }
 
     #[test]
@@ -596,12 +629,50 @@ mod testes {
         d.anotar("1", conversa("claude", "a"));
         d.anotar("1", conversa("claude", "b"));
         d.anotar("1", conversa("codex", "c"));
-        d.esquecer_sumidas("1", "claude", &["a".into()]);
-        assert_eq!(d.da_aba("1", "claude").len(), 1);
-        assert_eq!(d.da_aba("1", "codex").len(), 1);
-        d.esquecer_sumidas("1", "codex", &[]);
-        d.esquecer_sumidas("1", "claude", &[]);
+        d.esquecer_sumidas("1", dono("claude"), &["a".into()]);
+        assert_eq!(d.da_aba("1", dono("claude")).len(), 1);
+        assert_eq!(d.da_aba("1", dono("codex")).len(), 1);
+        d.esquecer_sumidas("1", dono("codex"), &[]);
+        d.esquecer_sumidas("1", dono("claude"), &[]);
         assert!(d.abas.is_empty());
+    }
+
+    #[test]
+    fn cada_perfil_tem_as_suas_conversas() {
+        let mut d = Diario::default();
+        // A conversa de antes dos perfis é do primeiro perfil (a mais nova vem antes).
+        d.anotar("1", conversa("claude", "antiga"));
+        d.anotar(
+            "1",
+            Conversa {
+                perfil: Some(1),
+                ..conversa("claude", "a")
+            },
+        );
+        d.anotar(
+            "1",
+            Conversa {
+                perfil: Some(4),
+                ..conversa("claude", "b")
+            },
+        );
+        let ids = |d: &Diario, perfil| -> Vec<String> {
+            let dono = Dono {
+                perfil,
+                ..dono("claude")
+            };
+            d.da_aba("1", dono).into_iter().map(|c| c.id).collect()
+        };
+        assert_eq!(ids(&d, 1), ["a", "antiga"]);
+        assert_eq!(ids(&d, 4), ["b"]);
+        // A verificação do perfil 4 não apaga as do 1.
+        let quatro = Dono {
+            perfil: 4,
+            ..dono("claude")
+        };
+        d.esquecer_sumidas("1", quatro, &[]);
+        assert_eq!(ids(&d, 1), ["a", "antiga"]);
+        assert!(ids(&d, 4).is_empty());
     }
 
     #[test]

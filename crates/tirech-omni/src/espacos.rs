@@ -76,6 +76,10 @@ pub struct Item {
 pub struct AssistenteSalvo {
     /// O assistente (`claude`, `codex` ou `opencode`).
     pub ferramenta: String,
+    /// O perfil do assistente (`ia.perfis_locais`); `None` no que foi gravado antes dos perfis,
+    /// que volta com o primeiro perfil do assistente.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perfil: Option<u64>,
     /// O id da conversa, para continuar; `None` quando ainda não se sabia (ou o diário está
     /// desligado), e o assistente volta numa conversa nova.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -166,6 +170,9 @@ pub struct JanelaSalva {
 pub struct ClusterIaSalvo {
     /// O assistente (`claude`, `codex` ou `opencode`).
     pub ferramenta: String,
+    /// O perfil do assistente, como o de [`AssistenteSalvo::perfil`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perfil: Option<u64>,
     /// O painel da aba dele.
     pub painel: usize,
     /// O id da conversa dele, para continuar.

@@ -178,6 +178,25 @@ efeito_bool!(
 );
 
 efeito_bool!(
+    efeito_geral__medidor_temperatura,
+    "geral.medidor_temperatura",
+    geral.medidor_temperatura
+);
+
+efeito_bool!(
+    efeito_geral__avisar_calor,
+    "geral.avisar_calor",
+    geral.avisar_calor
+);
+
+efeito_numero!(
+    efeito_geral__limite_calor,
+    "geral.limite_calor",
+    85.0,
+    geral.limite_calor
+);
+
+efeito_bool!(
     efeito_geral__confirmar_fechar,
     "geral.confirmar_fechar",
     geral.confirmar_fechar
@@ -1204,43 +1223,6 @@ efeito_texto!(
     "/srv/assistentes",
     ia.local_pasta
 );
-efeito_texto!(
-    efeito_ia__local_claude_caminho,
-    "ia.local_claude_caminho",
-    "/opt/claude/bin/claude",
-    ia.local_claude_caminho
-);
-efeito_texto!(
-    efeito_ia__local_claude_argumentos,
-    "ia.local_claude_argumentos",
-    "--model sonnet",
-    ia.local_claude_argumentos
-);
-efeito_texto!(
-    efeito_ia__local_codex_caminho,
-    "ia.local_codex_caminho",
-    "/opt/codex/bin/codex",
-    ia.local_codex_caminho
-);
-efeito_texto!(
-    efeito_ia__local_codex_argumentos,
-    "ia.local_codex_argumentos",
-    "--model o3",
-    ia.local_codex_argumentos
-);
-efeito_texto!(
-    efeito_ia__local_opencode_caminho,
-    "ia.local_opencode_caminho",
-    "/opt/opencode/bin/opencode",
-    ia.local_opencode_caminho
-);
-efeito_texto!(
-    efeito_ia__local_opencode_argumentos,
-    "ia.local_opencode_argumentos",
-    "--continue",
-    ia.local_opencode_argumentos
-);
-
 #[test]
 fn efeito_ia__bloqueio_extras() {
     let (pasta, mut m) = abrir("efeito-ia-bloqueio-extras");
@@ -1298,6 +1280,64 @@ fn acao_mcp_espaco_novo() {
     let (_pasta, mut m) = abrir("acao-mcp-espaco-novo");
     m.app.click(&id_do_card("acao.mcp_espaco_novo"));
     assert!(aparece(&mut m.app, "mcp-espaco-dialogo"));
+}
+
+#[test]
+fn acao_ia_perfil_local_novo() {
+    let (pasta, mut m) = abrir("acao-ia-perfil-local-novo");
+    // Os três perfis de quem nunca mexeu, um por assistente.
+    for id in 1..=3 {
+        assert!(
+            aparece(&mut m.app, &format!("perfil-local-{id}")),
+            "perfil {id}"
+        );
+    }
+    m.app.click(&id_do_card("acao.ia_perfil_local_novo"));
+    assert!(m.app.is_open("perfil-local-dialogo"));
+    m.app.click("perfil-local-nome").type_text("Codex B");
+    m.app.select("perfil-local-assistente", "Codex");
+    m.app
+        .click("perfil-local-conta")
+        .type_text("~/contas/codex-b");
+    m.app
+        .click("perfil-local-argumentos")
+        .type_text("--model o3");
+    m.app.click("perfil-local-dialogo-primary");
+    m.app.frame();
+
+    let c = gravada(&pasta);
+    let novo = c.ia.perfil_local(4).expect("o perfil 4");
+    assert_eq!(novo.nome, "Codex B");
+    assert_eq!(novo.ferramenta, "codex");
+    assert_eq!(novo.executavel, "");
+    assert_eq!(novo.conta, "~/contas/codex-b");
+    assert_eq!(novo.argumentos, "--model o3");
+    assert!(aparece(&mut m.app, "perfil-local-4"));
+
+    // O Apagar tira o perfil da lista.
+    m.app.click("perfil-local-apagar-4");
+    m.app.frame();
+    assert!(gravada(&pasta).ia.perfil_local(4).is_none());
+}
+
+#[test]
+fn editar_o_perfil_com_outro_executavel() {
+    let (pasta, mut m) = abrir("perfil-local-editar");
+    m.app.click("perfil-local-editar-3");
+    assert!(m.app.is_open("perfil-local-dialogo"));
+    // A busca pode achar um OpenCode do sistema (o executor dos testes não dá versão); o
+    // "Outro…" vale do mesmo jeito.
+    m.app.select("perfil-local-executavel", "Outro…");
+    assert!(aparece(&mut m.app, "perfil-local-outro"));
+    m.app
+        .click("perfil-local-outro")
+        .type_text("/opt/oc2/opencode");
+    m.app.click("perfil-local-dialogo-primary");
+    m.app.frame();
+    let c = gravada(&pasta);
+    let perfil = c.ia.perfil_local(3).expect("o perfil 3");
+    assert_eq!(perfil.ferramenta, "opencode");
+    assert_eq!(perfil.executavel, "/opt/oc2/opencode");
 }
 
 #[test]

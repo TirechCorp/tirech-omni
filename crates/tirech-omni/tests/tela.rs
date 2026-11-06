@@ -270,6 +270,7 @@ fn editar_as_propriedades_grava_no_arquivo_na_hora() {
             "Abrir abas novas",
             "Sessão persistente",
             "Mouse no terminal",
+            "Saúde dos discos",
             "Tentar de novo após",
             "Fechar sem uso após",
             "Credencial",

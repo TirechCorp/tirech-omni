@@ -6,7 +6,7 @@
 # Uso: ./empacotar-mac.sh [saída.dmg]   (padrão: target/tirech-omni-macos.dmg)
 # Compila os dois alvos (aarch64-apple-darwin e x86_64-apple-darwin) e junta cada executável
 # num universal com o lipo: o mesmo .dmg abre no Apple Silicon e no Intel. O .dmg traz o
-# "Tirech Omni.app", com os cinco executáveis em Contents/MacOS (o app e as ferramentas, que a
+# "Tirech Omni.app", com os seis executáveis em Contents/MacOS (o app, o htop-omni e as ferramentas, que a
 # instalação copia juntos), um atalho para /Applications e, se existir, o
 # target/THIRD-PARTY-NOTICES.txt do `cargo about` (ou o de $AVISOS).
 #
@@ -25,7 +25,7 @@ case $saida in /*) ;; *) saida=$(pwd)/$saida ;; esac
 avisos=${AVISOS:-$raiz/target/THIRD-PARTY-NOTICES.txt}
 alvo=${CARGO_TARGET_DIR:-$raiz/target}
 versao=$(sed -n 's/^version *= *"\(.*\)"/\1/p' "$raiz/Cargo.toml" | head -n 1)
-nomes="tirech-omni tirech-omni-add tirech-omni-agent tirech-omni-copy-id tirech-omni-keygen"
+nomes="tirech-omni htop-omni tirech-omni-add tirech-omni-agent tirech-omni-copy-id tirech-omni-keygen"
 triplos="aarch64-apple-darwin x86_64-apple-darwin"
 
 if [ "$(uname)" != Darwin ]; then
@@ -42,7 +42,7 @@ fi
 for triplo in $triplos; do
     echo "== $triplo"
     (cd "$raiz" && cargo build --release --locked --target "$triplo" \
-        -p tirech-omni -p tirech-omni-tools)
+        -p tirech-omni -p tirech-omni-tools -p htop-omni)
 done
 
 trabalho=$(mktemp -d)

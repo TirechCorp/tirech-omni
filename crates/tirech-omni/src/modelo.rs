@@ -766,6 +766,25 @@ impl MouseDoTerminal {
     }
 }
 
+/// O diagnóstico dos discos ([`crate::saude_discos`]) de uma conexão ou pasta: herda, ou decide.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiagnosticoDeDiscos {
+    /// Vale o da pasta mais perto que escolheu, ou o de Configurações › Geral.
+    #[default]
+    Herdar,
+    /// Lê os discos ao conectar.
+    Ligado,
+    /// Não lê.
+    Desligado,
+}
+
+impl DiagnosticoDeDiscos {
+    pub fn is_herdar(&self) -> bool {
+        *self == DiagnosticoDeDiscos::Herdar
+    }
+}
+
 /// Depois das tentativas de reconectar sozinho, quanto esperar para começar outra rodada. Herda
 /// da pasta e, sem pasta que decida, vale `conexoes.reconectar.retentar_mins`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1267,6 +1286,9 @@ pub struct Connection {
     /// O mouse no terminal (copiar ao selecionar e o botão direito); herda da pasta.
     #[serde(default, skip_serializing_if = "MouseDoTerminal::is_herdar")]
     pub mouse: MouseDoTerminal,
+    /// O diagnóstico dos discos ao conectar; herda da pasta.
+    #[serde(default, skip_serializing_if = "DiagnosticoDeDiscos::is_herdar")]
+    pub diagnostico_discos: DiagnosticoDeDiscos,
     /// Depois das tentativas de reconectar sozinho, outra rodada; herda da pasta.
     #[serde(default, skip_serializing_if = "Retentar::is_herdar")]
     pub retentar: Retentar,
@@ -1376,6 +1398,7 @@ impl Connection {
             comandos: ComandosAoConectar::default(),
             persistente: SessaoPersistente::Herdar,
             mouse: MouseDoTerminal::Herdar,
+            diagnostico_discos: DiagnosticoDeDiscos::Herdar,
             retentar: Retentar::Herdar,
             ocioso: Ocioso::Herdar,
             sessao_persistente: None,
@@ -1515,6 +1538,9 @@ pub struct Group {
     /// O mouse no terminal do grupo: vale para o que está dentro e herda.
     #[serde(default, skip_serializing_if = "MouseDoTerminal::is_herdar")]
     pub mouse: MouseDoTerminal,
+    /// O diagnóstico dos discos do grupo: vale para o que está dentro e herda.
+    #[serde(default, skip_serializing_if = "DiagnosticoDeDiscos::is_herdar")]
+    pub diagnostico_discos: DiagnosticoDeDiscos,
     /// A nova rodada de reconexão do grupo: vale para o que está dentro e herda.
     #[serde(default, skip_serializing_if = "Retentar::is_herdar")]
     pub retentar: Retentar,
@@ -1630,6 +1656,7 @@ impl Tree {
             comandos: ComandosAoConectar::default(),
             persistente: SessaoPersistente::Herdar,
             mouse: MouseDoTerminal::Herdar,
+            diagnostico_discos: DiagnosticoDeDiscos::Herdar,
             retentar: Retentar::Herdar,
             ocioso: Ocioso::Herdar,
             credencial_modo: ModoCredencial::Herdar,

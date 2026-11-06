@@ -295,7 +295,7 @@ impl Tela {
         conexao: Connection,
         seguir: Seguir,
     ) {
-        let lugar = match self.lugar_do_assistente(&json!({})) {
+        let lugar = match self.lugar_do_assistente(&json!({}), t.pedido.ligacao) {
             Ok(lugar) => lugar,
             Err(erro) => return self.erro_mcp(&t, erro),
         };

@@ -12,9 +12,9 @@ use crate::armazenamento::testes::PastaTemporaria;
 use crate::cofre::{ChaveSsh, Cofre, Item, Tipo};
 use crate::importar::{Entrada, Formato, Importacao, Trazida};
 use crate::modelo::{
-    Ativar, ComandosAoConectar, Connection, Jump, Kind, ModoComandos, ModoCredencial, ModoX11,
-    MouseDoTerminal, Node, OrigemDaSenha, Passo, Retentar, SessaoPersistente, TipoTunel, Tree,
-    Tunel,
+    Ativar, ComandosAoConectar, Connection, DiagnosticoDeDiscos, Jump, Kind, ModoComandos,
+    ModoCredencial, ModoX11, MouseDoTerminal, Node, OrigemDaSenha, Passo, Retentar,
+    SessaoPersistente, TipoTunel, Tree, Tunel,
 };
 use crate::redes::{PerfilRede, ProxyRede, Rede, TipoProxy};
 
@@ -632,6 +632,7 @@ fn com_comandos(a: &mut Amostra) -> (u64, u64) {
         if g.name == "ACME" {
             g.persistente = SessaoPersistente::Tmux;
             g.mouse = MouseDoTerminal::CopiarColar;
+            g.diagnostico_discos = DiagnosticoDeDiscos::Desligado;
             g.retentar = Retentar::Minutos(15);
             g.credencial_modo = ModoCredencial::Agente;
             g.comandos = proprios(vec![
@@ -650,6 +651,7 @@ fn com_comandos(a: &mut Amostra) -> (u64, u64) {
     let acme = a.arvore.connection_mut(id).unwrap();
     acme.persistente = SessaoPersistente::Nenhuma;
     acme.mouse = MouseDoTerminal::Menu;
+    acme.diagnostico_discos = DiagnosticoDeDiscos::Ligado;
     acme.retentar = Retentar::Desligado;
     acme.comandos = proprios(vec![
         Passo::comando("cd /srv", 5),
@@ -687,11 +689,13 @@ fn nativo_leva_os_comandos_e_religa_a_senha_do_cofre() {
     );
     assert_eq!(pasta.persistente, SessaoPersistente::Tmux);
     assert_eq!(pasta.mouse, MouseDoTerminal::CopiarColar);
+    assert_eq!(pasta.diagnostico_discos, DiagnosticoDeDiscos::Desligado);
     assert_eq!(pasta.retentar, Retentar::Minutos(15));
     assert_eq!(pasta.credencial_modo, ModoCredencial::Agente);
     let acme = achar(&i, "ACME prod");
     assert_eq!(acme.conexao.persistente, SessaoPersistente::Nenhuma);
     assert_eq!(acme.conexao.mouse, MouseDoTerminal::Menu);
+    assert_eq!(acme.conexao.diagnostico_discos, DiagnosticoDeDiscos::Ligado);
     assert_eq!(acme.conexao.retentar, Retentar::Desligado);
     assert!(!acme.conexao.comandos.reconectar);
     assert_eq!(

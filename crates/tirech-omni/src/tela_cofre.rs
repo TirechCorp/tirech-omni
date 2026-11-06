@@ -29,6 +29,7 @@ use crate::notas;
 use crate::notas_imagens::{self, Fonte, Imagens};
 use crate::openvpn;
 use crate::recentes;
+use crate::tela::cofre_portatil::EXTENSAO as PORTATIL;
 use crate::zerotier;
 use crate::{t, tk};
 
@@ -320,13 +321,17 @@ struct Pagina {
     importando: Andamento<(Lote, Trazidos)>,
 }
 
-/// O que a casca faz com o cofre entre máquinas (M44): os dois itens do menu "Mais".
+/// O que a casca faz com o cofre entre máquinas: os dois itens do menu "Mais" e o
+/// `.tirech-vault` escolhido no "Importar".
 #[derive(Clone)]
 pub struct Portabilidade {
     /// "Levar o cofre para outra máquina…".
     pub levar: Rc<dyn Fn()>,
     /// "Abrir cofre de outra máquina…".
     pub abrir: Rc<dyn Fn()>,
+    /// Abre o cofre deste arquivo como o "Abrir cofre de outra máquina…" (a senha dele, juntar
+    /// ou substituir): o "Importar" manda para cá o `.tirech-vault` que o "Levar" gravou.
+    pub abrir_arquivo: Rc<dyn Fn(&Path)>,
 }
 
 impl Pagina {
@@ -697,74 +702,86 @@ impl Pagina {
     }
 
     /// "Importar": um JSON (do Tirech Omni ou do Bitwarden) ou um CSV, para dentro da pasta aberta.
-    /// Os anexos do JSON do Tirech Omni vêm da pasta `<nome>-attachments` ao lado dele.
+    /// Os anexos do JSON do Tirech Omni vêm da pasta `<nome>-attachments` ao lado dele. Com a
+    /// casca, também o `.tirech-vault` do "Levar o cofre para outra máquina", que segue para o
+    /// "Abrir cofre de outra máquina" (o arquivo é cifrado com a senha do cofre de lá).
     fn importar(self: &Rc<Self>) {
         self.aviso.set(None);
         let pagina = Rc::clone(self);
-        dialogs::open_file()
+        let dialogo = dialogs::open_file()
             .remember("cofre-importar")
-            .title(t!("cofre-importar-para-o-cofre"))
-            .filter(t!("cofre-json-ou-csv"), &["json", "csv"])
-            .show(move |caminho| {
-                let Some(caminho) = caminho else {
-                    return;
-                };
-                let texto = match std::fs::read_to_string(&caminho) {
-                    Ok(texto) => texto,
-                    Err(erro) => {
-                        pagina.falhar(t!(
-                            "comum-nao-consegui-ler",
-                            arquivo = caminho.display().to_string(),
-                            erro = erro.to_string()
-                        ));
-                        return;
-                    }
-                };
-                let (lote, formato, avisos) = match cofre_json::importar_arquivo(&texto) {
-                    Ok(lido) => lido,
-                    Err(erro) => {
-                        pagina.falhar(erro);
-                        return;
-                    }
-                };
-                if lote.itens.iter().all(|i| i.anexos.is_empty()) {
-                    pagina.concluir_importacao(lote, &formato, avisos, Trazidos::default());
+            .title(t!("cofre-importar-para-o-cofre"));
+        let dialogo = if self.portabilidade.is_some() {
+            dialogo.filter(t!("cofre-json-csv-ou-cofre"), &["json", "csv", PORTATIL])
+        } else {
+            dialogo.filter(t!("cofre-json-ou-csv"), &["json", "csv"])
+        };
+        dialogo.show(move |caminho| {
+            let Some(caminho) = caminho else {
+                return;
+            };
+            let portatil = caminho
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case(PORTATIL));
+            if let Some(p) = pagina.portabilidade.as_ref().filter(|_| portatil) {
+                (p.abrir_arquivo)(&caminho);
+                return;
+            }
+            let texto = match std::fs::read_to_string(&caminho) {
+                Ok(texto) => texto,
+                Err(erro) => {
+                    pagina.falhar(t!(
+                        "comum-nao-consegui-ler",
+                        arquivo = caminho.display().to_string(),
+                        erro = erro.to_string()
+                    ));
                     return;
                 }
-                let vault = pagina.vault();
-                let pasta = caminho.parent().map(Path::to_path_buf).unwrap_or_default();
-                pagina.cofre.marcar_uso();
-                let fraca = Rc::downgrade(&pagina);
-                pagina.importando.iniciar(
-                    t!("cofre-cifrando-anexos-do-json"),
-                    move |progresso, cancelado| {
-                        let mut lote = lote;
-                        let trazidos = cofre_json::trazer_anexos(
-                            &mut lote, &pasta, &vault, progresso, cancelado,
-                        )?;
-                        Ok((lote, trazidos))
-                    },
-                    move |resultado| {
-                        let Some(pagina) = fraca.upgrade() else {
-                            return;
-                        };
-                        match resultado {
-                            Ok((lote, trazidos)) => {
-                                pagina.concluir_importacao(lote, &formato, avisos, trazidos);
-                            }
-                            Err(ErroAnexo::Cancelado) => {
-                                pagina.informar(t!("cofre-importacao-cancelada"))
-                            }
-                            Err(erro) => {
-                                pagina.falhar(t!(
-                                    "cofre-nao-foi-possivel-importar",
-                                    erro = erro.to_string()
-                                ));
-                            }
+            };
+            let (lote, formato, avisos) = match cofre_json::importar_arquivo(&texto) {
+                Ok(lido) => lido,
+                Err(erro) => {
+                    pagina.falhar(erro);
+                    return;
+                }
+            };
+            if lote.itens.iter().all(|i| i.anexos.is_empty()) {
+                pagina.concluir_importacao(lote, &formato, avisos, Trazidos::default());
+                return;
+            }
+            let vault = pagina.vault();
+            let pasta = caminho.parent().map(Path::to_path_buf).unwrap_or_default();
+            pagina.cofre.marcar_uso();
+            let fraca = Rc::downgrade(&pagina);
+            pagina.importando.iniciar(
+                t!("cofre-cifrando-anexos-do-json"),
+                move |progresso, cancelado| {
+                    let mut lote = lote;
+                    let trazidos =
+                        cofre_json::trazer_anexos(&mut lote, &pasta, &vault, progresso, cancelado)?;
+                    Ok((lote, trazidos))
+                },
+                move |resultado| {
+                    let Some(pagina) = fraca.upgrade() else {
+                        return;
+                    };
+                    match resultado {
+                        Ok((lote, trazidos)) => {
+                            pagina.concluir_importacao(lote, &formato, avisos, trazidos);
                         }
-                    },
-                );
-            });
+                        Err(ErroAnexo::Cancelado) => {
+                            pagina.informar(t!("cofre-importacao-cancelada"))
+                        }
+                        Err(erro) => {
+                            pagina.falhar(t!(
+                                "cofre-nao-foi-possivel-importar",
+                                erro = erro.to_string()
+                            ));
+                        }
+                    }
+                },
+            );
+        });
     }
 
     /// A pasta `vault/` do cofre.

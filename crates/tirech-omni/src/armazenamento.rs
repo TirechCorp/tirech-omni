@@ -454,6 +454,11 @@ impl Armazenamento {
         self.pasta.join("configuracoes.json")
     }
 
+    /// O `saude_discos.json` (a última leitura dos discos de cada servidor).
+    pub fn arquivo_saude_discos(&self) -> PathBuf {
+        self.pasta.join("saude_discos.json")
+    }
+
     /// O `rclone.json` (o binário e o arquivo de configuração do rclone).
     pub fn arquivo_rclone(&self) -> PathBuf {
         self.pasta.join("rclone.json")

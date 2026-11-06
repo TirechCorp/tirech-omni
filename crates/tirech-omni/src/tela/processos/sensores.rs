@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use tomni_ui::prelude::*;
 
-use super::{Curva, PONTOS, Processos, SENSORES, Tela, avisos, barra, numero, paineis, teto};
+use super::{Curva, Fonte, PONTOS, Processos, SENSORES, avisos, barra, numero, paineis, teto};
 use crate::sensores::{Grupo, Nivel, Nome, Sensores};
 use crate::t;
 
@@ -270,7 +270,7 @@ fn painel(p: Processos, grupos: Vec<Grupo>) -> impl View + use<> {
 }
 
 /// A aba Sensores.
-pub(in crate::tela) fn aba_sensores(tela: &Rc<Tela>, p: Processos) -> impl View + use<> {
+pub(in crate::tela) fn aba_sensores(fonte: &Fonte, p: Processos) -> impl View + use<> {
     let cpu = move || {
         p.quadro.with(|quadro| {
             quadro
@@ -327,7 +327,7 @@ pub(in crate::tela) fn aba_sensores(tela: &Rc<Tela>, p: Processos) -> impl View 
         .grow(1)
         .gap(8)
         .padding(8)
-        .child(barra(tela, p, SENSORES, p.escolhidos_dos_sensores))
+        .child(barra(fonte, p, SENSORES, p.escolhidos_dos_sensores))
         .child(
             Text::new(cpu)
                 .id("desempenho-sensores-processador")

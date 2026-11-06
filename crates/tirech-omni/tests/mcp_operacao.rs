@@ -15,10 +15,10 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tirech_omni::mcp::permissao::PermissaoIa;
-use tirech_omni::modelo::{Connection, Kind, Tree};
-use tomni_ui::Key;
+use tirech_omni::modelo::{Connection, Kind, Tree, Tunel};
 use tomni_ui::terminal::Session;
 use tomni_ui::theme::Theme;
+use tomni_ui::{Key, WindowHandle};
 use tomni_ui_test::TestApp;
 
 use assistente::Assistente;
@@ -1083,4 +1083,162 @@ fn quatro_sessoes_em_quatro_quadrantes() {
         assert_eq!(aba["dono"], format!("IA {}", i + 1));
         assert_eq!(aba["painel"], i + 1);
     }
+}
+
+/// Uma segunda janela, vazia e em foco; devolve a primeira e a nova, com a nova à vista do teste.
+fn segunda_janela_em_foco(m: &mut Montagem) -> (WindowHandle, WindowHandle) {
+    m.app.click("menus-janela").click("nova-janela");
+    m.app.frame();
+    let [primeira, outra] = m.app.windows()[..] else {
+        panic!("esperava duas janelas");
+    };
+    m.app.set_active_window(outra);
+    m.app.frame();
+    (primeira, outra)
+}
+
+/// Quantas abas cada painel da janela `janela` tem.
+fn abas_por_painel(m: &mut Montagem, janela: WindowHandle) -> Vec<usize> {
+    m.app.switch_to(janela);
+    let abas = m.app.panes("paineis").panes;
+    abas.iter().map(|p| p.tabs.len()).collect()
+}
+
+/// A aba nova segue a sessão, não o foco: vai para a janela e para o painel da aba que ela já
+/// controla. Uma sessão sem nenhuma aba, que não trabalha em lugar nenhum, fica com a janela em
+/// foco.
+#[test]
+fn a_aba_nova_vai_para_o_painel_da_sessao_com_o_foco_em_outra_janela() {
+    let permissoes = [PermissaoIa::Livre; 3];
+    let (_pasta, mut m, endereco) = tela("mcp-op-lugar-sessao", &permissoes);
+    let mut ia = Assistente::ligar(&mut m.app, &endereco, "Teste");
+    abrir_pela_ia(&mut m, &mut ia, 1, json!({ "painel": "direita" }));
+    let (primeira, outra) = segunda_janela_em_foco(&mut m);
+
+    abrir_pela_ia(&mut m, &mut ia, 2, json!({}));
+    assert_eq!(
+        abas_por_painel(&mut m, primeira),
+        [0, 2],
+        "no painel da aba dela, mesmo com um painel vazio ao lado"
+    );
+    assert_eq!(
+        abas_por_painel(&mut m, outra),
+        [0],
+        "nada na janela em foco"
+    );
+
+    let mut sem_abas = Assistente::ligar(&mut m.app, &endereco, "Sem abas");
+    abrir_pela_ia(&mut m, &mut sem_abas, 3, json!({}));
+    assert_eq!(abas_por_painel(&mut m, outra), [1]);
+    assert_eq!(abas_por_painel(&mut m, primeira), [0, 2]);
+}
+
+/// A janela e o painel pedidos continuam valendo acima do lugar da sessão.
+#[test]
+fn o_lugar_pedido_vale_mais_que_o_da_sessao() {
+    let permissoes = [PermissaoIa::Livre; 4];
+    let (_pasta, mut m, endereco) = tela("mcp-op-lugar-pedido", &permissoes);
+    let mut ia = Assistente::ligar(&mut m.app, &endereco, "Teste");
+    abrir_pela_ia(&mut m, &mut ia, 1, json!({ "painel": "direita" }));
+    let (primeira, outra) = segunda_janela_em_foco(&mut m);
+
+    abrir_pela_ia(&mut m, &mut ia, 2, json!({ "janela": 2 }));
+    assert_eq!(abas_por_painel(&mut m, outra), [1], "a janela pedida");
+
+    // Depois disso, a última aba mexida dela é a da segunda janela.
+    abrir_pela_ia(&mut m, &mut ia, 3, json!({ "janela": 1, "painel": 1 }));
+    assert_eq!(abas_por_painel(&mut m, primeira), [1, 1], "o painel pedido");
+
+    abrir_pela_ia(&mut m, &mut ia, 4, json!({ "janela": "nova" }));
+    assert_eq!(m.app.windows().len(), 3, "a janela nova pedida");
+}
+
+/// A grade que a sessão montou se enche um painel por aba, como antes.
+#[test]
+fn a_grade_da_sessao_se_enche_um_painel_por_aba() {
+    let permissoes = [PermissaoIa::Livre; 5];
+    let (_pasta, mut m, endereco) = tela("mcp-op-lugar-grade", &permissoes);
+    let mut ia = Assistente::ligar(&mut m.app, &endereco, "Teste");
+    organizar(&mut m, &mut ia, 2, 2);
+    let janela = m.app.windows()[0];
+    for id in 1..=3 {
+        abrir_pela_ia(&mut m, &mut ia, id, json!({}));
+    }
+    assert_eq!(abas_por_painel(&mut m, janela), [1, 1, 1, 0]);
+    abrir_pela_ia(&mut m, &mut ia, 4, json!({}));
+    assert_eq!(abas_por_painel(&mut m, janela), [1, 1, 1, 1]);
+    // Grade cheia: a próxima fica com a última aba dela, em vez de cair no painel em foco.
+    abrir_pela_ia(&mut m, &mut ia, 5, json!({}));
+    assert_eq!(abas_por_painel(&mut m, janela), [1, 1, 1, 2]);
+}
+
+/// Listar e organizar sem dizer a janela olham a janela da sessão, não a que está em foco.
+#[test]
+fn listar_e_organizar_paineis_seguem_a_janela_da_sessao() {
+    let permissoes = [PermissaoIa::Livre];
+    let (_pasta, mut m, endereco) = tela("mcp-op-lugar-organizar", &permissoes);
+    let mut ia = Assistente::ligar(&mut m.app, &endereco, "Teste");
+    abrir_pela_ia(&mut m, &mut ia, 1, json!({}));
+    let (primeira, outra) = segunda_janela_em_foco(&mut m);
+
+    let lista = ia.chamar(&mut m.app, "listar_paineis", json!({}));
+    assert!(!lista.e_erro(), "{}", lista.texto());
+    assert_eq!(
+        primeiro_json(&lista.texto())["janela"],
+        1,
+        "{}",
+        lista.texto()
+    );
+
+    organizar(&mut m, &mut ia, 2, 1);
+    assert_eq!(abas_por_painel(&mut m, primeira).len(), 2);
+    assert_eq!(abas_por_painel(&mut m, outra).len(), 1);
+}
+
+/// A sessão presa a uma aba (`--aba`, a do "Controlar com") abre ao lado dela, mesmo sem ser dona.
+#[test]
+fn a_sessao_presa_abre_no_painel_da_aba_alvo() {
+    let permissoes = [PermissaoIa::Livre; 3];
+    let (_pasta, mut m, endereco) = tela("mcp-op-lugar-alvo", &permissoes);
+    m.app.double_click("arvore-1").double_click("arvore-2");
+    let mut quem_organiza = Assistente::ligar(&mut m.app, &endereco, "Organiza");
+    organizar(&mut m, &mut quem_organiza, 2, 1);
+    let janela = m.app.windows()[0];
+    assert_eq!(abas_por_painel(&mut m, janela), [1, 1]);
+    assert!(Session::find("2-2").is_some(), "a segunda aba da árvore");
+    let (primeira, outra) = segunda_janela_em_foco(&mut m);
+
+    let mut presa = Assistente::ligar_na_aba(&mut m.app, &endereco, "Presa", "2-2");
+    abrir_pela_ia(&mut m, &mut presa, 3, json!({}));
+    assert_eq!(abas_por_painel(&mut m, primeira), [1, 2]);
+    assert_eq!(abas_por_painel(&mut m, outra), [0]);
+}
+
+/// `ligar_tunel` sem aba abre a da conexão no lugar da sessão.
+#[test]
+fn ligar_tunel_abre_a_aba_no_painel_da_sessao() {
+    let pasta = Pasta::nova("mcp-op-lugar-tunel");
+    let mut tree = arvore(&[PermissaoIa::Livre; 2]);
+    let tunel: Tunel = serde_json::from_value(json!({
+        "porta": 18080, "destino_host": "127.0.0.1", "destino_porta": 80
+    }))
+    .unwrap();
+    tree.connection_mut(2).unwrap().tuneis.push(tunel);
+    pasta.semear(&tree);
+    pasta.configurar("ia", "mcp_ligado", json!(true));
+    let endereco = pasta.0.join("mcp.sock");
+    let mut m = montar(&pasta, Theme::Light);
+
+    let mut ia = Assistente::ligar(&mut m.app, &endereco, "Teste");
+    abrir_pela_ia(&mut m, &mut ia, 1, json!({ "painel": "direita" }));
+    let (primeira, outra) = segunda_janela_em_foco(&mut m);
+
+    ia.pedir("ligar_tunel", json!({ "conexao": 2, "tunel": 1 }));
+    esperar(
+        &mut m.app,
+        |_| (1..=16).any(|n| Session::find(&format!("2-{n}")).is_some()),
+        "a aba do túnel não abriu",
+    );
+    assert_eq!(abas_por_painel(&mut m, primeira), [0, 2]);
+    assert_eq!(abas_por_painel(&mut m, outra), [0]);
 }

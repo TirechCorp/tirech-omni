@@ -85,7 +85,7 @@ impl Tela {
     }
 
     /// O clique na notificação: a aba à mostra, na janela dela, com o foco.
-    fn trazer_aba(&self, sessao: Session) {
+    pub(super) fn trazer_aba(&self, sessao: Session) {
         let Some((janela, _)) = self
             .sessoes_das_janelas(None)
             .into_iter()

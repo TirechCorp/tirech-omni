@@ -29,9 +29,11 @@ const CHAVE_PASTAS_DO_USUARIO: &str =
 const CHAVE_PASTAS_DO_SHELL: &str =
     r"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders";
 
-/// Os programas que a cópia leva: o app e as ferramentas de linha de comando do lado dele.
-const EXECUTAVEIS: [&str; 5] = [
+/// Os programas que a cópia leva: o app, o `htop-omni` e as ferramentas de linha de comando do
+/// lado dele.
+const EXECUTAVEIS: [&str; 6] = [
     "tirech-omni",
+    "htop-omni",
     "tirech-omni-keygen",
     "tirech-omni-agent",
     "tirech-omni-add",
@@ -1781,6 +1783,7 @@ mod testes {
         fs::create_dir_all(casa.join("Desktop")).unwrap();
         fs::write(origem.join("tirech-omni"), b"binario-1").unwrap();
         fs::write(origem.join("tirech-omni-keygen"), b"keygen").unwrap();
+        fs::write(origem.join("htop-omni"), b"htop").unwrap();
         fs::write(origem.join("tirech-omni.d"), b"nao copia").unwrap();
         let contexto = Contexto {
             windows: false,
@@ -2024,6 +2027,10 @@ mod testes {
             fs::read(copia.with_file_name("tirech-omni-keygen")).unwrap(),
             b"keygen"
         );
+        assert_eq!(
+            fs::read(copia.with_file_name("htop-omni")).unwrap(),
+            b"htop"
+        );
         assert!(
             !copia.with_file_name("tirech-omni.d").exists(),
             "só os irmãos conhecidos"
@@ -2064,6 +2071,7 @@ mod testes {
         ctx.aplicar(ItemDeInstalacao::Copia, false).unwrap();
         assert!(!copia.exists());
         assert!(!copia.with_file_name("tirech-omni-keygen").exists());
+        assert!(!copia.with_file_name("htop-omni").exists());
         assert_eq!(ctx.estado(ItemDeInstalacao::Copia), EstadoDoItem::Ausente);
     }
 

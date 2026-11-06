@@ -300,7 +300,7 @@ impl Tela {
 
     /// Lê o cofre de `caminho` e abre o diálogo que cabe: o da senha dele, se pedir uma, ou o
     /// das duas escolhas. `conflito` marca uma cópia que a sincronização deixou na pasta.
-    fn abrir_externo(&self, caminho: &Path, conflito: bool) {
+    pub(super) fn abrir_externo(&self, caminho: &Path, conflito: bool) {
         let externo = match self.cofre.agora(|c| c.abrir_copia(caminho)) {
             Ok(externo) => externo,
             Err(erro) => {

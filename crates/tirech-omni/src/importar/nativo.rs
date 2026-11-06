@@ -145,6 +145,7 @@ fn andar(
                     comandos: g.comandos.clone(),
                     persistente: g.persistente,
                     mouse: g.mouse,
+                    diagnostico_discos: g.diagnostico_discos,
                     retentar: g.retentar,
                     ocioso: g.ocioso,
                     credencial_modo: g.credencial_modo,

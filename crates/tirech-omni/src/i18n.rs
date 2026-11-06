@@ -343,6 +343,25 @@ pub fn decimal(valor: f64, casas: usize) -> String {
     base.replace('.', &separador)
 }
 
+/// Um inteiro com o separador de milhar do idioma: o contrário do decimal (`26.280` no pt-BR e
+/// `26,280` no en-US).
+pub fn inteiro(valor: u64) -> String {
+    let milhar = if atuais().cru(crate::tk!("formatos-decimal"), None) == "," {
+        '.'
+    } else {
+        ','
+    };
+    let digitos = valor.to_string();
+    let mut texto = String::with_capacity(digitos.len() + digitos.len() / 3);
+    for (i, digito) in digitos.chars().enumerate() {
+        if i > 0 && (digitos.len() - i).is_multiple_of(3) {
+            texto.push(milhar);
+        }
+        texto.push(digito);
+    }
+    texto
+}
+
 /// Os textos da lib no idioma de `t`, para o `set_strings`.
 fn strings_da_lib(t: &Traducoes) -> tomni_ui::Strings {
     let mut s = tomni_ui::Strings::default();

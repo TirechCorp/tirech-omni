@@ -214,6 +214,19 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   **Limite do aviso de calor** (0, o automático, é o crítico do sensor menos 10 °C, ou 90 °C);
   outra só depois de ele esfriar 5 °C e de 10 minutos, e o clique abre a aba Sensores. A leitura
   é leve: a cada 5 segundos, e só enquanto o número ou o aviso a pedem.
+- **`htop-omni`**: as abas Processos, Disco, Rede e Sensores do Desempenho num programa à parte, que
+  roda sem o Omni e vai nos mesmos pacotes. Só olha este computador, usa o idioma e o tema das
+  Configurações do Omni e não grava nada.
+- **Saúde dos discos**: ao conectar por SSH, em segundo plano e sem digitar nada na aba, o app lê
+  com o `smartctl` a vida restante, o total gravado, as horas ligado, as vezes ligado e os alertas
+  de cada disco. Lê sozinho como root. Com `sudo` sem senha, lê depois de um clique em **Verificar
+  de novo**, na aba Disco do Desempenho; sem esse clique, o `sudo` nunca é chamado. Em máquina
+  virtual e contêiner nem tenta. Um disco com alerta gera uma notificação. Liga e desliga em
+  Configurações › Geral, e cada pasta ou conexão pode decidir diferente.
+- **Fechar e mover um painel inteiro**: o menu da aba e o menu Janela têm **Fechar o painel…** e
+  **Mover o painel para a janela**. Fechar um painel com abas pergunta se elas vão para outro painel,
+  nesta janela ou em outra, sem reconectar, ou se as conexões fecham junto. O painel vazio fecha sem
+  perguntar.
 - **Tentar de novo após (reconexão que não desiste)**: quando a aba reconecta sozinha (Configurações
   › Conexões › Ao cair a conexão em **Reconectar sozinho**, e sempre na aba de um assistente)
   e as tentativas acabam, ela espera e começa outra rodada, até a conexão voltar; a aba avisa
@@ -756,7 +769,7 @@ e a janela que não cabe no monitor é reduzida e centralizada pela lib.
 ### Versão portable
 
 O pacote portable (`tirech-omni-portable-windows.zip`, gerado por `empacotar-portable.sh` na raiz
-do repositório) traz a pasta `Tirech Omni` com os cinco executáveis e uma pasta
+do repositório) traz a pasta `Tirech Omni` com os seis executáveis e uma pasta
 `tirech-omnidata` ao lado deles. **O marcador é a pasta:** com `tirech-omnidata` ao lado do
 executável, o app grava tudo nela e não toca em `%APPDATA%` nem em `~/.config`. Vale em
 qualquer sistema; sem a pasta, nada muda. A ordem da pasta de dados é: a variável
@@ -801,8 +814,8 @@ da Apple (`xcode-select --install`) e o `rustup`. Compila o `aarch64-apple-darwi
 `x86_64-apple-darwin`, junta cada executável num universal com o `lipo` e deixa
 `target/tirech-omni-macos.dmg` (ou o caminho que receber), com:
 
-- o `Tirech Omni.app`: os cinco executáveis em `Contents/MacOS` (a instalação copia o app e as
-  ferramentas juntos), o ícone `assets/icone.icns`, gerado dos mesmos desenhos do `.ico`, e o
+- o `Tirech Omni.app`: os seis executáveis em `Contents/MacOS` (a instalação copia o app, o
+  `htop-omni` e as ferramentas juntos), o ícone `assets/icone.icns`, gerado dos mesmos desenhos do `.ico`, e o
   `Info.plist` com o identificador `com.tirech.omni`, o mesmo do LaunchAgent do início com o
   sistema;
 - um atalho para `/Applications` e o `THIRD-PARTY-NOTICES.txt`.
@@ -1299,6 +1312,12 @@ variável `TIRECH_OMNI_CONFIG` apontar:
   (`desligada`, `so_ler`, `aprovar` ou `livre`; sem ele, herda da pasta).
 - `certificados.json`: as impressões dos certificados FTPS que a pessoa confiou, por
   `host:porta` (ao lado do `known_hosts`).
+- `saude_discos.json`: a última leitura da saúde dos discos de cada servidor (vida restante, total
+  gravado, horas ligado, vezes ligado e alertas), para não repetir o `smartctl` a cada conexão: vale
+  24 horas com discos lidos e 7 dias quando não deu para ler. Guarda também se o `sudo` já
+  funcionou naquele servidor: sozinho, o app só lê como root e nem chama o `sudo`, porque uma recusa
+  iria para o log e poderia virar e-mail ao administrador. Quem tem `sudo` sem senha clica em
+  "Verificar de novo", na aba Disco do Desempenho, uma vez por servidor. Apagar só faz ler de novo.
 - `vault.json` e `vault.key`: o cofre de senhas e de chaves (versão 3: pastas e itens com
   `uid`, lápides das remoções e as chaves SSH) e a chave que o abre (some quando há senha
   mestra). O `cofre.json` e o `chave` das versões antigas são renomeados na primeira abertura, e

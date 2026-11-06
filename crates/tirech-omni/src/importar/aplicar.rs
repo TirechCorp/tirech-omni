@@ -408,6 +408,7 @@ pub fn aplicar(
                         g.comandos = p.comandos;
                         g.persistente = p.persistente;
                         g.mouse = p.mouse;
+                        g.diagnostico_discos = p.diagnostico_discos;
                         g.retentar = p.retentar;
                         g.ocioso = p.ocioso;
                         g.credencial_modo = p.credencial_modo;

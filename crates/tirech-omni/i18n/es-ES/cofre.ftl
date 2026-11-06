@@ -256,3 +256,4 @@ cofre-externo-nao-e-cofre = Este archivo no es una bóveda de { -app }.
 cofre-externo-chave-estragada = La clave dentro del archivo está dañada.
 cofre-externo-chave-nao-abre = La clave que acompaña a la bóveda (vault.key) no abre este archivo.
 tipo-zerotier = Identidad ZeroTier
+cofre-json-csv-ou-cofre = JSON, CSV o bóveda de { -app }

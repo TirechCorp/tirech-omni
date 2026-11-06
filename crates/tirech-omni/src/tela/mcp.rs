@@ -739,7 +739,7 @@ impl Tela {
                 (alvo.sessao.map(|s| s.title()).unwrap_or_default(), None)
             }
             Acao::Organizar => {
-                let (janela, colunas, linhas) = self.grade_pedida(args)?;
+                let (janela, colunas, linhas) = self.grade_pedida(args, t.pedido.ligacao)?;
                 grade = Some((self.numero_da_janela(janela), colunas, linhas));
                 (format!("{colunas} × {linhas}"), None)
             }

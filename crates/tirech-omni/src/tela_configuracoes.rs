@@ -828,6 +828,10 @@ fn secao_geral(p: &Pagina) -> Expander {
                 0.0,
                 f64::from(LIMITE_CALOR_MAX),
             ))
+            .child(p.interruptor(
+                "geral.diagnostico_discos",
+                campo!(p, geral.diagnostico_discos),
+            ))
             .child(p.numero(
                 "geral.recentes_max",
                 numero_de!(p, RECENTES_MIN, RECENTES_MAX, geral.recentes_max),

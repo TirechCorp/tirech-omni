@@ -1862,6 +1862,9 @@ pub struct Lancado {
 /// Um comando que o [`FakeOpener`] rodou: o id da conexão, o comando e a entrada.
 pub type Execucao = (u64, String, Vec<u8>);
 
+/// As rodadas do diagnóstico dos discos no [`FakeOpener`]: o id da conexão e o script recebido.
+pub type ExecucoesDosDiscos = Arc<Mutex<Vec<(u64, String, Vec<u8>)>>>;
+
 /// O abridor dos testes: uma sessão `Loopback` com eco, sem rede nem processo. Guarda as
 /// senhas que a tela entregou, para o teste conferir.
 #[derive(Clone)]
@@ -1898,6 +1901,10 @@ pub struct FakeOpener {
     pub respostas_exec: Arc<Mutex<HashMap<u64, Result<ExecOutput, String>>>>,
     /// A resposta da sondagem por PowerShell (M46), quando o `sh -s` falha num servidor Windows.
     pub respostas_exec_windows: Arc<Mutex<HashMap<u64, Result<ExecOutput, String>>>>,
+    /// O que o diagnóstico dos discos responde, por id de conexão (sem resposta: saída vazia).
+    pub respostas_discos: Arc<Mutex<HashMap<u64, Result<ExecOutput, String>>>>,
+    /// Os ids das conexões em que o diagnóstico dos discos rodou, com o script que recebeu.
+    pub execucoes_discos: ExecucoesDosDiscos,
     /// Quanto o comando demora (zero por padrão), para os testes da espera.
     pub atraso_exec: Arc<Mutex<Duration>>,
     /// Com `true`, o servidor falso recusa o subsistema SFTP das sessões: o colar cai no plano B
@@ -2026,6 +2033,8 @@ impl Default for FakeOpener {
             execucoes: Arc::default(),
             respostas_exec: Arc::default(),
             respostas_exec_windows: Arc::default(),
+            respostas_discos: Arc::default(),
+            execucoes_discos: Arc::default(),
             atraso_exec: Arc::default(),
             sem_sftp: Rc::default(),
             execs: Arc::default(),
@@ -2383,7 +2392,33 @@ impl Opener for FakeOpener {
         let respostas = Arc::clone(&self.respostas_exec);
         let respostas_windows = Arc::clone(&self.respostas_exec_windows);
         let atraso = Arc::clone(&self.atraso_exec);
+        let respostas_discos = Arc::clone(&self.respostas_discos);
+        let execucoes_discos = Arc::clone(&self.execucoes_discos);
         Ok(Arc::new(move |comando, entrada, enviado| {
+            if comando == crate::saude_discos::COMANDO
+                || comando == crate::saude_discos::COMANDO_COM_SUDO
+            {
+                let mut lido = Vec::new();
+                entrada
+                    .read_to_end(&mut lido)
+                    .map_err(|erro| erro.to_string())?;
+                execucoes_discos
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push((id, comando.to_owned(), lido));
+                let resposta = respostas_discos
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(&id)
+                    .cloned();
+                return resposta.unwrap_or_else(|| {
+                    Ok(ExecOutput {
+                        status: Some(0),
+                        stdout: Vec::new(),
+                        stderr: Vec::new(),
+                    })
+                });
+            }
             if comando != "sh -s" && comando != COMANDO_SONDAGEM_WINDOWS {
                 return servidor.rodar(comando, entrada, enviado);
             }

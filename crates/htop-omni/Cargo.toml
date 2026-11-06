@@ -1,0 +1,20 @@
+[package]
+name = "htop-omni"
+description = "As abas Processos, Disco, Rede e Sensores do Desempenho do Tirech Omni, num programa à parte"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+tirech-omni = { path = "../tirech-omni" }
+tomni-ui.workspace = true
+sys-locale.workspace = true
+
+[build-dependencies]
+winresource.workspace = true
+
+[lints]
+workspace = true

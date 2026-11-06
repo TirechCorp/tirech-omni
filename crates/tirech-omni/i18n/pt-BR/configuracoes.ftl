@@ -119,6 +119,10 @@ config-geral-avisar_calor = Avisar quando a CPU esquentar
     .descricao = Uma notificação do sistema quando o processador deste computador passa do limite. Outra só depois de ele esfriar 5 °C e de 10 minutos.
     .palavras = temperatura calor quente aviso notificacao sensor cpu processador superaquecimento
 
+config-geral-diagnostico_discos = Diagnóstico dos discos
+    .descricao = Ao conectar, lê em segundo plano a vida útil, o total gravado, as horas ligado, as vezes que o disco foi ligado e os alertas do SMART. Como root, lê sozinho; com sudo sem senha, depois de um clique em Verificar de novo, na aba Disco do Desempenho. Sem esse clique, nem chama o sudo. Em máquina virtual e em contêiner nem tenta. As conexões e as pastas podem decidir diferente.
+    .palavras = disco ssd hd nvme smart smartctl tbw vida util desgaste saude horas ligado alerta diagnostico sudo root
+
 config-geral-limite_calor = Limite do aviso de calor (°C)
     .descricao = Acima desta temperatura, o aviso. 0 é o automático: o crítico do sensor menos 10 °C, ou 90 °C.
     .palavras = temperatura calor limite graus celsius aviso sensor

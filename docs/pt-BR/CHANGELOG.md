@@ -7,6 +7,18 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- `htop-omni`: as abas Processos, Disco, Rede e Sensores do Desempenho num programa à parte, só
+  deste computador, que roda sem o Omni e não grava nada. Vai em todos os pacotes.
+- Saúde dos discos: ao conectar por SSH, em segundo plano, a vida restante, o total gravado, as
+  horas ligado, as vezes ligado e os alertas de cada disco, pelo `smartctl`, com notificação quando
+  há alerta. Na aba Disco do Desempenho, com **Detalhes**. Liga e desliga em Configurações › Geral,
+  por pasta e por conexão. Em máquina virtual e contêiner nem tenta. A leitura automática só roda
+  como root ou onde o `sudo` já funcionou; o primeiro uso do `sudo` vem do clique em **Verificar de
+  novo**, porque uma recusa iria para o log e poderia virar e-mail ao administrador.
+- Fechar e mover um painel inteiro: **Fechar o painel…** pergunta se as abas vão para outro painel,
+  nesta janela ou em outra, ou se as conexões fecham junto; **Mover o painel para a janela** leva o
+  painel como ele está. O Ctrl+Shift+W passa pela mesma pergunta.
+
 - Sensores: a aba **Sensores** do Desempenho mostra a temperatura da CPU, da memória, do disco,
   da placa-mãe e da placa de vídeo, com o gráfico do último minuto, e as ventoinhas, deste
   computador ou do servidor de uma conexão SSH aberta (Linux). O que não tem sensor não aparece.
@@ -106,6 +118,11 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Mudado
 
+- Menos CPU com muitas abas, e dividir um painel não para mais a janela: com 12 abas, de 43–54 ms
+  para 6,7–7,6 ms.
+- As abas que um assistente abre pelo MCP ficam na janela e no painel em que ele já trabalha, e não
+  na janela com o foco.
+
 - Os campos Caminho e Argumentos do Claude Code, do Codex e do OpenCode deram lugar aos perfis;
   o que estava neles vira o perfil padrão de cada assistente.
 - A cópia só de leitura manda para a dona o que muda nas conexões, nas configurações, nos
@@ -126,6 +143,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
   Sem a dona no ar, a segunda liga o motor ela mesma.
 
 ### Corrigido
+
+- O cofre levado para outra máquina não aparecia ao importar: o **Importar** do cofre agora abre o
+  `.tirech-vault`.
+- Uma chave `.ppk` Ed25519 em cada 512 dava "Passphrase incorreta" com a senha certa.
 
 - A senha não entrava nos servidores que só aceitam o `keyboard-interactive` (o FreeBSD e o
   pfSense de fábrica, o OpenSSH com `PasswordAuthentication no`): agora entra. Um código de dois

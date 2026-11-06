@@ -400,3 +400,7 @@ autocompletar-origem-shell = Historial de { $shell }
 autocompletar-origem-escolhidos = Usado en esta conexión
 autocompletar-origem-envio = Barra de envío
 autocompletar-origem-ao-conectar = Comandos al conectar
+
+saude-discos-linha = Salud de los discos
+saude-discos-linha-descricao = Tras conectar, lee en segundo plano la salud de los discos del servidor (smartctl, con SMART y desgaste), sin escribir nada en la pestaña. Como root, lee por sí solo. Con sudo sin contraseña, lee tras un clic en Comprobar de nuevo, en la pestaña Disco de Rendimiento, y lo recuerda desde entonces; sin ese clic, nunca se llama a sudo. Nunca se intenta en una máquina virtual ni en un contenedor. Heredar sigue la carpeta y, si ninguna carpeta elige, Configuración › General.
+saude-discos-linha-descricao-pasta = Diagnóstico de los discos para las conexiones de esta carpeta que no eligieron otra cosa.

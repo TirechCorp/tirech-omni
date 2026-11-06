@@ -15,7 +15,8 @@ use tomni_ui::terminal::LogMode;
 
 use super::duplicar::Destino;
 use super::{
-    Lugar, PaineisDaJanela, Tela, acao, com_ia, com_mcp, ia, importacao, janelas, mcp_sessoes, wsl,
+    Lugar, PaineisDaJanela, Tela, acao, com_ia, com_mcp, ia, importacao, janelas, mcp_sessoes,
+    painel_inteiro, wsl,
 };
 use crate::abrir::{abrir_log_cifrado, com_sufixo_cifrado};
 use crate::atalhos;
@@ -489,6 +490,36 @@ fn menu_janela(tela: &Rc<Tela>, janela: Janela) -> MenuFlyout {
             acao(tela, |t| t.salvar_todas_como_espaco()),
         )
         .icon(Symbol::Save)
+        .separator()
+        .submenu(
+            "janela-painel-mover",
+            t!("casca-mover-o-painel-para-a-janela"),
+            painel_inteiro::submenu_mover(tela, janela, "janela-painel-mover", move || {
+                janela
+                    .layout
+                    .with_untracked(|l| l.pane(l.active()).selected)
+            }),
+        )
+        .item_visible(move || {
+            janela
+                .layout
+                .try_with(|l| !l.pane(l.active()).tabs.is_empty())
+                .unwrap_or(false)
+        })
+        .item(
+            "janela-painel-fechar",
+            t!("casca-fechar-o-painel-menu"),
+            acao(tela, move |t| {
+                t.pedir_fechar_painel(janela, janela.layout.with_untracked(|l| l.active()));
+            }),
+        )
+        .icon(Symbol::Dismiss)
+        .item_visible(move || {
+            janela
+                .layout
+                .try_with(|l| l.pane_count() > 1 || !l.pane(l.active()).tabs.is_empty())
+                .unwrap_or(false)
+        })
         .separator();
     // Itens reservados: o menu não muda de forma, só mostra os das janelas que existem.
     for n in 0..janelas::NO_MENU {

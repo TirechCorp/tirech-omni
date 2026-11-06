@@ -1264,3 +1264,7 @@ ia-perfil-erro-assistente = Elige el asistente.
 ia-perfil-erro-limite = { $assistente } ya tiene { $n } perfiles, el máximo.
 ia-perfil-nao-achado = No encontré el programa del perfil “{ $nome }” en este equipo.
 ia-perfil-entrar-titulo = Iniciar sesión · { $nome }
+
+config-geral-diagnostico_discos = Diagnóstico de los discos
+    .descricao = Al conectar, lee en segundo plano el desgaste, el total escrito, las horas encendido, los encendidos y las alertas de SMART. Como root, lee por sí solo; con sudo sin contraseña, tras un clic en Comprobar de nuevo, en la pestaña Disco de Rendimiento. Sin ese clic, nunca se llama a sudo. En máquinas virtuales y contenedores ni se intenta. Las conexiones y las carpetas pueden decidir otra cosa.
+    .palavras = disco ssd hdd nvme smart smartctl tbw vida desgaste salud horas encendido alerta diagnóstico sudo root

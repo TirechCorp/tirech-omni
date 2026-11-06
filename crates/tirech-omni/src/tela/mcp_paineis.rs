@@ -17,11 +17,12 @@ use crate::mcp::permissao::{PermissaoIa, permissao_efetiva};
 use crate::t;
 
 impl Tela {
-    /// A janela que o pedido aponta: `"atual"` (ou nada) ou o número dela, a partir de 1.
-    pub(super) fn janela_numerada(&self, valor: &Value) -> Result<Janela, String> {
+    /// A janela que o pedido aponta: `"atual"` (ou nada), que é a janela em que a sessão
+    /// `ligacao` trabalha, ou o número dela, a partir de 1.
+    pub(super) fn janela_numerada(&self, valor: &Value, ligacao: u64) -> Result<Janela, String> {
         match valor {
-            Value::Null => Ok(self.janela_ativa()),
-            Value::String(s) if s == "atual" => Ok(self.janela_ativa()),
+            Value::Null => Ok(self.janela_da_sessao(ligacao)),
+            Value::String(s) if s == "atual" => Ok(self.janela_da_sessao(ligacao)),
             outro => {
                 let n = numero(outro).ok_or_else(|| t!("mcp-janela-invalida"))?;
                 self.janelas
@@ -39,8 +40,12 @@ impl Tela {
     }
 
     /// A janela, as colunas e as linhas de um `organizar_paineis`.
-    pub(super) fn grade_pedida(&self, args: &Value) -> Result<(Janela, usize, usize), String> {
-        let janela = self.janela_numerada(&args["janela"])?;
+    pub(super) fn grade_pedida(
+        &self,
+        args: &Value,
+        ligacao: u64,
+    ) -> Result<(Janela, usize, usize), String> {
+        let janela = self.janela_numerada(&args["janela"], ligacao)?;
         let valida = |n: Option<usize>| n.filter(|&n| n <= LIMITE_DA_GRADE);
         let (colunas, linhas) = (
             valida(numero(&args["colunas"])),
@@ -58,7 +63,7 @@ impl Tela {
     /// `listar_paineis`: como as abas das conexões liberadas estão nos painéis da janela, com o
     /// nome das sessões de assistente que são donas delas.
     pub(super) fn mcp_listar_paineis(self: &Rc<Self>, t: Rc<Trabalho>) {
-        let janela = match self.janela_numerada(&t.pedido.args["janela"]) {
+        let janela = match self.janela_numerada(&t.pedido.args["janela"], t.pedido.ligacao) {
             Ok(janela) => janela,
             Err(erro) => return self.terminar_mcp(&t, Saida::Erro(erro)),
         };
@@ -131,7 +136,7 @@ impl Tela {
     /// continuam abertas: vão para os painéis na ordem, uma por painel, e as que sobram ficam
     /// no último (é o que `PaneLayout::grid` faz).
     pub(super) fn mcp_organizar_paineis(self: &Rc<Self>, t: Rc<Trabalho>, plano: Plano) {
-        let (janela, colunas, linhas) = match self.grade_pedida(&t.pedido.args) {
+        let (janela, colunas, linhas) = match self.grade_pedida(&t.pedido.args, t.pedido.ligacao) {
             Ok(grade) => grade,
             Err(erro) => return self.terminar_mcp(&t, Saida::Erro(erro)),
         };

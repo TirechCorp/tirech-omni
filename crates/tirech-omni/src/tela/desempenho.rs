@@ -20,7 +20,7 @@ use tomni_ui::notification::Notification;
 use tomni_ui::prelude::*;
 
 use super::Tela;
-use super::processos::{self, Corrente, Processos};
+use super::processos::{self, Corrente, Fonte, Processos};
 use crate::agente::ler_contador;
 use crate::configuracoes::OrigemDoMedidor;
 use crate::desempenho::{self as conta, Amostra, Amostrador, PONTOS, RITMO};
@@ -138,7 +138,7 @@ pub(super) fn ligar(tela: &Rc<Tela>) -> Desempenho {
         escolhidas: signal(BTreeSet::new()),
         ordem: signal(Some(("cpu".to_owned(), SortDirection::Descending))),
         grafico: signal(0),
-        processos: processos::ligar(tela, {
+        processos: processos::ligar(&Fonte::da_tela(tela), {
             let janelas = tela.janelas.clone();
             move || janelas.alguma_em(PAGINA)
         }),
@@ -274,6 +274,7 @@ fn ligar_a_origem(tela: &Rc<Tela>, d: Desempenho) {
     // O leitor: nasce com o medidor ligado fora do app, troca com a máquina e para quando o
     // medidor volta para o app ou some.
     let t = Rc::clone(tela);
+    let fonte = Fonte::da_tela(tela);
     let correndo: Rc<RefCell<Option<Corrente>>> = Rc::default();
     let antes: RefCell<Option<Option<Option<String>>>> = RefCell::new(None);
     let leitor = Rc::clone(&correndo);
@@ -307,7 +308,7 @@ fn ligar_a_origem(tela: &Rc<Tela>, d: Desempenho) {
                     Some(sessao)
                 }
             };
-            *leitor.borrow_mut() = Some(Corrente::nova(&t, sessao, d.pronto));
+            *leitor.borrow_mut() = Some(Corrente::nova(&fonte, sessao, d.pronto));
         });
     });
 
@@ -968,6 +969,7 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
         .on_invoke(move |chave| ir.ir_para_a_aba_da_chave(&chave));
 
     let com_sessoes = Rc::clone(tela);
+    let fonte = Fonte::da_tela(tela);
     Column::new()
         .id("desempenho-pagina")
         .grow(1)
@@ -999,22 +1001,22 @@ pub(super) fn pagina(tela: &Rc<Tela>, d: Desempenho) -> impl View + use<> {
                 .tab(
                     processos::PROCESSOS,
                     t!("processos-aba"),
-                    processos::aba_processos(tela, d.processos),
+                    processos::aba_processos(&fonte, d.processos),
                 )
                 .tab(
                     processos::DISCO,
                     t!("processos-aba-disco"),
-                    processos::aba_disco(tela, d.processos),
+                    processos::aba_disco(&fonte, d.processos),
                 )
                 .tab(
                     processos::REDE,
                     t!("processos-aba-rede"),
-                    processos::aba_rede(tela, d.processos),
+                    processos::aba_rede(&fonte, d.processos),
                 )
                 .tab(
                     processos::SENSORES,
                     t!("processos-aba-sensores"),
-                    processos::aba_sensores(tela, d.processos),
+                    processos::aba_sensores(&fonte, d.processos),
                 )
                 // Sem sensores aqui e sem servidor para escolher, a aba não tem o que mostrar.
                 .tab_visible(move |chave| {

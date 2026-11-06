@@ -16,6 +16,7 @@ cofre-gerar-de-novo = Gerar de novo
 cofre-gerar-senha = Gerar senha
 cofre-importar-para-o-cofre = Importar para o cofre
 cofre-json-ou-csv = JSON ou CSV
+cofre-json-csv-ou-cofre = JSON, CSV ou cofre do { -app }
 cofre-mover-para = Mover para…
 cofre-nome-do-campo = Nome do campo
 cofre-nova-senha-mestra = Nova senha mestra

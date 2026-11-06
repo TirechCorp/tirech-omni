@@ -16,6 +16,7 @@ cofre-gerar-de-novo = Generate again
 cofre-gerar-senha = Generate password
 cofre-importar-para-o-cofre = Import into the vault
 cofre-json-ou-csv = JSON or CSV
+cofre-json-csv-ou-cofre = JSON, CSV or { -app } vault
 cofre-mover-para = Move to…
 cofre-nome-do-campo = Field name
 cofre-nova-senha-mestra = New master password

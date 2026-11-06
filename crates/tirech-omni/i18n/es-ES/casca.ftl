@@ -482,3 +482,58 @@ sensores-valor = Valor
 sensores-chip = Chip
 sensores-calor-titulo = La CPU se ha calentado
 sensores-calor-corpo = El procesador de este equipo está a { $temperatura } (el aviso es por encima de { $limite }).
+
+saude-discos-titulo = Salud de los discos
+saude-discos-resumo = Discos leídos: { $n } · con alertas: { $alerta }
+saude-discos-detalhes = Detalles
+saude-discos-nenhum = Ningún disco con SMART en esta máquina.
+saude-discos-virtual = Máquina virtual o contenedor: los discos no se leen.
+saude-discos-sem-permissao = Sin permiso para leer los discos: entra como root o, con sudo sin contraseña, haz clic en Comprobar de nuevo.
+saude-discos-sem-smartctl = smartctl no está instalado: los discos no se leen.
+saude-discos-verificar = Comprobar de nuevo
+saude-discos-alerta-titulo = Discos con alertas
+saude-discos-notificacao-titulo = Alerta de disco en { $nome }
+saude-discos-coluna-disco = Disco
+saude-discos-coluna-modelo = Modelo
+saude-discos-coluna-saude = Salud
+saude-discos-coluna-vida = Vida restante
+saude-discos-coluna-gravado = Escrito
+saude-discos-coluna-horas = Horas encendido
+saude-discos-coluna-ligacoes = Encendidos
+saude-discos-coluna-realocados = Reasignados
+saude-discos-alerta-falhando = SMART indica que el disco está fallando
+saude-discos-alerta-critico = el disco activó su aviso crítico
+saude-discos-alerta-reserva = el área de reserva está por debajo del umbral
+saude-discos-alerta-vida = queda { $vida }% de su vida útil
+saude-discos-alerta-realocados = { $n } sectores reasignados
+saude-discos-alerta-pendentes = { $n } sectores pendientes
+saude-discos-alerta-midia = { $n } errores de medio
+saude-discos-alerta-de = { $disco }: { $alerta }
+saude-discos-falhando = Fallando
+saude-discos-em-alerta = Alerta
+saude-discos-ok = OK
+saude-discos-sem-dado = Sin datos
+saude-discos-horas = { $horas } h
+saude-discos-horas-um-ano = { $horas } h ({ $anos } año)
+saude-discos-horas-anos = { $horas } h ({ $anos } años)
+saude-discos-opcao-ligado = Activado
+saude-discos-opcao-desligado = Desactivado
+saude-discos-herdar-de = Heredar ({ $nome })
+saude-discos-herdar-configuracoes = Heredar (Configuración)
+
+casca-fechar-o-painel-menu = Cerrar el panel…
+casca-mover-o-painel-para-a-janela = Mover el panel a la ventana
+casca-fechar-o-painel-n = ¿Cerrar el panel { $n }?
+casca-painel-abas-mover-ou-fechar = { $n ->
+    [one] Este panel tiene 1 pestaña. Muévela a otro panel o cierra también la conexión.
+    *[other] Este panel tiene { $n } pestañas. Muévelas a otro panel o cierra también las conexiones.
+    }
+casca-painel-abas-so-fechar = { $n ->
+    [one] Este panel tiene 1 pestaña y ningún otro panel puede recibirla. Al cerrar el panel se cierra la conexión.
+    *[other] Este panel tiene { $n } pestañas y ningún otro panel puede recibirlas. Al cerrar el panel se cierran las conexiones.
+    }
+casca-mover-as-abas-para = Mover las pestañas a
+casca-mover-as-abas = Mover las pestañas
+casca-fechar-as-abas = Cerrar las pestañas
+casca-esta-janela = Esta ventana
+casca-janela-e-painel = { $janela } › { $painel }

@@ -339,6 +339,63 @@ impl Tela {
         })
     }
 
+    /// Onde a sessão `ligacao` trabalha, em `so_em` ou em qualquer janela: a janela e o painel da
+    /// aba a que está presa, senão da última aba dada a ela, senão da aba dela mexida por último.
+    pub(super) fn lugar_da_sessao(
+        &self,
+        ligacao: u64,
+        so_em: Option<Janela>,
+    ) -> Option<(Janela, usize)> {
+        let abertas = self.sessoes_das_janelas(so_em);
+        let achar = |chave: &str| {
+            abertas
+                .iter()
+                .find(|(_, sessao)| sessao.key_str() == chave)
+                .copied()
+        };
+        let presa = || self.aba_da_sessao(ligacao).and_then(|chave| achar(&chave));
+        let dada = || {
+            let dadas = self.mcp.dadas.borrow();
+            dadas
+                .get(&ligacao)?
+                .iter()
+                .rev()
+                .find_map(|chave| achar(chave))
+        };
+        let dela = || {
+            let donos = self.mcp.donos.borrow();
+            let atividade = self.mcp.atividade.borrow();
+            abertas
+                .iter()
+                .filter(|(_, sessao)| donos.get(&sessao.key_str()) == Some(&ligacao))
+                .max_by_key(|(_, sessao)| atividade.get(&sessao.key_str()).map(|a| a.quando))
+                .copied()
+        };
+        let (janela, sessao) = presa().or_else(dada).or_else(dela)?;
+        let painel = janela.layout.with_untracked(|l| l.pane_of(sessao))?;
+        Some((janela, painel))
+    }
+
+    /// A janela em que a sessão `ligacao` trabalha; sem nenhuma aba dela, a última ativa.
+    pub(super) fn janela_da_sessao(&self, ligacao: u64) -> Janela {
+        self.lugar_da_sessao(ligacao, None)
+            .map_or_else(|| self.janela_ativa(), |(janela, _)| janela)
+    }
+
+    /// Se a sessão `ligacao` montou a grade de `janela` e ainda há painel vazio nela.
+    pub(super) fn enchendo_a_grade(&self, ligacao: u64, janela: Janela) -> bool {
+        let numero = self.numero_da_janela(janela);
+        let dela = self
+            .mcp
+            .grades
+            .borrow()
+            .get(&numero)
+            .is_some_and(|(sessao, _, _)| *sessao == ligacao);
+        dela && janela
+            .layout
+            .with_untracked(|l| (0..l.pane_count()).any(|i| l.pane(i).tabs.is_empty()))
+    }
+
     /// Passa a aba `chave` para a sessão `ligacao`.
     pub(super) fn dar_aba(&self, chave: &str, ligacao: u64) {
         self.mcp

@@ -414,6 +414,43 @@ processos-disco-virtual = Virtual
 processos-disco-lendo = Lendo
 processos-disco-escrevendo = Escrevendo
 processos-disco-nenhum = Nenhum disco fez operações.
+saude-discos-titulo = Saúde dos discos
+saude-discos-resumo = Discos lidos: { $n } · com alerta: { $alerta }
+saude-discos-detalhes = Detalhes
+saude-discos-nenhum = Nenhum disco com SMART nesta máquina.
+saude-discos-virtual = Máquina virtual ou contêiner: os discos não são lidos.
+saude-discos-sem-permissao = Sem permissão para ler os discos: entre como root ou, com sudo sem senha, clique em Verificar de novo.
+saude-discos-sem-smartctl = O smartctl não está instalado: os discos não são lidos.
+saude-discos-verificar = Verificar de novo
+saude-discos-alerta-titulo = Discos com alerta
+saude-discos-notificacao-titulo = Disco com alerta em { $nome }
+saude-discos-coluna-disco = Disco
+saude-discos-coluna-modelo = Modelo
+saude-discos-coluna-saude = Saúde
+saude-discos-coluna-vida = Vida restante
+saude-discos-coluna-gravado = Gravado
+saude-discos-coluna-horas = Horas ligado
+saude-discos-coluna-ligacoes = Ligações
+saude-discos-coluna-realocados = Realocados
+saude-discos-alerta-falhando = o SMART diz que o disco está falhando
+saude-discos-alerta-critico = o disco ligou o aviso crítico
+saude-discos-alerta-reserva = a área de reserva está abaixo do limite
+saude-discos-alerta-vida = restam { $vida }% da vida útil
+saude-discos-alerta-realocados = { $n } setores realocados
+saude-discos-alerta-pendentes = { $n } setores pendentes
+saude-discos-alerta-midia = { $n } erros de mídia
+saude-discos-alerta-de = { $disco }: { $alerta }
+saude-discos-falhando = Falhando
+saude-discos-em-alerta = Em alerta
+saude-discos-ok = OK
+saude-discos-sem-dado = Sem dado
+saude-discos-horas = { $horas } h
+saude-discos-horas-um-ano = { $horas } h ({ $anos } ano)
+saude-discos-horas-anos = { $horas } h ({ $anos } anos)
+saude-discos-opcao-ligado = Ligado
+saude-discos-opcao-desligado = Desligado
+saude-discos-herdar-de = Herdar ({ $nome })
+saude-discos-herdar-configuracoes = Herdar (Configurações)
 processos-nenhum = Nenhum processo.
 processos-estado-executando = Executando
 processos-estado-dormindo = Dormindo
@@ -482,3 +519,19 @@ sensores-valor = Valor
 sensores-chip = Chip
 sensores-calor-titulo = A CPU esquentou
 sensores-calor-corpo = O processador deste computador está a { $temperatura } (o aviso é acima de { $limite }).
+casca-fechar-o-painel-menu = Fechar o painel…
+casca-mover-o-painel-para-a-janela = Mover o painel para a janela
+casca-fechar-o-painel-n = Fechar o painel { $n }?
+casca-painel-abas-mover-ou-fechar = { $n ->
+    [one] Este painel tem 1 aba. Mova-a para outro painel ou feche a conexão junto.
+    *[other] Este painel tem { $n } abas. Mova-as para outro painel ou feche as conexões junto.
+    }
+casca-painel-abas-so-fechar = { $n ->
+    [one] Este painel tem 1 aba, e não há outro painel para recebê-la. Fechar o painel fecha a conexão.
+    *[other] Este painel tem { $n } abas, e não há outro painel para recebê-las. Fechar o painel fecha as conexões.
+    }
+casca-mover-as-abas-para = Mover as abas para
+casca-mover-as-abas = Mover as abas
+casca-fechar-as-abas = Fechar as abas
+casca-esta-janela = Esta janela
+casca-janela-e-painel = { $janela } › { $painel }

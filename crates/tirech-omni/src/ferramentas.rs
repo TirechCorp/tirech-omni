@@ -194,6 +194,9 @@ pub struct Ambiente {
     /// uma vez, para saber se a aba Sensores existe, e o leitor leve do medidor e do aviso de
     /// calor lê por aqui, numa thread. Os testes não têm sensores, a não ser que ponham alguns.
     pub sensores: std::sync::Arc<dyn Fn() -> crate::sensores::Sensores + Send + Sync>,
+    /// O diagnóstico dos discos deste computador. Roda o `smartctl` (e o `sudo -n`) quando a
+    /// aba Disco abre, numa thread; os testes respondem sem rodar nada.
+    pub saude_local: std::sync::Arc<dyn Fn(bool) -> crate::saude_discos::Diagnostico + Send + Sync>,
     /// De quanto em quanto tempo o leitor leve dos sensores (o do medidor e do aviso de calor)
     /// lê: [`crate::sensores::RITMO`]; nos testes, bem menos.
     pub ritmo_dos_sensores: std::time::Duration,
@@ -278,6 +281,7 @@ impl Ambiente {
             processos: Rc::new(crate::processos::fonte_do_sistema),
             ritmo_dos_processos: crate::processos::RITMO,
             sensores: std::sync::Arc::new(crate::sensores::deste_computador),
+            saude_local: std::sync::Arc::new(crate::saude_discos::deste_computador),
             ritmo_dos_sensores: crate::sensores::RITMO,
         }
     }
@@ -329,6 +333,7 @@ impl Ambiente {
             processos: Rc::new(|_| Box::new(crate::processos::FonteDeTeste::exemplo())),
             ritmo_dos_processos: std::time::Duration::from_millis(50),
             sensores: std::sync::Arc::new(crate::sensores::Sensores::default),
+            saude_local: std::sync::Arc::new(|_| crate::saude_discos::Diagnostico::OutroSistema),
             ritmo_dos_sensores: std::time::Duration::from_millis(50),
         }
     }

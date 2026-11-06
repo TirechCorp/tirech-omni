@@ -41,7 +41,9 @@ operado por assistentes de IA como o Claude Code, o Codex e o OpenCode.
   abrir a página no navegador pelo canal SSH.
 - **Desempenho**: um medidor de CPU na barra de título e uma página como a do Gerenciador de
   Tarefas, com o peso de cada terminal, e os processos e o disco deste computador ou do
-  servidor SSH, com filtro, árvore e encerrar.
+  servidor SSH, com filtro, árvore e encerrar. As mesmas abas, sem o app, no `htop-omni`.
+- **Saúde dos discos**: vida restante, total gravado, horas ligado, vezes ligado e alertas pelo
+  `smartctl`, em segundo plano ao conectar.
 - Interface em **português, inglês e espanhol**.
 - Versão **portable** para o Windows, pacotes para **ARM**, bandeja do sistema e instalação no
   computador sem administrador.
@@ -70,9 +72,9 @@ Os pacotes ficam nas [Releases](https://github.com/TirechCorp/tirech-omni/releas
 | [`tirech-omni-linux-armv7.tar.gz`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-linux-armv7.tar.gz) | Linux ARM de 32 bits (armhf) |
 | [`tirech-omni-macos.dmg`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-macos.dmg) | macOS 11 ou mais novo, Apple Silicon e Intel (universal) |
 
-Cada pacote traz o app, as ferramentas de linha de comando (`tirech-omni-keygen`,
+Cada pacote traz o app, o `htop-omni`, as ferramentas de linha de comando (`tirech-omni-keygen`,
 `tirech-omni-agent`, `tirech-omni-add` e `tirech-omni-copy-id`) e o
-`THIRD-PARTY-NOTICES.txt`; no macOS, as ferramentas ficam dentro do `.app`, em
+`THIRD-PARTY-NOTICES.txt`; no macOS, eles ficam dentro do `.app`, em
 `Contents/MacOS`. O `SHA256SUMS.txt` da release confere os downloads.
 
 ## Instalar
@@ -174,6 +176,7 @@ O workspace tem dois pacotes:
 | Pacote | O quê |
 | --- | --- |
 | `tirech-omni` | o app |
+| `htop-omni` | as abas Processos, Disco, Rede e Sensores do Desempenho num programa à parte |
 | `tirech-omni-tools` | `tirech-omni-keygen`, `tirech-omni-agent`, `tirech-omni-add` e `tirech-omni-copy-id`: o `ssh-keygen`, o `ssh-agent`, o `ssh-add` e o `ssh-copy-id` em linha de comando, com as chaves do app |
 
 ### Pacotes

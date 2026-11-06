@@ -414,6 +414,43 @@ processos-disco-virtual = Virtual
 processos-disco-lendo = Reading
 processos-disco-escrevendo = Writing
 processos-disco-nenhum = No disk has done any operations.
+saude-discos-titulo = Disk health
+saude-discos-resumo = Disks read: { $n } · with alerts: { $alerta }
+saude-discos-detalhes = Details
+saude-discos-nenhum = No disk with SMART on this machine.
+saude-discos-virtual = Virtual machine or container: disks are not read.
+saude-discos-sem-permissao = No permission to read the disks: log in as root or, with passwordless sudo, click Check again.
+saude-discos-sem-smartctl = smartctl is not installed: disks are not read.
+saude-discos-verificar = Check again
+saude-discos-alerta-titulo = Disks with alerts
+saude-discos-notificacao-titulo = Disk alert on { $nome }
+saude-discos-coluna-disco = Disk
+saude-discos-coluna-modelo = Model
+saude-discos-coluna-saude = Health
+saude-discos-coluna-vida = Life left
+saude-discos-coluna-gravado = Written
+saude-discos-coluna-horas = Power-on hours
+saude-discos-coluna-ligacoes = Power cycles
+saude-discos-coluna-realocados = Reallocated
+saude-discos-alerta-falhando = SMART says the disk is failing
+saude-discos-alerta-critico = the disk raised its critical warning
+saude-discos-alerta-reserva = the spare area is below its threshold
+saude-discos-alerta-vida = { $vida }% of its useful life left
+saude-discos-alerta-realocados = { $n } reallocated sectors
+saude-discos-alerta-pendentes = { $n } pending sectors
+saude-discos-alerta-midia = { $n } media errors
+saude-discos-alerta-de = { $disco }: { $alerta }
+saude-discos-falhando = Failing
+saude-discos-em-alerta = Alert
+saude-discos-ok = OK
+saude-discos-sem-dado = No data
+saude-discos-horas = { $horas } h
+saude-discos-horas-um-ano = { $horas } h ({ $anos } year)
+saude-discos-horas-anos = { $horas } h ({ $anos } years)
+saude-discos-opcao-ligado = On
+saude-discos-opcao-desligado = Off
+saude-discos-herdar-de = Inherit ({ $nome })
+saude-discos-herdar-configuracoes = Inherit (Settings)
 processos-nenhum = No processes.
 processos-estado-executando = Running
 processos-estado-dormindo = Sleeping
@@ -482,3 +519,19 @@ sensores-valor = Value
 sensores-chip = Chip
 sensores-calor-titulo = The CPU is getting hot
 sensores-calor-corpo = This computer's processor is at { $temperatura } (the warning is above { $limite }).
+casca-fechar-o-painel-menu = Close the pane…
+casca-mover-o-painel-para-a-janela = Move the pane to window
+casca-fechar-o-painel-n = Close pane { $n }?
+casca-painel-abas-mover-ou-fechar = { $n ->
+    [one] This pane has 1 tab. Move it to another pane or close the connection too.
+    *[other] This pane has { $n } tabs. Move them to another pane or close the connections too.
+    }
+casca-painel-abas-so-fechar = { $n ->
+    [one] This pane has 1 tab, and no other pane can take it. Closing the pane closes the connection.
+    *[other] This pane has { $n } tabs, and no other pane can take them. Closing the pane closes the connections.
+    }
+casca-mover-as-abas-para = Move the tabs to
+casca-mover-as-abas = Move the tabs
+casca-fechar-as-abas = Close the tabs
+casca-esta-janela = This window
+casca-janela-e-painel = { $janela } › { $painel }

@@ -13,8 +13,8 @@ use tomni_ui::prelude::*;
 use tomni_ui::terminal::Session;
 use tomni_ui::terminal::ssh::{ForwardState, ForwardStatus, SshForwards};
 
+use super::Tela;
 use super::mcp::{Plano, Saida, Sonda, Trabalho};
-use super::{Lugar, Tela};
 use crate::abrir::forward_do_tunel;
 use crate::mcp::permissao::{PermissaoIa, permissao_efetiva};
 use crate::modelo::{Connection, TipoTunel, Tunel};
@@ -463,7 +463,11 @@ impl Tela {
             .iter()
             .map(|(_, s)| s.key_str())
             .collect();
-        self.abrir_com(conexao.id, Lugar::default(), true);
+        let lugar = match self.lugar_do_assistente(&json!({}), t.pedido.ligacao) {
+            Ok(lugar) => lugar,
+            Err(erro) => return self.terminar_mcp(&t, Saida::Erro(erro)),
+        };
+        self.abrir_com(conexao.id, lugar, true);
         let prefixo = format!("{}-", conexao.id);
         let inicio = Instant::now();
         let mut marcada = false;

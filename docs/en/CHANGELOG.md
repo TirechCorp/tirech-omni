@@ -7,6 +7,19 @@ follow [SemVer](https://semver.org/).
 
 ### Added
 
+- `htop-omni`: the Processes, Disk, Network and Sensors tabs of Performance in a separate program,
+  for this computer only, which runs without Omni and writes nothing. It ships in every package.
+- Disk health: when connecting over SSH, in the background, each disk's remaining life, total data
+  written, power-on hours, power cycles and alerts, through `smartctl`, with a notification on an
+  alert. In the Disk tab of Performance, under **Details**. Turn it on or off in Settings › General,
+  per folder and per connection. Virtual machines and containers aren't even tried. The automatic
+  reading only runs as root or where `sudo` has already worked; the first use of `sudo` comes from
+  clicking **Check again**, because a refusal would go to the log and could become an email to the
+  administrator.
+- Close and move a whole pane: **Close the pane…** asks whether the tabs go to another pane, in this
+  window or another, or whether the connections close too; **Move the pane to window** takes the pane
+  as it is. Ctrl+Shift+W goes through the same question.
+
 - Sensors: the Performance page's **Sensors** tab shows the temperature of the CPU, memory,
   disk, motherboard and graphics card, with the last minute's chart, and the fans, for this
   computer or the server of an open SSH connection (Linux). What has no sensor doesn't show up.
@@ -110,6 +123,11 @@ follow [SemVer](https://semver.org/).
 
 ### Changed
 
+- Less CPU with many tabs, and splitting a pane no longer stalls the window: with 12 tabs, from
+  43–54 ms to 6.7–7.6 ms.
+- Tabs an assistant opens through MCP stay in the window and pane it already works in, not in the
+  focused window.
+
 - The Claude Code, Codex and OpenCode Path and Arguments fields gave way to profiles; what was
   in them becomes each assistant's default profile.
 - The read-only copy sends to the owner what changes in the connections, the settings, the AI
@@ -133,6 +151,10 @@ follow [SemVer](https://semver.org/).
   engine up itself.
 
 ### Fixed
+
+- The vault taken to another machine didn't show up when importing: the vault's **Import** now opens
+  the `.tirech-vault`.
+- One Ed25519 `.ppk` key in 512 gave "Incorrect passphrase" with the right one.
 
 - The password did not work on servers that only accept `keyboard-interactive` (FreeBSD and
   pfSense out of the box, OpenSSH with `PasswordAuthentication no`): it does now. A two-factor

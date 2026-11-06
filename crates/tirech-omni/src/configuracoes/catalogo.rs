@@ -211,6 +211,7 @@ pub const CATALOGO: &[Definicao] = &[
     ),
     def!("geral.avisar_calor", tk!("config-secao-geral"), Valor),
     def!("geral.limite_calor", tk!("config-secao-geral"), Valor),
+    def!("geral.diagnostico_discos", tk!("config-secao-geral"), Valor),
     def!("geral.recentes_max", tk!("config-secao-geral"), Valor),
     def!("acao.limpar_recentes", tk!("config-secao-geral"), Acao),
     def!("geral.assistente_ia", tk!("config-secao-geral"), Valor),

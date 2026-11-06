@@ -54,6 +54,8 @@ pub enum Campo {
     Persistente,
     /// Sessão › Mouse no terminal (copiar e colar, ou o menu).
     Mouse,
+    /// Sessão › Saúde dos discos (a vida útil e os alertas do SMART).
+    DiagnosticoDiscos,
     /// Sessão › Tentar de novo após (a rodada nova de reconexão).
     Reconectar,
     /// Sessão › Fechar sem uso após.
@@ -79,7 +81,7 @@ pub enum Campo {
 
 impl Campo {
     /// Todos os campos, na ordem da grade.
-    pub const TODOS: [Campo; 27] = [
+    pub const TODOS: [Campo; 28] = [
         Campo::Url,
         Campo::Host,
         Campo::Porta,
@@ -98,6 +100,7 @@ impl Campo {
         Campo::SessaoSsh,
         Campo::Persistente,
         Campo::Mouse,
+        Campo::DiagnosticoDiscos,
         Campo::Reconectar,
         Campo::Ocioso,
         Campo::Programa,
@@ -134,7 +137,7 @@ impl Campo {
                     | Kind::Link
             ),
             Campo::Ia => matches!(tipo, Kind::Ssh | Kind::Local | Kind::Telnet),
-            Campo::IaNoServidor => matches!(tipo, Kind::Ssh),
+            Campo::IaNoServidor | Campo::DiagnosticoDiscos => matches!(tipo, Kind::Ssh),
             Campo::Mcp => matches!(
                 tipo,
                 Kind::Ssh
@@ -174,7 +177,7 @@ mod testes {
 
     /// A tabela por extenso, na ordem de `Kind::TODOS`: Ssh, Sftp, Ftp, S3, Rclone, Local, Telnet,
     /// Link. Mudar a tabela exige mudar este teste.
-    const TABELA: [(Campo, [bool; 8]); 27] = [
+    const TABELA: [(Campo, [bool; 8]); 28] = [
         (
             Campo::Url,
             [false, false, false, false, false, false, false, true],
@@ -246,6 +249,10 @@ mod testes {
         (
             Campo::Mouse,
             [true, false, false, false, false, true, true, false],
+        ),
+        (
+            Campo::DiagnosticoDiscos,
+            [true, false, false, false, false, false, false, false],
         ),
         (
             Campo::Reconectar,

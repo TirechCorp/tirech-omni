@@ -702,6 +702,87 @@ mod remoto {
         );
     }
 
+    const SAUDE: &str = "desempenho-disco-saude";
+
+    /// Quantas vezes o diagnóstico dos discos rodou no servidor.
+    fn rodadas(servidor: &Servidor) -> usize {
+        servidor
+            .comandos()
+            .iter()
+            .filter(|c| c.starts_with(tirech_omni::saude_discos::COMANDO))
+            .count()
+    }
+
+    /// O caminho inteiro por um canal SSH de verdade: o comando sai pela sessão aberta, sem abrir
+    /// outra conexão, e o que ele responde vira a notificação.
+    #[test]
+    fn o_diagnostico_dos_discos_roda_pelo_canal_da_sessao() {
+        let pasta = Pasta::nova("processos-saude-real");
+        let servidor = Rc::new(Servidor::novo(&pasta.caminho().join("servidor")));
+        servidor.programar(
+            tirech_omni::saude_discos::COMANDO,
+            "@tirech-discos discos\n@disco /dev/sda sat\n\
+             {\"model_name\":\"HD\",\"smart_status\":{\"passed\":false}}\n@fim\n",
+            0,
+        );
+        let mut tree = Tree::default();
+        let mut c = Connection::new("servidor", Kind::Ssh);
+        c.host = "127.0.0.1".into();
+        c.port = servidor.porta;
+        c.user = "ana".into();
+        c.key_file = Some("/chaves/ana".into());
+        tree.add_connection(None, c);
+        pasta.semear(&tree);
+        pasta.pagina_inicial_padrao("terminais");
+        pasta.agente_padrao(false);
+        let mut ambiente = Ambiente::de_teste(pasta.caminho(), pasta.ssh());
+        let fonte = FonteDeTeste::exemplo();
+        ambiente.processos = Rc::new(move |_| Box::new(fonte.clone()));
+        ambiente.ritmo_dos_processos = Duration::from_millis(50);
+        let caminho = pasta.caminho().to_path_buf();
+        let s = Rc::clone(&servidor);
+        let mut app = TestApp::new(move || {
+            tela_com_ferramentas(caminho, ambiente, move |_| Rc::new(AbreReal(s)), |_| {})
+        })
+        .size(1280, 720)
+        .theme(Theme::Light);
+        app.double_click("arvore-1");
+        esperar(&mut app, "a notificação", |a| {
+            !a.notifications().is_empty()
+        });
+        assert_eq!(app.notifications()[0].title, "Disco com alerta em servidor");
+        assert_eq!(rodadas(&servidor), 1, "{:?}", servidor.comandos());
+        assert_eq!(servidor.aceitas(), 1, "uma conexão só");
+
+        // A aba Disco mostra o servidor escolhido, sem rodar de novo: a leitura ainda vale.
+        app.click("menus-exibir").click("desempenho");
+        app.click("desempenho-secoes-disco");
+        app.select("desempenho-disco-maquina", "servidor");
+        esperar(&mut app, "o resumo", |a| {
+            a.tree().find("desempenho-disco-saude-detalhes").is_some()
+                && a.visible("desempenho-disco-saude-detalhes")
+        });
+        app.click("desempenho-disco-saude-detalhes");
+        esperar(&mut app, "a tabela", |a| a.grid(SAUDE).rows.len() == 1);
+        assert_eq!(celulas(&app, SAUDE, "/dev/sda-sat")[2], "Falhando");
+        assert_eq!(rodadas(&servidor), 1);
+
+        // "Verificar de novo" pergunta ao servidor, agora podendo chamar o `sudo`: o disco voltou
+        // ao normal e o alerta some.
+        servidor.programar(
+            tirech_omni::saude_discos::COMANDO_COM_SUDO,
+            "@tirech-discos discos\n@disco /dev/sda sat\n\
+             {\"model_name\":\"HD\",\"smart_status\":{\"passed\":true}}\n@fim\n",
+            0,
+        );
+        app.click("desempenho-disco-saude-verificar");
+        esperar(&mut app, "o disco bom", |a| {
+            celulas(a, SAUDE, "/dev/sda-sat")[2] == "OK"
+        });
+        assert_eq!(rodadas(&servidor), 2);
+        assert_eq!(servidor.aceitas(), 1, "continua uma conexão só");
+    }
+
     #[test]
     fn o_medidor_mostra_a_cpu_do_servidor_ate_a_sessao_fechar() {
         let pasta = Pasta::nova("processos-medidor-remoto");

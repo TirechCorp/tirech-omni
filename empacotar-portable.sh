@@ -1,12 +1,12 @@
 #!/bin/sh
-# Monta o zip da versão portable do Windows: a pasta "Tirech Omni" com os cinco
+# Monta o zip da versão portable do Windows: a pasta "Tirech Omni" com os seis
 # executáveis e a pasta tirech-omnidata ao lado deles. Com essa pasta ao lado do .exe, o app
 # grava tudo nela e não escreve no sistema.
 #
 # Uso: ./empacotar-portable.sh [saída.zip]
 # Os .exe vêm de $CARGO_TARGET_DIR/$TRIPLO/release (padrão: ./target e x86_64-pc-windows-gnu),
 # do build
-#   cargo build --release --target x86_64-pc-windows-gnu -p tirech-omni -p tirech-omni-tools
+#   cargo build --release --target x86_64-pc-windows-gnu -p tirech-omni -p tirech-omni-tools -p htop-omni
 # O Windows ARM (TRIPLO=aarch64-pc-windows-gnullvm) vem do empacotar-arm.sh, que deixa a
 # libunwind.dll ao lado dos .exe: ela vai junto no zip.
 # Os avisos de terceiros vêm de $AVISOS (padrão: target/THIRD-PARTY-NOTICES.txt, do
@@ -25,7 +25,7 @@ trap 'rm -rf "$trabalho"' EXIT
 pacote="$trabalho/Tirech Omni"
 mkdir -p "$pacote/tirech-omnidata"
 
-for nome in tirech-omni tirech-omni-add tirech-omni-agent tirech-omni-copy-id tirech-omni-keygen; do
+for nome in tirech-omni htop-omni tirech-omni-add tirech-omni-agent tirech-omni-copy-id tirech-omni-keygen; do
     if [ ! -f "$alvo/$nome.exe" ]; then
         echo "Falta $alvo/$nome.exe: rode o build do Windows antes." >&2
         exit 1

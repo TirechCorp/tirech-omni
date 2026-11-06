@@ -119,6 +119,10 @@ config-geral-avisar_calor = Warn when the CPU gets hot
     .descricao = A system notification when this computer's processor goes above the limit. Another one only after it cools down 5 °C and 10 minutes pass.
     .palavras = temperature heat hot warning notification sensor cpu processor overheating
 
+config-geral-diagnostico_discos = Disk diagnostics
+    .descricao = When connecting, reads the wear, total data written, power-on hours, power cycles and SMART alerts in the background. As root, it reads on its own; with passwordless sudo, after one click on Check again, in the Disk tab of Performance. Without that click, sudo is never called. Virtual machines and containers aren't even tried. Connections and folders can decide otherwise.
+    .palavras = disk ssd hdd nvme smart smartctl tbw life wear health hours power alert diagnostics sudo root
+
 config-geral-limite_calor = Heat warning limit (°C)
     .descricao = Above this temperature, the warning. 0 is automatic: the sensor's critical limit minus 10 °C, or 90 °C.
     .palavras = temperature heat limit degrees celsius warning sensor

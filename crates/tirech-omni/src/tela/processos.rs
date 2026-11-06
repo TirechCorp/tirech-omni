@@ -10,6 +10,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use tomni_ui::prelude::*;
 use tomni_ui::terminal::Session;
@@ -20,11 +21,16 @@ use crate::agente::{acordar, ler_contador};
 use crate::desempenho as conta;
 use crate::espacos::id_da_chave;
 use crate::portas::descobrir::AbridorCompartilhado;
-use crate::processos::{Evento, Leitor, Leitura, Linha, Maquina, PONTOS, UsoDoDisco, UsoDoNucleo};
-use crate::sensores::Grupo;
+use crate::processos::{
+    Evento, FonteDeProcessos, Leitor, Leitura, Linha, Maquina, PONTOS, UsoDoDisco, UsoDoNucleo,
+};
+use crate::sensores::{Grupo, Sensores};
 use crate::t;
 
+mod saude;
 mod sensores;
+
+pub(super) use saude::FonteDaSaude;
 
 pub(super) use sensores::{aba_sensores, graus_mili, mostrar_sensores_daqui};
 
@@ -112,6 +118,81 @@ pub(super) struct Processos {
     linhas_dos_sensores: Signal<Vec<DataGridRow>>,
     escolhidos_dos_sensores: Signal<BTreeSet<String>>,
     ordem_dos_sensores: Signal<Option<(String, SortDirection)>>,
+    /// O diagnóstico dos discos da máquina escolhida (`None`: nada lido ou desligado).
+    saude: Signal<Option<crate::saude_discos::Diagnostico>>,
+    linhas_da_saude: Signal<Vec<DataGridRow>>,
+    escolhidos_da_saude: Signal<BTreeSet<String>>,
+    saude_aberta: Signal<bool>,
+}
+
+/// De onde as abas leem: a fonte dos processos de cada máquina, as máquinas do seletor e o
+/// leitor que corre. O Omni dá as sessões SSH abertas ([`Fonte::da_tela`]); o `htop-omni`, só
+/// este computador ([`Fonte::deste_computador`]).
+#[derive(Clone)]
+pub(super) struct Fonte {
+    processos: Rc<dyn Fn(Maquina) -> Box<dyn FonteDeProcessos>>,
+    ritmo: Duration,
+    sensores: Arc<dyn Fn() -> Sensores + Send + Sync>,
+    maquinas: Rc<dyn Fn() -> Vec<(String, Option<Session>)>>,
+    correndo: Rc<RefCell<Option<Corrente>>>,
+    /// Mostra o seletor de máquina (sem ele, só este computador).
+    com_seletor: bool,
+    saude: FonteDaSaude,
+}
+
+impl Fonte {
+    /// A do Omni: a fonte do ambiente, este computador e as sessões SSH das janelas.
+    pub(super) fn da_tela(tela: &Rc<Tela>) -> Self {
+        let ambiente = tela.ferramentas.ambiente();
+        let t = Rc::clone(tela);
+        let (ler, pedir) = (Rc::clone(tela), Rc::clone(tela));
+        Self {
+            processos: Rc::clone(&ambiente.processos),
+            ritmo: ambiente.ritmo_dos_processos,
+            sensores: Arc::clone(&ambiente.sensores),
+            maquinas: Rc::new(move || maquinas(&t)),
+            correndo: Rc::clone(&tela.processos_correndo),
+            com_seletor: true,
+            saude: FonteDaSaude {
+                ler: Rc::new(move |sessao| ler.saude_da_maquina(sessao)),
+                pedir: Rc::new(move |sessao, forcar| pedir.pedir_saude(sessao, forcar)),
+            },
+        }
+    }
+
+    /// Só este computador, sem o seletor de máquina.
+    pub(super) fn deste_computador(
+        processos: Rc<dyn Fn(Maquina) -> Box<dyn FonteDeProcessos>>,
+        ritmo: Duration,
+        sensores: Arc<dyn Fn() -> Sensores + Send + Sync>,
+        saude: FonteDaSaude,
+    ) -> Self {
+        Self {
+            processos,
+            ritmo,
+            sensores,
+            maquinas: Rc::new(|| vec![(t!("processos-este-computador"), None)]),
+            correndo: Rc::default(),
+            com_seletor: false,
+            saude,
+        }
+    }
+
+    /// As máquinas do seletor: este computador primeiro.
+    pub(super) fn maquinas(&self) -> Vec<(String, Option<Session>)> {
+        (self.maquinas)()
+    }
+
+    /// Encerra os processos `chaves` (os pids) da máquina da aba; `forcar`, na marra.
+    fn encerrar(&self, chaves: &[String], forcar: bool) {
+        let pids: Vec<u32> = chaves.iter().filter_map(|c| c.parse().ok()).collect();
+        if pids.is_empty() {
+            return;
+        }
+        if let Some(c) = self.correndo.borrow().as_ref() {
+            c.leitor.encerrar(pids, forcar);
+        }
+    }
 }
 
 /// O leitor que corre e, numa máquina remota, a sessão e o abridor dela (renovado a cada
@@ -122,9 +203,9 @@ pub(super) struct Corrente {
 }
 
 impl Corrente {
-    /// Sobe o leitor de `sessao` (`None`: este computador); cada entrega sobe `pronto`.
-    pub(super) fn nova(tela: &Tela, sessao: Option<Session>, pronto: Signal<u64>) -> Self {
-        let ambiente = tela.ferramentas.ambiente();
+    /// Sobe o leitor de `sessao` (`None`: este computador) com a fonte de `fonte`; cada entrega
+    /// sobe `pronto`.
+    pub(super) fn nova(fonte: &Fonte, sessao: Option<Session>, pronto: Signal<u64>) -> Self {
         let (alvo, remota) = match sessao {
             Some(sessao) => {
                 let abridor: AbridorCompartilhado = Arc::new(Mutex::new(sessao.ssh_channels()));
@@ -135,11 +216,9 @@ impl Corrente {
             }
             None => (Maquina::Local, None),
         };
-        let leitor = Leitor::novo(
-            (ambiente.processos)(alvo),
-            ambiente.ritmo_dos_processos,
-            move || acordar(pronto),
-        );
+        let leitor = Leitor::novo((fonte.processos)(alvo), fonte.ritmo, move || {
+            acordar(pronto)
+        });
         Self { leitor, remota }
     }
 
@@ -194,7 +273,7 @@ pub(super) fn maquinas(tela: &Tela) -> Vec<(String, Option<Session>)> {
 
 /// O estado e os efeitos: o leitor da máquina escolhida enquanto `pagina_aberta()` e uma das
 /// abas novas está à mostra, e as linhas das tabelas a cada leitura.
-pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static) -> Processos {
+pub(super) fn ligar(fonte: &Fonte, pagina_aberta: impl Fn() -> bool + 'static) -> Processos {
     let p = Processos {
         aba: signal(APP.to_owned()),
         maquina: signal(t!("processos-este-computador")),
@@ -235,18 +314,20 @@ pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static)
         grafico: signal(0),
         grafico_do_disco: signal(0),
         grafico_da_rede: signal(0),
-        sensores_aqui: !(tela.ferramentas.ambiente().sensores)()
-            .temperaturas
-            .is_empty(),
+        sensores_aqui: !(fonte.sensores)().temperaturas.is_empty(),
         temperaturas: std::array::from_fn(|_| signal(Vec::new())),
         ventoinhas_vistas: signal(BTreeSet::new()),
         grafico_dos_sensores: signal(0),
         linhas_dos_sensores: signal(Vec::new()),
         escolhidos_dos_sensores: signal(BTreeSet::new()),
         ordem_dos_sensores: signal(None),
+        saude: signal(None),
+        linhas_da_saude: signal(Vec::new()),
+        escolhidos_da_saude: signal(BTreeSet::new()),
+        saude_aberta: signal(false),
     };
     // O leitor: nasce quando a aba aparece, troca com a máquina e para quando some.
-    let t = Rc::clone(tela);
+    let f = fonte.clone();
     let antes: RefCell<Option<(bool, String)>> = RefCell::new(None);
     effect(move || {
         let ativo = pagina_aberta() && p.aba.get() != APP;
@@ -257,7 +338,7 @@ pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static)
         }
         *antes.borrow_mut() = agora;
         untrack(|| {
-            t.processos_correndo.borrow_mut().take();
+            f.correndo.borrow_mut().take();
             p.quadro.set(None);
             p.erro.set(None);
             p.aviso.set(None);
@@ -284,21 +365,22 @@ pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static)
             if !ativo {
                 return;
             }
-            let sessao = maquinas(&t)
+            let sessao = f
+                .maquinas()
                 .into_iter()
                 .find(|(rotulo, _)| *rotulo == maquina)
                 .and_then(|(_, s)| s);
-            *t.processos_correndo.borrow_mut() = Some(Corrente::nova(&t, sessao, p.pronto));
+            *f.correndo.borrow_mut() = Some(Corrente::nova(&f, sessao, p.pronto));
         });
     });
 
     // O que o leitor entregou.
-    let t = Rc::clone(tela);
+    let correndo = Rc::clone(&fonte.correndo);
     effect(move || {
         ler_contador(p.pronto);
         untrack(|| {
             let eventos = {
-                let correndo = t.processos_correndo.borrow();
+                let correndo = correndo.borrow();
                 let Some(c) = correndo.as_ref() else {
                     return;
                 };
@@ -320,10 +402,10 @@ pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static)
     });
 
     // A sessão escolhida fechou: volta para este computador.
-    let t = Rc::clone(tela);
+    let f = fonte.clone();
     effect(move || {
         p.pronto.get();
-        let lista = maquinas(&t);
+        let lista = f.maquinas();
         let atual = p.maquina.get();
         if !lista.iter().any(|(rotulo, _)| *rotulo == atual) {
             p.maquina.set(lista[0].0.clone());
@@ -376,6 +458,7 @@ pub(super) fn ligar(tela: &Rc<Tela>, pagina_aberta: impl Fn() -> bool + 'static)
         });
     });
     sensores::ligar(p);
+    saude::ligar(fonte, p);
     p
 }
 
@@ -751,32 +834,22 @@ fn linhas_da_rede(
         .collect()
 }
 
-impl Tela {
-    /// Encerra os processos `chaves` (os pids) da máquina da aba; `forcar`, na marra.
-    fn encerrar_processos(&self, chaves: &[String], forcar: bool) {
-        let pids: Vec<u32> = chaves.iter().filter_map(|c| c.parse().ok()).collect();
-        if pids.is_empty() {
-            return;
-        }
-        if let Some(c) = self.processos_correndo.borrow().as_ref() {
-            c.leitor.encerrar(pids, forcar);
-        }
-    }
-}
-
 /// A barra de cima de uma aba: a máquina, o filtro, a opção da aba e os botões de encerrar (que
 /// descem para a linha de baixo quando a janela é estreita). Na Rede, só a máquina e o filtro.
 fn barra(
-    tela: &Rc<Tela>,
+    fonte: &Fonte,
     p: Processos,
     aba: &'static str,
     escolhidas: Signal<BTreeSet<String>>,
 ) -> impl View + use<> {
-    let t = Rc::clone(tela);
+    let f = fonte.clone();
     let rotulos = move || {
         p.pronto.get();
+        if !f.com_seletor {
+            return Vec::new();
+        }
         vec![
-            maquinas(&t)
+            f.maquinas()
                 .into_iter()
                 .map(|(rotulo, _)| rotulo)
                 .collect::<Vec<_>>(),
@@ -820,7 +893,7 @@ fn barra(
         CheckBox::bind(p.so_disco, t!("processos-so-disco")).id("desempenho-disco-so-ativos")
     };
     let nenhuma = move || escolhidas.with(BTreeSet::is_empty);
-    let (t1, t2) = (Rc::clone(tela), Rc::clone(tela));
+    let (f1, f2) = (fonte.clone(), fonte.clone());
     linha.child(opcao).child(Border::new().grow(1)).child(
         Row::new()
             .gap(8)
@@ -831,7 +904,7 @@ fn barra(
                     .disabled(nenhuma)
                     .on_click(move || {
                         let chaves: Vec<String> = escolhidas.get_untracked().into_iter().collect();
-                        t1.encerrar_processos(&chaves, false);
+                        f1.encerrar(&chaves, false);
                     }),
             )
             .child(
@@ -840,7 +913,7 @@ fn barra(
                     .disabled(nenhuma)
                     .on_click(move || {
                         let chaves: Vec<String> = escolhidas.get_untracked().into_iter().collect();
-                        t2.encerrar_processos(&chaves, true);
+                        f2.encerrar(&chaves, true);
                     }),
             ),
     )
@@ -1345,11 +1418,11 @@ fn avisos(p: Processos, aba: &'static str) -> impl View {
 /// O menu de contexto de uma linha: encerrar a linha (ou as escolhidas, se ela está entre
 /// elas).
 fn menu(
-    tela: &Rc<Tela>,
+    fonte: &Fonte,
     aba: &'static str,
     escolhidas: Signal<BTreeSet<String>>,
 ) -> impl Fn(&str) -> MenuFlyout + 'static {
-    let tela = Rc::clone(tela);
+    let fonte = fonte.clone();
     move |chave: &str| {
         // O menu nasce com a linha: a seleção se lê na hora do clique.
         let alvo = move |chave: &str| -> Vec<String> {
@@ -1361,25 +1434,25 @@ fn menu(
                 }
             })
         };
-        let (t1, t2) = (Rc::clone(&tela), Rc::clone(&tela));
+        let (f1, f2) = (fonte.clone(), fonte.clone());
         let (c1, c2) = (chave.to_owned(), chave.to_owned());
         MenuFlyout::new()
             .item(
                 format!("desempenho-{aba}-menu-{chave}-encerrar"),
                 t!("processos-encerrar"),
-                move || t1.encerrar_processos(&alvo(&c1), false),
+                move || f1.encerrar(&alvo(&c1), false),
             )
             .item(
                 format!("desempenho-{aba}-menu-{chave}-forcar"),
                 t!("processos-forcar"),
-                move || t2.encerrar_processos(&alvo(&c2), true),
+                move || f2.encerrar(&alvo(&c2), true),
             )
     }
 }
 
 /// A aba Processos.
-pub(super) fn aba_processos(tela: &Rc<Tela>, p: Processos) -> impl View + use<> {
-    let apagar = Rc::clone(tela);
+pub(super) fn aba_processos(fonte: &Fonte, p: Processos) -> impl View + use<> {
+    let apagar = fonte.clone();
     let tabela = DataGrid::bind(p.linhas, p.escolhidas)
         .id("desempenho-processos-tabela")
         .grow(1)
@@ -1404,13 +1477,13 @@ pub(super) fn aba_processos(tela: &Rc<Tela>, p: Processos) -> impl View + use<> 
         ])
         .sort(p.ordem)
         .empty_text(t!("processos-nenhum"))
-        .item_context_flyout(menu(tela, PROCESSOS, p.escolhidas))
-        .on_delete(move |chaves| apagar.encerrar_processos(&chaves, false));
+        .item_context_flyout(menu(fonte, PROCESSOS, p.escolhidas))
+        .on_delete(move |chaves| apagar.encerrar(&chaves, false));
     Column::new()
         .grow(1)
         .gap(8)
         .padding(8)
-        .child(barra(tela, p, PROCESSOS, p.escolhidas))
+        .child(barra(fonte, p, PROCESSOS, p.escolhidas))
         .child(graficos_dos_processos(p))
         .child(resumo(p, PROCESSOS))
         .child(avisos(p, PROCESSOS))
@@ -1418,8 +1491,8 @@ pub(super) fn aba_processos(tela: &Rc<Tela>, p: Processos) -> impl View + use<> 
 }
 
 /// A aba Disco.
-pub(super) fn aba_disco(tela: &Rc<Tela>, p: Processos) -> impl View + use<> {
-    let apagar = Rc::clone(tela);
+pub(super) fn aba_disco(fonte: &Fonte, p: Processos) -> impl View + use<> {
+    let apagar = fonte.clone();
     let operacoes = OPERACOES_POR_PROCESSO.then(|| {
         [
             DataGridColumn::new("leituras", t!("processos-disco-leituras"))
@@ -1460,8 +1533,8 @@ pub(super) fn aba_disco(tela: &Rc<Tela>, p: Processos) -> impl View + use<> {
         .columns(colunas)
         .sort(p.ordem_do_disco)
         .empty_text(t!("processos-nenhum"))
-        .item_context_flyout(menu(tela, DISCO, p.escolhidas_do_disco))
-        .on_delete(move |chaves| apagar.encerrar_processos(&chaves, false));
+        .item_context_flyout(menu(fonte, DISCO, p.escolhidas_do_disco))
+        .on_delete(move |chaves| apagar.encerrar(&chaves, false));
     let discos = DataGrid::bind(p.linhas_dos_discos, p.escolhidos_dos_discos)
         .id("desempenho-disco-discos")
         .grow(1)
@@ -1491,20 +1564,23 @@ pub(super) fn aba_disco(tela: &Rc<Tela>, p: Processos) -> impl View + use<> {
         .size(p.altura_dos_discos)
         .min_first(56.0)
         .min_second(48.0)
-        .grow(1);
+        .grow(1)
+        .visible(move || !saude::tabela_a_mostra(p));
     Column::new()
         .grow(1)
         .gap(8)
         .padding(8)
-        .child(barra(tela, p, DISCO, p.escolhidas_do_disco))
+        .child(barra(fonte, p, DISCO, p.escolhidas_do_disco))
         .child(graficos_do_disco(p))
         .child(resumo(p, DISCO))
         .child(avisos(p, DISCO))
+        .child(saude::bloco(fonte, p))
+        .child(saude::tabela(p))
         .child(tabelas)
 }
 
 /// A aba Rede.
-pub(super) fn aba_rede(tela: &Rc<Tela>, p: Processos) -> impl View + use<> {
+pub(super) fn aba_rede(fonte: &Fonte, p: Processos) -> impl View + use<> {
     let tabela = DataGrid::bind(p.linhas_da_rede, p.escolhidas_da_rede)
         .id("desempenho-rede-tabela")
         .grow(1)
@@ -1533,7 +1609,7 @@ pub(super) fn aba_rede(tela: &Rc<Tela>, p: Processos) -> impl View + use<> {
         .grow(1)
         .gap(8)
         .padding(8)
-        .child(barra(tela, p, REDE, p.escolhidas_da_rede))
+        .child(barra(fonte, p, REDE, p.escolhidas_da_rede))
         .child(graficos_da_rede(p))
         .child(resumo(p, REDE))
         .child(avisos(p, REDE))

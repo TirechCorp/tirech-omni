@@ -588,6 +588,10 @@ categoria! {
         medidor_temperatura: bool = true,
         /// A notificação do sistema quando a CPU deste computador passa de `limite_calor`.
         avisar_calor: bool = true,
+        /// O diagnóstico dos discos: em segundo plano, ao conectar, lê a vida útil e os alertas
+        /// do SMART (só como root ou com `sudo` sem senha, e nunca em máquina virtual). As
+        /// conexões e as pastas podem decidir diferente.
+        diagnostico_discos: bool = true,
         /// O limite do aviso de calor, em °C (de 0 a 120); 0 é o automático: o crítico do
         /// sensor menos 10 °C, ou 90 °C.
         limite_calor: u32 = 0,

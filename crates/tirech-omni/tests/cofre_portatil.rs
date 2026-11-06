@@ -113,6 +113,35 @@ fn levar_o_cofre_salva_o_arquivo_e_abrir_num_app_novo_junta() {
 }
 
 #[test]
+fn o_importar_do_cofre_mostra_e_abre_o_arquivo_do_levar() {
+    // O pedido: o arquivo que o "Levar" grava não aparecia no "Importar" do cofre (o filtro só
+    // tinha JSON e CSV). Agora aparece e segue para o "Abrir cofre de outra máquina".
+    let a = semear("portatil-importar-a", &["srv-a", "srv-b"]);
+    let b = semear("portatil-importar-b", &["so-do-b"]);
+    let arquivo = a.caminho().join("cofre.tirech-vault");
+    let mut app = na_pagina_do_cofre(&a);
+    levar(&mut app, &arquivo, None);
+    assert!(arquivo.is_file());
+
+    let mut outro = na_pagina_do_cofre(&b);
+    outro.click("cofre-importar");
+    outro.file_dialog_answer(Some(arquivo.clone()));
+    outro.frame();
+    let pedido = outro.file_dialogs().pop().expect("o diálogo do Importar");
+    let extensoes: Vec<&str> = pedido
+        .filters
+        .iter()
+        .flat_map(|f| f.extensions.iter().map(String::as_str))
+        .collect();
+    assert_eq!(extensoes, ["json", "csv", "tirech-vault"]);
+    assert!(outro.is_open("cofre-abrir-dialogo"));
+    assert!(outro.text("cofre-abrir-resumo").contains("2 itens"));
+    outro.click("cofre-abrir-dialogo-primary");
+    assert!(outro.text("aviso-sucesso").contains("2 novos"));
+    assert_eq!(titulos(&b.cofre()), ["so-do-b", "srv-a", "srv-b"]);
+}
+
+#[test]
 fn levar_com_senha_propria_pede_a_senha_ao_abrir() {
     let a = semear("portatil-senha-a", &["srv-a"]);
     let b = semear("portatil-senha-b", &["so-do-b"]);

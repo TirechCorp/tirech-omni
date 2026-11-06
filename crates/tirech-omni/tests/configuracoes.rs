@@ -189,6 +189,12 @@ efeito_bool!(
     geral.avisar_calor
 );
 
+efeito_bool!(
+    efeito_geral__diagnostico_discos,
+    "geral.diagnostico_discos",
+    geral.diagnostico_discos
+);
+
 efeito_numero!(
     efeito_geral__limite_calor,
     "geral.limite_calor",

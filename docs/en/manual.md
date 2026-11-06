@@ -225,6 +225,20 @@ tabs from the previous state does not count. Deleting a connection removes its r
   **Retry after** row in the properties of an SSH or Telnet connection, or of a folder, chooses
   another one: Inherit, **Off**, 1, 2, 5, 10, 15 or 30 min, or 1 h. "Inherit" says which folder
   it comes from.
+- **`htop-omni`**: the Processes, Disk, Network and Sensors tabs of Performance in a separate
+  program, which runs without Omni and ships in the same packages. It only looks at this computer,
+  uses the language and theme from Omni's Settings, and writes nothing.
+- **Disk health**: when connecting over SSH, in the background and without typing anything in the
+  tab, the app uses `smartctl` to read each disk's remaining life, total data written, power-on
+  hours, power cycles and alerts. As root, it reads on its own. With passwordless `sudo`, it reads
+  after one click on **Check again**, in the Disk tab of Performance; without that click, `sudo` is
+  never called. Virtual machines and containers aren't even tried. A disk with an alert raises a
+  notification. Turn it on or off in Settings › General; each folder or connection can decide
+  otherwise.
+- **Close and move a whole pane**: the tab menu and the Window menu have **Close the pane…** and
+  **Move the pane to window**. Closing a pane with tabs asks whether they go to another pane, in this
+  window or another, without reconnecting, or whether the connections close too. An empty pane closes
+  without asking.
 - **Close an unused tab**: a terminal tab that goes a while with nothing typed, pasted or sent
   by an assistant closes on its own, with a notice ("The tab web closed after 10 min without
   use"). Output from the server doesn't count as use, and a persistent session (tmux or screen)
@@ -762,7 +776,7 @@ and a window that doesn't fit on the monitor is shrunk and centered by the lib.
 ### Portable version
 
 The portable package (`tirech-omni-portable-windows.zip`, built by `empacotar-portable.sh` at the root
-of the repository) contains the `Tirech Omni` folder with the five executables and a
+of the repository) contains the `Tirech Omni` folder with the six executables and a
 `tirech-omnidata` folder next to them. **The folder is the marker:** with `tirech-omnidata` next to the
 executable, the app writes everything into it and doesn't touch `%APPDATA%` or `~/.config`. This works on
 any system; without the folder, nothing changes. The order for the data folder is: the
@@ -807,7 +821,7 @@ linux-arm64` builds a single target. The build goes into `target/docker`, separa
 `x86_64-apple-darwin`, joins each executable into a universal one with `lipo` and leaves
 `target/tirech-omni-macos.dmg` (or the path it is given), with:
 
-- `Tirech Omni.app`: the five executables in `Contents/MacOS` (installing copies the app and the
+- `Tirech Omni.app`: the six executables in `Contents/MacOS` (installing copies the app, `htop-omni` and the
   tools together), the `assets/icone.icns` icon, made from the same drawings as the `.ico`, and
   an `Info.plist` with the identifier `com.tirech.omni`, the same as the start-with-the-system
   LaunchAgent;
@@ -1309,6 +1323,13 @@ In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in t
   (`desligada`, `so_ler`, `aprovar` or `livre`; without it, it inherits from the folder).
 - `certificados.json`: the fingerprints of the FTPS certificates the user trusted, by
   `host:port` (next to `known_hosts`).
+- `saude_discos.json`: the last disk health reading for each server (remaining life, total data
+  written, power-on hours, power cycles and alerts), so `smartctl` isn't repeated on every
+  connection: it lasts 24 hours when disks were read and 7 days when they couldn't be. It also keeps
+  whether `sudo` has already worked on that server: on its own, the app only reads as root and doesn't
+  even call `sudo`, because a refusal would go to the log and could become an email to the
+  administrator. With passwordless `sudo`, click "Check again", in the Disk tab of Performance, once
+  per server. Deleting it only causes a new reading.
 - `vault.json` and `vault.key`: the password and key vault (version 3: folders and items with
   `uid`, tombstones for removals and the SSH keys) and the key that opens it (gone when there's a master
   password). `cofre.json` and `chave` from older versions are renamed on first open, and

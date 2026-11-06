@@ -4,7 +4,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -95,6 +95,7 @@ mod duplicar;
 mod envio;
 mod estado_conexoes;
 mod ganchos;
+pub mod htop;
 mod ia;
 mod ia_chat;
 mod ia_comando;
@@ -125,6 +126,7 @@ mod notificacoes;
 mod ocioso;
 mod openvpn_perguntas;
 mod pagina_logs;
+mod painel_inteiro;
 mod perfis_locais;
 mod portas;
 mod processos;
@@ -133,6 +135,7 @@ mod rclone;
 mod rclone_form;
 mod redes;
 mod retentar;
+mod saude_discos;
 mod scripts;
 mod sessao_tmux;
 mod sessoes_servidor;
@@ -579,6 +582,7 @@ struct Campos {
     /// O texto da linha "Mouse no terminal" da conexão ou do grupo escolhido (`Herdar (…)`,
     /// `Copiar e colar` ou `Menu`).
     mouse: Signal<String>,
+    diagnostico_discos: Signal<String>,
     /// O texto da linha "Tentar de novo após" da conexão ou do grupo escolhido (`Herdar (…)`,
     /// `Desligado` ou um tempo).
     retentar: Signal<String>,
@@ -666,6 +670,7 @@ impl Campos {
             mcp_abrir: signal(String::new()),
             persistente: signal(String::new()),
             mouse: signal(String::new()),
+            diagnostico_discos: signal(String::new()),
             retentar: signal(String::new()),
             ocioso: signal(String::new()),
             credencial_da_pasta: signal(String::new()),
@@ -1095,6 +1100,7 @@ struct Tela {
     nao_perguntar: Signal<bool>,
     /// O "Fechar todas as abas?" (M42).
     abas: abas_caidas::Estado,
+    painel_inteiro: painel_inteiro::Estado,
     /// O zoom da fonte de cada aba (Ctrl+roda, Ctrl+`=`, Ctrl+`-`, Ctrl+`0`).
     zoom_fonte: ZoomFonte,
     /// O diálogo "Abrir em modo cluster" (M42).
@@ -1109,6 +1115,7 @@ struct Tela {
     instalar: instalar::Estado,
     /// Os assistentes de IA no servidor (M46).
     ia: ia::Estado,
+    saude_discos: saude_discos::Estado,
     /// Duplicar a aba na pasta atual (M64).
     duplicar: duplicar::Estado,
     /// A sessão persistente (tmux ou screen) das abas SSH.
@@ -1152,7 +1159,7 @@ struct Tela {
     /// pede.
     medidas: Cell<Option<desempenho::Desempenho>>,
     /// O leitor das abas Processos e Disco do Desempenho, enquanto uma delas está à mostra.
-    processos_correndo: RefCell<Option<processos::Corrente>>,
+    processos_correndo: Rc<RefCell<Option<processos::Corrente>>>,
     /// As páginas que vivem numa janela por vez ([`PAGINAS_DE_UMA_JANELA`]) e a janela de cada
     /// uma.
     donas: [(&'static str, Signal<WindowHandle>); 3],
@@ -1727,6 +1734,7 @@ impl Tela {
             self.guardar_mcp_abrir_do_grupo();
             self.guardar_persistente_do_grupo();
             self.guardar_mouse_do_grupo();
+            self.guardar_diagnostico_discos_do_grupo();
             self.guardar_retentar_do_grupo();
             self.guardar_ocioso_do_grupo();
             self.guardar_credencial_do_grupo();
@@ -1743,6 +1751,8 @@ impl Tela {
         nova.mcp_abrir = self.mcp_abrir_da_linha();
         nova.persistente = tmux::do_rotulo(&self.campos.persistente.get());
         nova.mouse = crate::mouse::do_rotulo(&self.campos.mouse.get());
+        nova.diagnostico_discos =
+            crate::saude_discos::do_rotulo(&self.campos.diagnostico_discos.get());
         nova.retentar = crate::retentar::do_rotulo(&self.campos.retentar.get(), atual.retentar);
         nova.ocioso = crate::ocioso::do_rotulo(&self.campos.ocioso.get(), atual.ocioso);
         // Trocar o tipo (ou a segurança do FTP) troca a porta, se ela estava no padrão de antes.
@@ -2355,6 +2365,7 @@ impl Tela {
         self.sincronizar_mcp_abrir();
         self.sincronizar_persistente();
         self.sincronizar_mouse();
+        self.sincronizar_diagnostico_discos();
         self.sincronizar_retentar();
         self.sincronizar_ocioso();
         self.sincronizar_comandos_do_grupo();
@@ -2817,6 +2828,13 @@ impl Tela {
     /// Leva a sessão para o painel ativo da janela `destino` e dá o foco a ela.
     fn mover_sessao(&self, sessao: Session, destino: Janela) {
         let painel = destino.layout.with_untracked(|l| l.active());
+        self.mover_sessao_ao_painel(sessao, destino, painel);
+        destino.layout.update(|l| l.select(sessao));
+        destino.handle.focus();
+    }
+
+    /// Leva a sessão para o painel `painel` da janela `destino`.
+    fn mover_sessao_ao_painel(&self, sessao: Session, destino: Janela, painel: usize) {
         let chave = sessao.key_str();
         for outra in self.janelas.todas_agora() {
             if outra.handle != destino.handle {
@@ -2824,8 +2842,18 @@ impl Tela {
             }
         }
         move_session(sessao, destino.layout, painel);
-        destino.layout.update(|l| l.select(sessao));
-        destino.handle.focus();
+    }
+
+    /// O que a tela guarda de uma aba que fechou. O descarte da sessão vem depois, em
+    /// [`Tela::fechar_abas_tmux`].
+    fn esquecer_aba(&self, janela: Janela, sessao: Session) {
+        janela.envio.esquecer(&sessao.key_str());
+        crate::logs::esquecer_ativo(&sessao.key_str());
+        self.assistente.motor.esquecer_aba(&sessao.key_str());
+        self.esquecer_conversa(&sessao.key_str());
+        self.esquecer_portas(&sessao.key_str());
+        self.zoom_fonte.esquecer(sessao);
+        self.duplicar.esquecer(sessao);
     }
 
     /// Fecha a janela secundária que ficou sem sessões depois de uma mudança de aba.
@@ -3995,6 +4023,13 @@ fn extra_da_aba(tela: &Rc<Tela>, janela: Janela, sessao: Session, menu: MenuFlyo
         (Rc::clone(tela), Rc::clone(tela), Rc::clone(tela));
     envio::receber_envio(janela, sessao, menu)
         .submenu("mover-janela", t!("casca-mover-para-a-janela"), mover)
+        .submenu(
+            "painel-mover-janela",
+            t!("casca-mover-o-painel-para-a-janela"),
+            painel_inteiro::submenu_mover(tela, janela, "painel-mover-janela", move || {
+                Some(sessao)
+            }),
+        )
         .item("aba-duplicar", t!("casca-duplicar-aba"), {
             let t = Rc::clone(tela);
             move || {
@@ -4032,6 +4067,15 @@ fn extra_da_aba(tela: &Rc<Tela>, janela: Janela, sessao: Session, menu: MenuFlyo
         )
         .icon(Symbol::Save)
         .separator()
+        .item("painel-fechar", t!("casca-fechar-o-painel-menu"), {
+            let t = Rc::clone(tela);
+            move || {
+                if let Some(painel) = janela.layout.with_untracked(|l| l.pane_of(sessao)) {
+                    t.pedir_fechar_painel(janela, painel);
+                }
+            }
+        })
+        .icon(Symbol::Dismiss)
         .item(
             "reconectar-caidas-aba",
             t!("casca-reconectar-as-abas-caidas"),
@@ -4116,13 +4160,7 @@ fn area_de_terminais(tela: &Rc<Tela>, janela: Janela, principal: bool) -> Column
                 }
             })
             .on_session_closed(move |sessao| {
-                envio.esquecer(&sessao.key_str());
-                crate::logs::esquecer_ativo(&sessao.key_str());
-                fechada.assistente.motor.esquecer_aba(&sessao.key_str());
-                fechada.esquecer_conversa(&sessao.key_str());
-                fechada.esquecer_portas(&sessao.key_str());
-                fechada.zoom_fonte.esquecer(sessao);
-                fechada.duplicar.esquecer(sessao);
+                fechada.esquecer_aba(janela, sessao);
                 fechada.fechar_abas_tmux(vec![sessao]);
                 fechada.fechar_assistentes_de(sessao);
             })
@@ -4130,6 +4168,10 @@ fn area_de_terminais(tela: &Rc<Tela>, janela: Janela, principal: bool) -> Column
                 if destacar.config.with_untracked(|c| c.janelas.tear_off) {
                     destacar.destacar(sessao, ponto, janela);
                 }
+            })
+            .on_close_pane({
+                let tela = Rc::clone(tela);
+                move |painel| tela.atalho_fechar_painel(janela, painel)
             })
             .tab_menu_extra(move |sessao, menu| extra_da_aba(&extra, janela, sessao, menu))
             .on_tab_tooltip(move |sessao| dica.dica_da_sessao(sessao))
@@ -4661,6 +4703,7 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, impl Fn() -> 
         });
         // Os avisos das abas que a pessoa não está vendo viram notificações do sistema.
         tela.ligar_notificacoes();
+        tela.ligar_saude_discos();
     }
 
     Tela::vigiar_desbloqueio(&tela);
@@ -5209,6 +5252,7 @@ fn pagina_terminais(tela: &Rc<Tela>, fila: FilaChaves) -> (Column, impl Fn() -> 
 
         Column::new()
             .child(abas_caidas::dialogo(&tela))
+            .child(painel_inteiro::dialogo(&tela))
             .child(sessao_tmux::dialogo(&tela))
             .child(controlar::dialogo(&tela))
             .child(openvpn())
@@ -6061,6 +6105,13 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
         .hidden(esconde(CampoDaGrade::Mouse))
         .description(t!("mouse-linha-descricao"))
         .choice_from(
+            t!("saude-discos-linha"),
+            move || campos.diagnostico_discos,
+            move || saude_discos::opcoes_da_selecao(tree, selecionado),
+        )
+        .hidden(esconde(CampoDaGrade::DiagnosticoDiscos))
+        .description(t!("saude-discos-linha-descricao"))
+        .choice_from(
             t!("retentar-linha"),
             move || campos.retentar,
             move || retentar::opcoes_da_selecao(tree, selecionado),
@@ -6255,6 +6306,12 @@ fn painel_propriedades(tela: &Rc<Tela>) -> Column {
             move || mouse::opcoes_da_selecao(tree, selecionado),
         )
         .description(t!("mouse-linha-descricao-pasta"))
+        .choice_from(
+            t!("saude-discos-linha"),
+            move || campos.diagnostico_discos,
+            move || saude_discos::opcoes_da_selecao(tree, selecionado),
+        )
+        .description(t!("saude-discos-linha-descricao-pasta"))
         .choice_from(
             t!("retentar-linha"),
             move || campos.retentar,
@@ -6520,6 +6577,7 @@ fn nova_tela(
         fechar_ou_bandeja: signal(false),
         nao_perguntar: signal(false),
         abas: abas_caidas::Estado::novo(),
+        painel_inteiro: painel_inteiro::Estado::novo(),
         zoom_fonte: ZoomFonte::novo(),
         cluster: cluster::Estado::novo(),
         scripts: scripts::Estado::novo(),
@@ -6527,6 +6585,7 @@ fn nova_tela(
         wsl: wsl::Estado::novo(),
         instalar: instalar::Estado::novo(),
         ia: ia::Estado::novo(),
+        saude_discos: saude_discos::Estado::novo(),
         duplicar: duplicar::Estado::novo(),
         tmux: sessao_tmux::Estado::novo(),
         sessoes_servidor: sessoes_servidor::Estado::novo(),
@@ -6561,7 +6620,7 @@ fn nova_tela(
         gravar_nota: Rc::new(RefCell::new(None)),
         gravar_notas_das_secundarias: RefCell::default(),
         medidas: Cell::new(None),
-        processos_correndo: RefCell::new(None),
+        processos_correndo: Rc::default(),
         donas: PAGINAS_DE_UMA_JANELA.map(|nome| (nome, signal(principal.handle))),
         depois_de_desbloquear: RefCell::new(None),
         logs_esperando_o_cofre: Cell::new(false),
@@ -6976,6 +7035,10 @@ fn navegacao(tela: &Rc<Tela>, nav: &NavegacaoDaJanela, terminais: impl View) -> 
                     abrir: {
                         let tela = Rc::clone(&tela);
                         Rc::new(move || tela.abrir_cofre_de_fora())
+                    },
+                    abrir_arquivo: {
+                        let tela = Rc::clone(&tela);
+                        Rc::new(move |caminho: &Path| tela.abrir_externo(caminho, false))
                     },
                 }),
                 Some(Rc::new(move |id: u64| {

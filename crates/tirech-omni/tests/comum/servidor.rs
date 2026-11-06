@@ -405,6 +405,20 @@ impl server::Handler for Ssh {
             return Ok(());
         }
         let comando = String::from_utf8_lossy(data).into_owned();
+        // O diagnóstico dos discos que o app roda ao conectar: sem resposta programada, sai sem
+        // dizer nada, porque o script rodaria de verdade neste computador e chamaria o `sudo -n`.
+        if comando.starts_with("sh -s -- tirech-discos")
+            && !self.estado.tabela.lock().unwrap().contains_key(&comando)
+        {
+            session.channel_success(channel)?;
+            let handle = session.handle();
+            tokio::spawn(async move {
+                let _ = handle.exit_status_request(channel, 0).await;
+                let _ = handle.eof(channel).await;
+                let _ = handle.close(channel).await;
+            });
+            return Ok(());
+        }
         self.estado.comandos.lock().unwrap().push(comando.clone());
         session.channel_success(channel)?;
         let programada = {

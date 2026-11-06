@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 
 use crate::cofre::{Lote, Mapa};
 use crate::modelo::{
-    ComandosAoConectar, Connection, ModoCredencial, MouseDoTerminal, Ocioso, Retentar, S3Opcoes,
-    S3Provedor, SessaoPersistente,
+    ComandosAoConectar, Connection, DiagnosticoDeDiscos, ModoCredencial, MouseDoTerminal, Ocioso,
+    Retentar, S3Opcoes, S3Provedor, SessaoPersistente,
 };
 use crate::redes::{PerfilRede, ProxyRede, Rede, TipoProxy};
 use crate::t;
@@ -54,6 +54,8 @@ pub struct PastaTrazida {
     pub persistente: SessaoPersistente,
     /// O mouse no terminal da pasta, só no JSON nativo.
     pub mouse: MouseDoTerminal,
+    /// O diagnóstico dos discos da pasta, só no JSON nativo.
+    pub diagnostico_discos: DiagnosticoDeDiscos,
     /// A rodada nova de reconexão da pasta, só no JSON nativo.
     pub retentar: Retentar,
     /// O tempo sem uso que fecha as abas da pasta, só no JSON nativo.

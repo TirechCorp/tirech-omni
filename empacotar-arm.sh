@@ -4,7 +4,7 @@
 #
 # Uso: ./empacotar-arm.sh [linux-arm64] [linux-armv7] [windows-arm64]   (sem nada: os três)
 # Os pacotes vão para $SAIDA (padrão: ./target):
-#   tirech-omni-linux-arm64.tar.gz, tirech-omni-linux-armv7.tar.gz (os cinco executáveis e,
+#   tirech-omni-linux-arm64.tar.gz, tirech-omni-linux-armv7.tar.gz (os seis executáveis e,
 #   se existir, o target/THIRD-PARTY-NOTICES.txt do `cargo about`)
 #   tirech-omni-portable-windows-arm64.zip (o portable, pelo empacotar-portable.sh)
 # O build fica em target/docker (os do contêiner não se misturam com os do computador), e os
@@ -18,7 +18,7 @@ case $saida in /*) ;; *) saida=$(pwd)/$saida ;; esac
 build=$raiz/target/docker
 avisos=${AVISOS:-$raiz/target/THIRD-PARTY-NOTICES.txt}
 rust=$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$raiz/rust-toolchain.toml")
-nomes="tirech-omni tirech-omni-add tirech-omni-agent tirech-omni-copy-id tirech-omni-keygen"
+nomes="tirech-omni htop-omni tirech-omni-add tirech-omni-agent tirech-omni-copy-id tirech-omni-keygen"
 
 if [ ! -d "$mae/tomni-ui" ]; then
     echo "Falta $mae/tomni-ui: clone a lib ao lado deste repositório." >&2
@@ -47,10 +47,10 @@ compilar() {
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
         -v "$mae:$mae" -w "$raiz" \
         -e CARGO_TARGET_DIR="$build" -e CARGO_HOME="$build/cargo-home" \
-        "$1" cargo build --release --locked --target "$2" -p tirech-omni -p tirech-omni-tools
+        "$1" cargo build --release --locked --target "$2" -p tirech-omni -p tirech-omni-tools -p htop-omni
 }
 
-# tarball <triplo> <nome>: a pasta <nome> com os cinco executáveis, num .tar.gz.
+# tarball <triplo> <nome>: a pasta <nome> com os seis executáveis, num .tar.gz.
 tarball() {
     trabalho=$(mktemp -d)
     mkdir "$trabalho/$2"

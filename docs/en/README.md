@@ -42,7 +42,9 @@ AI assistants such as Claude Code, Codex and OpenCode.
   the page in the browser through the SSH channel.
 - **Performance**: a CPU meter in the title bar and a page like the Task Manager's, with the
   weight of each terminal, and the processes and disk of this computer or of the SSH server,
-  with filter, tree and end process.
+  with filter, tree and end process. The same tabs, without the app, in `htop-omni`.
+- **Disk health**: remaining life, total data written, power-on hours, power cycles and alerts
+  through `smartctl`, in the background when connecting.
 - Interface in **Portuguese, English and Spanish**.
 - **Portable** version for Windows, **ARM** packages, system tray and per-user installation
   without admin rights.
@@ -71,9 +73,9 @@ The packages are on the [Releases](https://github.com/TirechCorp/tirech-omni/rel
 | [`tirech-omni-linux-armv7.tar.gz`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-linux-armv7.tar.gz) | 32-bit Linux ARM (armhf) |
 | [`tirech-omni-macos.dmg`](https://github.com/TirechCorp/tirech-omni/releases/latest/download/tirech-omni-macos.dmg) | macOS 11 or newer, Apple Silicon and Intel (universal) |
 
-Each package includes the app, the command-line tools (`tirech-omni-keygen`,
+Each package includes the app, `htop-omni`, the command-line tools (`tirech-omni-keygen`,
 `tirech-omni-agent`, `tirech-omni-add` and `tirech-omni-copy-id`) and
-`THIRD-PARTY-NOTICES.txt`; on macOS, the tools live inside the `.app`, in `Contents/MacOS`.
+`THIRD-PARTY-NOTICES.txt`; on macOS, they live inside the `.app`, in `Contents/MacOS`.
 The release's `SHA256SUMS.txt` verifies the downloads.
 
 ## Install
@@ -175,6 +177,7 @@ The workspace has two packages:
 | Package | What |
 | --- | --- |
 | `tirech-omni` | the app |
+| `htop-omni` | the Processes, Disk, Network and Sensors tabs of Performance in a separate program |
 | `tirech-omni-tools` | `tirech-omni-keygen`, `tirech-omni-agent`, `tirech-omni-add` and `tirech-omni-copy-id`: `ssh-keygen`, `ssh-agent`, `ssh-add` and `ssh-copy-id` on the command line, with the app's keys |
 
 ### Packages

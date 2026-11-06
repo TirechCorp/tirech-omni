@@ -114,11 +114,15 @@ fn operacao() -> Vec<Value> {
                 ("conexao", conexao(CONEXAO)),
                 (
                     "janela",
-                    texto("\"atual\" (padrão), \"nova\" ou o número da janela."),
+                    texto(
+                        "\"atual\" (padrão: a janela em que esta sessão já tem abas; sem nenhuma, a que está em foco), \"nova\" ou o número da janela.",
+                    ),
                 ),
                 (
                     "painel",
-                    texto("O número do painel, \"direita\" ou \"nova_janela\"."),
+                    texto(
+                        "O número do painel, \"direita\" ou \"nova_janela\". Sem ele, o painel da aba que esta sessão controla; se ela montou a grade da janela, o próximo painel vazio.",
+                    ),
                 ),
             ],
             &["conexao"],
@@ -362,14 +366,24 @@ fn operacao() -> Vec<Value> {
         ferramenta(
             "listar_paineis",
             "Mostra como as abas estão em painéis numa janela. Exige: ver, em alguma conexão liberada.",
-            vec![("janela", texto("\"atual\" (padrão) ou o número da janela."))],
+            vec![(
+                "janela",
+                texto(
+                    "\"atual\" (padrão: a janela em que esta sessão já tem abas; sem nenhuma, a que está em foco) ou o número da janela.",
+                ),
+            )],
             &[],
         ),
         ferramenta(
             "organizar_paineis",
             "Muda a grade de painéis da janela. Exige: mudar, na permissão mais alta entre as conexões liberadas.",
             vec![
-                ("janela", texto("\"atual\" (padrão) ou o número da janela.")),
+                (
+                    "janela",
+                    texto(
+                        "\"atual\" (padrão: a janela em que esta sessão já tem abas; sem nenhuma, a que está em foco) ou o número da janela.",
+                    ),
+                ),
                 ("colunas", inteiro("Quantas colunas.")),
                 ("linhas", inteiro("Quantas linhas.")),
             ],

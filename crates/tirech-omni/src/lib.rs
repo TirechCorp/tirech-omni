@@ -72,6 +72,7 @@ pub mod redes;
 pub mod reinicio;
 pub mod relogio;
 pub mod retentar;
+pub mod saude_discos;
 pub mod scripts;
 pub mod sensores;
 pub mod shell_na_rede;

@@ -57,21 +57,25 @@ impl Tela {
     }
 
     /// Onde a aba nova entra, pelos argumentos `janela` e `painel`.
-    pub(super) fn lugar_do_assistente(self: &Rc<Self>, args: &Value) -> Result<Lugar, String> {
+    pub(super) fn lugar_do_assistente(
+        self: &Rc<Self>,
+        args: &Value,
+        ligacao: u64,
+    ) -> Result<Lugar, String> {
         let nova = |tela: &Rc<Self>| {
             tela.abrir_janela((1, 1), None)
                 .ok_or_else(|| t!("casca-so-uma-janela"))
         };
         let mut janela: Janela = match &args["janela"] {
-            Value::Null => self.janela_ativa(),
-            Value::String(s) if s == "atual" => self.janela_ativa(),
             Value::String(s) if s == "nova" => nova(self)?,
-            outro => self.janela_numerada(outro)?,
+            outro => self.janela_numerada(outro, ligacao)?,
         };
+        let painel_dela = self.lugar_da_sessao(ligacao, Some(janela)).map(|(_, p)| p);
         match &args["painel"] {
             Value::Null => Ok(Lugar {
                 janela: Some(janela.handle),
-                painel: None,
+                // A grade que a sessão montou se enche primeiro.
+                painel: painel_dela.filter(|_| !self.enchendo_a_grade(ligacao, janela)),
             }),
             Value::String(s) if s == "nova_janela" => {
                 janela = nova(self)?;
@@ -83,8 +87,8 @@ impl Tela {
             Value::String(s) if s == "direita" => {
                 let mut novo = 0;
                 janela.layout.update(|l| {
-                    let ativo = l.active();
-                    novo = l.split(ativo, PaneDirection::Right);
+                    let base = painel_dela.unwrap_or_else(|| l.active());
+                    novo = l.split(base, PaneDirection::Right);
                 });
                 Ok(Lugar::painel(janela, novo))
             }
@@ -114,7 +118,7 @@ impl Tela {
         let Some(conexao) = plano.conexao else {
             return self.erro_mcp(&t, t!("mcp-conexao-invalida"));
         };
-        let lugar = match self.lugar_do_assistente(&t.pedido.args) {
+        let lugar = match self.lugar_do_assistente(&t.pedido.args, t.pedido.ligacao) {
             Ok(lugar) => lugar,
             Err(erro) => return self.erro_mcp(&t, erro),
         };

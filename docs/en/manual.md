@@ -233,7 +233,10 @@ tabs from the previous state does not count. Deleting a connection removes its r
   hours, power cycles and alerts. As root, it reads on its own. With passwordless `sudo`, it reads
   after one click on **Check again**, in the Disk tab of Performance; without that click, `sudo` is
   never called. Virtual machines and containers aren't even tried. A disk with an alert raises a
-  notification. Turn it on or off in Settings › General; each folder or connection can decide
+  notification. This computer shows up in the same tab: on Linux through `smartctl`; on Windows and
+  macOS read straight from the system, with nothing to install (on Windows, NVMe and SATA disks; on
+  macOS, NVMe disks). If Windows refuses the reading, the tab asks you to run the program as
+  administrator. Turn it on or off in Settings › General; each folder or connection can decide
   otherwise.
 - **Close and move a whole pane**: the tab menu and the Window menu have **Close the pane…** and
   **Move the pane to window**. Closing a pane with tabs asks whether they go to another pane, in this
@@ -1323,9 +1326,9 @@ In the system's configuration folder (`~/.config/tirech-omni` on Linux), or in t
   (`desligada`, `so_ler`, `aprovar` or `livre`; without it, it inherits from the folder).
 - `certificados.json`: the fingerprints of the FTPS certificates the user trusted, by
   `host:port` (next to `known_hosts`).
-- `saude_discos.json`: the last disk health reading for each server (remaining life, total data
-  written, power-on hours, power cycles and alerts), so `smartctl` isn't repeated on every
-  connection: it lasts 24 hours when disks were read and 7 days when they couldn't be. It also keeps
+- `saude_discos.json`: the last disk health reading for each server and for this computer
+  (remaining life, total data written, power-on hours, power cycles and alerts), so the reading
+  isn't repeated on every connection: it lasts 24 hours when disks were read and 7 days when they couldn't be. It also keeps
   whether `sudo` has already worked on that server: on its own, the app only reads as root and doesn't
   even call `sudo`, because a refusal would go to the log and could become an email to the
   administrator. With passwordless `sudo`, click "Check again", in the Disk tab of Performance, once

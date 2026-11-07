@@ -420,6 +420,7 @@ saude-discos-detalhes = Detalhes
 saude-discos-nenhum = Nenhum disco com SMART nesta máquina.
 saude-discos-virtual = Máquina virtual ou contêiner: os discos não são lidos.
 saude-discos-sem-permissao = Sem permissão para ler os discos: entre como root ou, com sudo sem senha, clique em Verificar de novo.
+saude-discos-sem-administrador = Sem permissão para ler os discos: abra o programa como administrador e clique em Verificar de novo.
 saude-discos-sem-smartctl = O smartctl não está instalado: os discos não são lidos.
 saude-discos-verificar = Verificar de novo
 saude-discos-alerta-titulo = Discos com alerta

@@ -7,6 +7,10 @@ follow [SemVer](https://semver.org/).
 
 ### Added
 
+- Disk health for this computer on Windows and macOS, without `smartctl`: read straight from the
+  system (on Windows, NVMe and SATA disks; on macOS, NVMe disks, without root). Without permission
+  on Windows, the tab asks for the program to run as administrator. Windows hasn't been checked on
+  a real machine yet.
 - `htop-omni`: the Processes, Disk, Network and Sensors tabs of Performance in a separate program,
   for this computer only, which runs without Omni and writes nothing. It ships in every package.
 - Disk health: when connecting over SSH, in the background, each disk's remaining life, total data
@@ -123,6 +127,7 @@ follow [SemVer](https://semver.org/).
 
 ### Changed
 
+- The NVMe spare alert only fires below the threshold, like the disk's own critical warning.
 - Less CPU with many tabs, and splitting a pane no longer stalls the window: with 12 tabs, from
   43–54 ms to 6.7–7.6 ms.
 - Tabs an assistant opens through MCP stay in the window and pane it already works in, not in the
@@ -152,6 +157,8 @@ follow [SemVer](https://semver.org/).
 
 ### Fixed
 
+- Performance and `htop-omni` could close on their own when ending a process or changing rows
+  right as a new reading arrived.
 - The vault taken to another machine didn't show up when importing: the vault's **Import** now opens
   the `.tirech-vault`.
 - One Ed25519 `.ppk` key in 512 gave "Incorrect passphrase" with the right one.

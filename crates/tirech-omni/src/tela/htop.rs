@@ -21,7 +21,7 @@ pub const NOME: &str = "htop-omni";
 /// A janela com as leituras de verdade deste computador.
 ///
 /// `diagnostico` é a opção "Diagnóstico dos discos" das Configurações do Omni: desligada, a aba
-/// Disco não roda o `smartctl`. `sudo_provado` diz que o `sudo` já funcionou neste computador
+/// Disco não lê a saúde dos discos. `sudo_provado` diz que o `sudo` já funcionou neste computador
 /// (é o `saude_discos.json` do Omni): sem isso, só o botão "Verificar de novo" o chama.
 pub fn tela(diagnostico: bool, sudo_provado: bool) -> impl View {
     tela_com(

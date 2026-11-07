@@ -420,6 +420,7 @@ saude-discos-detalhes = Details
 saude-discos-nenhum = No disk with SMART on this machine.
 saude-discos-virtual = Virtual machine or container: disks are not read.
 saude-discos-sem-permissao = No permission to read the disks: log in as root or, with passwordless sudo, click Check again.
+saude-discos-sem-administrador = No permission to read the disks: run the program as administrator and click Check again.
 saude-discos-sem-smartctl = smartctl is not installed: disks are not read.
 saude-discos-verificar = Check again
 saude-discos-alerta-titulo = Disks with alerts

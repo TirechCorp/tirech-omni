@@ -1,5 +1,8 @@
 //! O diagnóstico dos discos: a vida útil, o quanto já foi gravado, as horas ligado, as vezes que
-//! o disco foi ligado e os alertas do SMART, pelo `smartctl` do servidor (ou deste computador).
+//! o disco foi ligado e os alertas do SMART, pelo `smartctl` do servidor (ou deste computador, no
+//! Linux). No Windows e no macOS, este computador é lido direto, sem o `smartctl`
+//! ([`deste_computador`]): os bytes vêm do `tomni-ui-win32` e do `tomni-ui-macos`, e a leitura
+//! deles ([`do_registro_nvme`], [`das_estatisticas_ata`]) fica aqui.
 //!
 //! Roda em segundo plano, num canal da sessão SSH que já está aberta: nada aparece no terminal e
 //! nada pede senha. Em máquina virtual e em contêiner não tenta nada (o disco de lá não é físico).
@@ -182,7 +185,7 @@ pub enum Alerta {
     Falhando,
     /// O `Critical Warning` do NVMe está ligado.
     AvisoCritico,
-    /// A reserva do NVMe chegou ao limite.
+    /// A reserva do NVMe ficou abaixo do limite (como no bit 0 do aviso crítico).
     ReservaBaixa,
     /// Pouca vida restante.
     VidaBaixa(u8),
@@ -217,6 +220,13 @@ impl SaudeDoDisco {
             .dispositivo
             .strip_prefix("/dev/")
             .unwrap_or(&self.dispositivo);
+        // O `PhysicalDriveN` do Windows: o mesmo nome da aba Disco.
+        if let Some(n) = curto
+            .strip_prefix(PREFIXO_DO_WINDOWS)
+            .and_then(|n| n.parse::<u32>().ok())
+        {
+            return t!("processos-disco-n", n = n);
+        }
         if self.tipo.contains(',') {
             format!("{curto} ({})", self.tipo)
         } else {
@@ -247,7 +257,7 @@ impl SaudeDoDisco {
             alertas.push(Alerta::AvisoCritico);
         }
         if let (Some(reserva), Some(limite)) = (self.reserva, self.reserva_limite)
-            && reserva <= limite
+            && reserva < limite
         {
             alertas.push(Alerta::ReservaBaixa);
         }
@@ -278,14 +288,15 @@ impl SaudeDoDisco {
         }
     }
 
-    /// Se este disco é a linha `nome` da tabela dos discos (`/dev/sda` é `sda` e `/dev/nvme0` é
-    /// `nvme0n1`).
+    /// Se este disco é a linha `nome` da tabela dos discos (`/dev/sda` é `sda`, `/dev/nvme0` é
+    /// `nvme0n1` e o `PhysicalDrive0` do Windows é "Disco 0").
     pub fn e_a_linha(&self, nome: &str) -> bool {
         let curto = self
             .dispositivo
             .strip_prefix("/dev/")
             .unwrap_or(&self.dispositivo);
         nome == curto
+            || nome == self.nome()
             || nome
                 .strip_prefix(curto)
                 .is_some_and(|resto| resto.starts_with('n') && curto.starts_with("nvme"))
@@ -609,6 +620,164 @@ fn ler_linha_de_atributo(disco: &mut SaudeDoDisco, linha: &str, setor: u64) {
     );
 }
 
+// --- A leitura nativa do Windows e do macOS ---
+
+/// O começo do dispositivo de um disco do Windows (`PhysicalDrive0`).
+const PREFIXO_DO_WINDOWS: &str = "PhysicalDrive";
+
+/// Um inteiro de `bytes` bytes, em little-endian, a partir de `inicio`; o que passa do `u64`
+/// fica no máximo.
+fn inteiro_le(registro: &[u8], inicio: usize, bytes: usize) -> Option<u64> {
+    let fatia = registro.get(inicio..inicio + bytes)?;
+    let valor = fatia
+        .iter()
+        .rev()
+        .fold(0u128, |acc, &b| (acc << 8) | u128::from(b));
+    Some(u64::try_from(valor).unwrap_or(u64::MAX))
+}
+
+/// Um disco NVMe pelo registro de saúde (a página de log 2, com 512 bytes): o mesmo que o
+/// `smartctl` mostra em "SMART/Health Information". Um registro curto não diz nada.
+pub fn do_registro_nvme(
+    dispositivo: String,
+    modelo: Option<String>,
+    registro: &[u8],
+) -> SaudeDoDisco {
+    let mut disco = SaudeDoDisco {
+        dispositivo,
+        tipo: "nvme".into(),
+        modelo,
+        ..SaudeDoDisco::default()
+    };
+    if registro.len() < 512 {
+        return disco;
+    }
+    let aviso = u64::from(registro[0]);
+    disco.passou = Some(aviso == 0);
+    disco.aviso_critico = Some(aviso);
+    disco.reserva = Some(u64::from(registro[3]));
+    disco.reserva_limite = Some(u64::from(registro[4]));
+    disco.vida_restante = Some(vida_de_usado(u64::from(registro[5])));
+    // A unidade do NVMe é de mil blocos de 512 bytes.
+    disco.gravado = inteiro_le(registro, 48, 16).map(|n| n.saturating_mul(512_000));
+    disco.ligacoes = inteiro_le(registro, 112, 16);
+    disco.horas = inteiro_le(registro, 128, 16);
+    disco.erros_midia = inteiro_le(registro, 160, 16);
+    disco
+}
+
+/// Uma estatística de uma página das estatísticas do aparelho do ATA: o valor nos 48 bits de
+/// baixo, só se o bit 63 (suportada) e o 62 (válida) estão ligados.
+fn estatistica_ata(pagina: &[u8], deslocamento: usize) -> Option<u64> {
+    let palavra = inteiro_le(pagina, deslocamento, 8)?;
+    (palavra >> 62 == 0b11).then_some(palavra & 0xFFFF_FFFF_FFFF)
+}
+
+/// Um disco SATA pelas páginas das estatísticas do aparelho (o log 0x04 do ATA, 512 bytes cada,
+/// com o número da página no byte 2): a 1 (geral) dá as vezes ligado, as horas e os setores
+/// gravados; a 3 (disco rotativo), os setores realocados e os candidatos a realocar; a 7 (SSD), o
+/// "% usado". `setor` é o tamanho do setor lógico. O autoteste do SMART não vem por aqui.
+pub fn das_estatisticas_ata(
+    dispositivo: String,
+    modelo: Option<String>,
+    paginas: &[Vec<u8>],
+    setor: u32,
+) -> SaudeDoDisco {
+    let mut disco = SaudeDoDisco {
+        dispositivo,
+        tipo: "ata".into(),
+        modelo,
+        ..SaudeDoDisco::default()
+    };
+    for pagina in paginas.iter().filter(|p| p.len() >= 512) {
+        let valor = |deslocamento| estatistica_ata(pagina, deslocamento);
+        match pagina[2] {
+            1 => {
+                disco.ligacoes = valor(8);
+                disco.horas = valor(16).map(|h| h & 0xFFFF_FFFF);
+                disco.gravado = valor(24).map(|n| n.saturating_mul(u64::from(setor)));
+            }
+            3 => {
+                disco.realocados = valor(0x20);
+                disco.pendentes = valor(0x38);
+            }
+            7 => disco.vida_restante = valor(8).map(|u| vida_de_usado(u & 0xFF)),
+            _ => {}
+        }
+    }
+    disco
+}
+
+/// O que a leitura nativa (do Windows ou do macOS) deu de um disco, antes de interpretar.
+#[derive(Clone, Debug, Default)]
+pub struct DiscoNativo {
+    /// `PhysicalDrive0` no Windows, `disk0` no macOS.
+    pub dispositivo: String,
+    pub modelo: Option<String>,
+    pub fornecedor: Option<String>,
+    /// O barramento diz que é um disco virtual.
+    pub virtual_: bool,
+    /// O registro de saúde de um NVMe.
+    pub nvme: Option<Vec<u8>>,
+    /// As páginas das estatísticas de um SATA.
+    pub ata: Vec<Vec<u8>>,
+    /// O tamanho do setor lógico.
+    pub setor: u32,
+    /// O sistema recusou a leitura.
+    pub negado: bool,
+}
+
+/// Os nomes que entregam o disco de uma máquina virtual (no modelo ou no fornecedor).
+const NOMES_VIRTUAIS: [&str; 7] = [
+    "vmware", "qemu", "vbox", "virtual", "red hat", "xen", "msft",
+];
+
+impl DiscoNativo {
+    /// Um disco de máquina virtual: pelo barramento ou pelo nome.
+    fn e_virtual(&self) -> bool {
+        let nome = format!(
+            "{} {}",
+            self.fornecedor.as_deref().unwrap_or_default(),
+            self.modelo.as_deref().unwrap_or_default()
+        )
+        .to_lowercase();
+        self.virtual_ || NOMES_VIRTUAIS.iter().any(|v| nome.contains(v))
+    }
+
+    /// O disco lido.
+    fn lido(self) -> SaudeDoDisco {
+        match self.nvme {
+            Some(registro) => do_registro_nvme(self.dispositivo, self.modelo, &registro),
+            None => das_estatisticas_ata(self.dispositivo, self.modelo, &self.ata, self.setor),
+        }
+    }
+}
+
+/// O diagnóstico a partir da leitura nativa: numa máquina virtual (ou só com discos virtuais),
+/// [`Diagnostico::Virtual`]; sem nenhum disco lido e com alguma recusa,
+/// [`Diagnostico::SemPermissao`]; senão, os discos que disseram alguma coisa.
+pub fn diagnostico_nativo(discos: Vec<DiscoNativo>, maquina_virtual: bool) -> Diagnostico {
+    if maquina_virtual {
+        return Diagnostico::Virtual;
+    }
+    let havia = !discos.is_empty();
+    let reais: Vec<DiscoNativo> = discos.into_iter().filter(|d| !d.e_virtual()).collect();
+    if havia && reais.is_empty() {
+        return Diagnostico::Virtual;
+    }
+    let negado = reais.iter().any(|d| d.negado);
+    let lidos: Vec<SaudeDoDisco> = reais
+        .into_iter()
+        .map(DiscoNativo::lido)
+        .filter(SaudeDoDisco::tem_dados)
+        .collect();
+    if lidos.is_empty() && negado {
+        Diagnostico::SemPermissao
+    } else {
+        Diagnostico::Discos(lidos)
+    }
+}
+
 /// O total gravado em texto (`12,3 TB`), nas unidades decimais que os discos usam para o TBW.
 pub fn texto_do_gravado(bytes: u64) -> String {
     let valor = bytes as f64;
@@ -763,8 +932,12 @@ pub fn do_rotulo(texto: &str) -> DiagnosticoDeDiscos {
     }
 }
 
-/// O diagnóstico deste computador: o [`SCRIPT`] num `sh`, chamando o `sudo` só com `com_sudo`.
-/// Bloqueia; chame de uma thread. Só o Linux tem o que ler; nos outros sistemas, nem tenta.
+/// O diagnóstico deste computador. Bloqueia; chame de uma thread.
+///
+/// - No Linux, o [`SCRIPT`] num `sh`, chamando o `sudo` só com `com_sudo`.
+/// - No Windows, o IOCTL de cada disco ([`tomni_ui_win32::disk_health`]), sem o `smartctl`; sem
+///   administrador, só os discos que o Windows deixa ler.
+/// - No macOS, o plug-in do NVMe do IOKit ([`tomni_ui_macos::nvme_health`]), sem root.
 pub fn deste_computador(com_sudo: bool) -> Diagnostico {
     #[cfg(target_os = "linux")]
     {
@@ -791,7 +964,41 @@ pub fn deste_computador(com_sudo: bool) -> Diagnostico {
             Err(_) => Diagnostico::OutroSistema,
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        use tomni_ui_win32::DiskBus;
+        let _ = com_sudo;
+        let discos = tomni_ui_win32::disk_health()
+            .into_iter()
+            .map(|d| DiscoNativo {
+                dispositivo: format!("{PREFIXO_DO_WINDOWS}{}", d.index),
+                modelo: d.model,
+                fornecedor: d.vendor,
+                virtual_: d.bus == DiskBus::Virtual,
+                nvme: d.nvme_smart_log,
+                ata: d.ata_device_statistics,
+                setor: d.logical_sector_size,
+                negado: d.access_denied,
+            })
+            .collect();
+        diagnostico_nativo(discos, false)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = com_sudo;
+        let discos = tomni_ui_macos::nvme_health()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|d| DiscoNativo {
+                dispositivo: d.name,
+                modelo: d.model,
+                nvme: d.smart_log,
+                ..DiscoNativo::default()
+            })
+            .collect();
+        diagnostico_nativo(discos, tomni_ui_macos::is_virtual_machine())
+    }
+    #[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
     {
         let _ = com_sudo;
         Diagnostico::OutroSistema
@@ -1283,6 +1490,211 @@ ID# ATTRIBUTE_NAME          FLAG     VALUE WORST THRESH TYPE      UPDATED  WHEN_
         assert!(!d("/dev/sda", "").e_a_linha("sdaa"));
         assert!(d("/dev/nvme0", "nvme").e_a_linha("nvme0n1"));
         assert!(!d("/dev/nvme1", "nvme").e_a_linha("nvme0n1"));
+        // O Windows: o mesmo nome da aba Disco.
+        let disco_0 = t!("processos-disco-n", n = 0u32);
+        assert_eq!(d("PhysicalDrive0", "nvme").nome(), disco_0);
+        assert!(d("PhysicalDrive0", "ata").e_a_linha(&disco_0));
+        assert!(!d("PhysicalDrive1", "ata").e_a_linha(&disco_0));
+        // O macOS: o nome BSD.
+        assert_eq!(d("disk0", "nvme").nome(), "disk0");
+        assert!(d("disk0", "nvme").e_a_linha("disk0"));
+    }
+
+    /// Um registro de saúde do NVMe com os campos do layout da especificação.
+    fn registro_nvme() -> Vec<u8> {
+        let mut r = vec![0u8; 512];
+        r[1..3].copy_from_slice(&310u16.to_le_bytes()); // 37 °C, em kelvin
+        r[3] = 100; // reserva
+        r[4] = 10; // limite da reserva
+        r[5] = 3; // % usado
+        r[48..56].copy_from_slice(&1_296_355u64.to_le_bytes());
+        r[112..120].copy_from_slice(&42u64.to_le_bytes());
+        r[128..136].copy_from_slice(&1234u64.to_le_bytes());
+        r[144..152].copy_from_slice(&7u64.to_le_bytes());
+        r
+    }
+
+    #[test]
+    fn o_registro_nvme_da_a_vida_o_gravado_as_horas_e_as_ligacoes() {
+        let d = do_registro_nvme("disk0".into(), Some("APPLE SSD".into()), &registro_nvme());
+        assert_eq!(d.tipo, "nvme");
+        assert_eq!(d.modelo.as_deref(), Some("APPLE SSD"));
+        assert_eq!(d.passou, Some(true));
+        assert_eq!(d.aviso_critico, Some(0));
+        assert_eq!((d.reserva, d.reserva_limite), (Some(100), Some(10)));
+        assert_eq!(d.vida_restante, Some(97));
+        assert_eq!(d.gravado, Some(1_296_355 * 512_000));
+        assert_eq!(d.ligacoes, Some(42));
+        assert_eq!(d.horas, Some(1234));
+        assert_eq!(d.erros_midia, Some(0));
+        assert!(d.alertas().is_empty());
+
+        // A reserva no limite ainda não é alerta: o SSD da Apple diz 100% com limite de 99%.
+        let mut r = registro_nvme();
+        r[3] = 99;
+        r[4] = 99;
+        let d = do_registro_nvme("disk0".into(), None, &r);
+        assert!(d.alertas().is_empty());
+
+        // O aviso crítico e a reserva abaixo do limite viram alertas.
+        let mut r = registro_nvme();
+        r[0] = 0x01;
+        r[3] = 5;
+        r[160] = 3;
+        let d = do_registro_nvme("disk0".into(), None, &r);
+        assert_eq!(d.passou, Some(false));
+        let alertas = d.alertas();
+        assert!(alertas.contains(&Alerta::Falhando));
+        assert!(alertas.contains(&Alerta::AvisoCritico));
+        assert!(alertas.contains(&Alerta::ReservaBaixa));
+        assert!(alertas.contains(&Alerta::ErrosDeMidia(3)));
+
+        // Um contador de 128 bits que passa do `u64` fica no máximo; o gravado também.
+        let mut r = registro_nvme();
+        r[48..64].copy_from_slice(&u128::MAX.to_le_bytes());
+        r[112..128].copy_from_slice(&(u128::from(u64::MAX) + 1).to_le_bytes());
+        let d = do_registro_nvme("disk0".into(), None, &r);
+        assert_eq!(d.gravado, Some(u64::MAX));
+        assert_eq!(d.ligacoes, Some(u64::MAX));
+
+        // Um registro curto não diz nada.
+        let d = do_registro_nvme("disk0".into(), None, &[0u8; 100]);
+        assert!(!d.tem_dados());
+    }
+
+    /// Uma página das estatísticas do ATA, com o número dela no byte 2.
+    fn pagina_ata(numero: u8, valores: &[(usize, u64)]) -> Vec<u8> {
+        let mut p = vec![0u8; 512];
+        p[2] = numero;
+        for &(deslocamento, valor) in valores {
+            p[deslocamento..deslocamento + 8].copy_from_slice(&valor.to_le_bytes());
+        }
+        p
+    }
+
+    /// Os bits 63 (suportada) e 62 (válida) de uma estatística do ATA.
+    const VALIDA: u64 = 0b11 << 62;
+
+    #[test]
+    fn as_estatisticas_ata_dao_as_ligacoes_as_horas_o_gravado_e_a_vida() {
+        let paginas = vec![
+            pagina_ata(
+                1,
+                &[
+                    (8, VALIDA | 812),
+                    // As horas ficam nos 32 bits de baixo; o resto não conta.
+                    (16, VALIDA | (0xAB << 32) | 20_000),
+                    (24, VALIDA | 1_000_000),
+                ],
+            ),
+            pagina_ata(3, &[(0x20, VALIDA | 4), (0x38, VALIDA | 2)]),
+            pagina_ata(7, &[(8, VALIDA | (0xFF << 8) | 12)]),
+        ];
+        let d = das_estatisticas_ata("PhysicalDrive1".into(), Some("SSD".into()), &paginas, 512);
+        assert_eq!(d.tipo, "ata");
+        assert_eq!(d.ligacoes, Some(812));
+        assert_eq!(d.horas, Some(20_000));
+        assert_eq!(d.gravado, Some(512_000_000));
+        assert_eq!(d.realocados, Some(4));
+        assert_eq!(d.pendentes, Some(2));
+        assert_eq!(d.vida_restante, Some(88));
+        // O autoteste não vem pelas estatísticas.
+        assert_eq!(d.passou, None);
+        assert!(d.alertas().contains(&Alerta::Realocados(4)));
+        assert!(d.alertas().contains(&Alerta::Pendentes(2)));
+
+        // Com setor de 4 KiB, o gravado acompanha.
+        let d = das_estatisticas_ata("x".into(), None, &paginas[..1], 4096);
+        assert_eq!(d.gravado, Some(4_096_000_000));
+    }
+
+    #[test]
+    fn a_estatistica_ata_sem_os_bits_de_suportada_e_valida_nao_conta() {
+        let paginas = vec![pagina_ata(
+            1,
+            &[
+                // Só suportada.
+                (8, (1 << 63) | 5),
+                // Só válida.
+                (16, (1 << 62) | 6),
+                // Nenhum dos dois.
+                (24, 7),
+            ],
+        )];
+        let d = das_estatisticas_ata("x".into(), None, &paginas, 512);
+        assert_eq!((d.ligacoes, d.horas, d.gravado), (None, None, None));
+        assert!(!d.tem_dados());
+
+        // Uma página curta ou de número desconhecido é ignorada.
+        let mut curta = pagina_ata(1, &[(8, VALIDA | 5)]);
+        curta.truncate(100);
+        let outra = pagina_ata(4, &[(8, VALIDA | 5)]);
+        let d = das_estatisticas_ata("x".into(), None, &[curta, outra], 512);
+        assert!(!d.tem_dados());
+    }
+
+    #[test]
+    fn o_diagnostico_nativo_separa_virtual_recusa_e_discos_lidos() {
+        let nvme = |dispositivo: &str| DiscoNativo {
+            dispositivo: dispositivo.into(),
+            modelo: Some("Samsung SSD 990 PRO".into()),
+            nvme: Some(registro_nvme()),
+            ..DiscoNativo::default()
+        };
+        let negado = |dispositivo: &str| DiscoNativo {
+            dispositivo: dispositivo.into(),
+            negado: true,
+            ..DiscoNativo::default()
+        };
+
+        // Uma máquina virtual não lê nada.
+        assert_eq!(
+            diagnostico_nativo(vec![nvme("disk0")], true),
+            Diagnostico::Virtual
+        );
+        // Só discos virtuais: pelo barramento, pelo fornecedor ou pelo modelo.
+        let virtuais = vec![
+            DiscoNativo {
+                virtual_: true,
+                ..nvme("PhysicalDrive0")
+            },
+            DiscoNativo {
+                fornecedor: Some("Msft".into()),
+                modelo: Some("Virtual Disk".into()),
+                ..DiscoNativo::default()
+            },
+            DiscoNativo {
+                modelo: Some("QEMU HARDDISK".into()),
+                ..DiscoNativo::default()
+            },
+        ];
+        assert_eq!(diagnostico_nativo(virtuais, false), Diagnostico::Virtual);
+
+        // Nenhum lido e algum recusado: falta permissão.
+        assert_eq!(
+            diagnostico_nativo(vec![negado("PhysicalDrive0")], false),
+            Diagnostico::SemPermissao
+        );
+        // Um lido basta, mesmo com outro recusado; o que não disse nada sai.
+        let d = diagnostico_nativo(
+            vec![
+                negado("PhysicalDrive0"),
+                nvme("PhysicalDrive1"),
+                DiscoNativo {
+                    dispositivo: "PhysicalDrive2".into(),
+                    ..DiscoNativo::default()
+                },
+            ],
+            false,
+        );
+        let discos = d.discos();
+        assert_eq!(discos.len(), 1);
+        assert_eq!(discos[0].dispositivo, "PhysicalDrive1");
+        // Sem discos (um Mac com SATA, por exemplo): nenhum, sem pedir permissão.
+        assert_eq!(
+            diagnostico_nativo(Vec::new(), false),
+            Diagnostico::Discos(Vec::new())
+        );
     }
 
     #[test]

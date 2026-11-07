@@ -221,7 +221,10 @@ abas do estado anterior não conta. Apagar uma conexão tira o recente dela.
   com o `smartctl` a vida restante, o total gravado, as horas ligado, as vezes ligado e os alertas
   de cada disco. Lê sozinho como root. Com `sudo` sem senha, lê depois de um clique em **Verificar
   de novo**, na aba Disco do Desempenho; sem esse clique, o `sudo` nunca é chamado. Em máquina
-  virtual e contêiner nem tenta. Um disco com alerta gera uma notificação. Liga e desliga em
+  virtual e contêiner nem tenta. Um disco com alerta gera uma notificação. Este computador
+  aparece na mesma aba: no Linux, pelo `smartctl`; no Windows e no macOS, lido direto do sistema,
+  sem programa a instalar (no Windows, os NVMe e os SATA; no macOS, os NVMe). Se o Windows recusar
+  a leitura, a aba pede para abrir o programa como administrador. Liga e desliga em
   Configurações › Geral, e cada pasta ou conexão pode decidir diferente.
 - **Fechar e mover um painel inteiro**: o menu da aba e o menu Janela têm **Fechar o painel…** e
   **Mover o painel para a janela**. Fechar um painel com abas pergunta se elas vão para outro painel,
@@ -1312,8 +1315,9 @@ variável `TIRECH_OMNI_CONFIG` apontar:
   (`desligada`, `so_ler`, `aprovar` ou `livre`; sem ele, herda da pasta).
 - `certificados.json`: as impressões dos certificados FTPS que a pessoa confiou, por
   `host:porta` (ao lado do `known_hosts`).
-- `saude_discos.json`: a última leitura da saúde dos discos de cada servidor (vida restante, total
-  gravado, horas ligado, vezes ligado e alertas), para não repetir o `smartctl` a cada conexão: vale
+- `saude_discos.json`: a última leitura da saúde dos discos de cada servidor e deste computador
+  (vida restante, total gravado, horas ligado, vezes ligado e alertas), para não repetir a leitura
+  a cada conexão: vale
   24 horas com discos lidos e 7 dias quando não deu para ler. Guarda também se o `sudo` já
   funcionou naquele servidor: sozinho, o app só lê como root e nem chama o `sudo`, porque uma recusa
   iria para o log e poderia virar e-mail ao administrador. Quem tem `sudo` sem senha clica em

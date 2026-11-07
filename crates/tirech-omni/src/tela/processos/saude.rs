@@ -107,8 +107,9 @@ fn linha(disco: &SaudeDoDisco) -> DataGridRow {
         .cell(inteiro(disco.realocados), numero(disco.realocados))
 }
 
-/// O texto do estado acima da tabela. `None`: não há o que dizer.
-fn legenda(diagnostico: &Diagnostico) -> Option<String> {
+/// O texto do estado acima da tabela. `None`: não há o que dizer. `deste_computador` troca o
+/// conselho da falta de permissão no Windows, onde quem lê os discos é o administrador.
+fn legenda(diagnostico: &Diagnostico, deste_computador: bool) -> Option<String> {
     match diagnostico {
         Diagnostico::Discos(discos) if discos.is_empty() => Some(t!("saude-discos-nenhum")),
         Diagnostico::Discos(discos) => {
@@ -120,6 +121,9 @@ fn legenda(diagnostico: &Diagnostico) -> Option<String> {
             ))
         }
         Diagnostico::Virtual => Some(t!("saude-discos-virtual")),
+        Diagnostico::SemPermissao if deste_computador && cfg!(windows) => {
+            Some(t!("saude-discos-sem-administrador"))
+        }
         Diagnostico::SemPermissao => Some(t!("saude-discos-sem-permissao")),
         Diagnostico::SemSmartctl => Some(t!("saude-discos-sem-smartctl")),
         Diagnostico::OutroSistema => None,
@@ -172,7 +176,10 @@ pub(super) fn tabela_a_mostra(p: Processos) -> bool {
 /// A linha do estado e, com a tabela à mostra, o alerta da aba Disco.
 pub(super) fn bloco(fonte: &Fonte, p: Processos) -> impl View + use<> {
     let f = fonte.clone();
-    let texto = move || p.saude.with(|d| d.as_ref().and_then(legenda));
+    let texto = move || {
+        let local = p.maquina.with(|m| *m == t!("processos-este-computador"));
+        p.saude.with(|d| d.as_ref().and_then(|d| legenda(d, local)))
+    };
     let alertas = move || {
         p.saude
             .with(|d| d.as_ref().map(Diagnostico::alertas).unwrap_or_default())

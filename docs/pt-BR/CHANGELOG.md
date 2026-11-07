@@ -7,6 +7,10 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Adicionado
 
+- Saúde dos discos deste computador no Windows e no macOS, sem `smartctl`: lida direto do sistema
+  (no Windows, os NVMe e os SATA; no macOS, os NVMe, sem root). Sem permissão no Windows, a aba
+  pede o programa aberto como administrador. O Windows ainda não foi conferido numa máquina de
+  verdade.
 - `htop-omni`: as abas Processos, Disco, Rede e Sensores do Desempenho num programa à parte, só
   deste computador, que roda sem o Omni e não grava nada. Vai em todos os pacotes.
 - Saúde dos discos: ao conectar por SSH, em segundo plano, a vida restante, o total gravado, as
@@ -118,6 +122,7 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Mudado
 
+- O alerta da reserva do NVMe só vale abaixo do limite, como o aviso crítico do próprio disco.
 - Menos CPU com muitas abas, e dividir um painel não para mais a janela: com 12 abas, de 43–54 ms
   para 6,7–7,6 ms.
 - As abas que um assistente abre pelo MCP ficam na janela e no painel em que ele já trabalha, e não
@@ -144,6 +149,8 @@ O formato segue o [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/), e
 
 ### Corrigido
 
+- O Desempenho e o `htop-omni` podiam fechar sozinhos ao encerrar um processo ou trocar de
+  linha bem na hora em que chegava uma leitura nova.
 - O cofre levado para outra máquina não aparecia ao importar: o **Importar** do cofre agora abre o
   `.tirech-vault`.
 - Uma chave `.ppk` Ed25519 em cada 512 dava "Passphrase incorreta" com a senha certa.

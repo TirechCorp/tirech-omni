@@ -194,8 +194,9 @@ pub struct Ambiente {
     /// uma vez, para saber se a aba Sensores existe, e o leitor leve do medidor e do aviso de
     /// calor lê por aqui, numa thread. Os testes não têm sensores, a não ser que ponham alguns.
     pub sensores: std::sync::Arc<dyn Fn() -> crate::sensores::Sensores + Send + Sync>,
-    /// O diagnóstico dos discos deste computador. Roda o `smartctl` (e o `sudo -n`) quando a
-    /// aba Disco abre, numa thread; os testes respondem sem rodar nada.
+    /// O diagnóstico dos discos deste computador, quando a aba Disco abre, numa thread: no Linux
+    /// pelo `smartctl` (e o `sudo -n`), no Windows e no macOS direto do sistema. Os testes
+    /// respondem sem ler nada.
     pub saude_local: std::sync::Arc<dyn Fn(bool) -> crate::saude_discos::Diagnostico + Send + Sync>,
     /// De quanto em quanto tempo o leitor leve dos sensores (o do medidor e do aviso de calor)
     /// lê: [`crate::sensores::RITMO`]; nos testes, bem menos.

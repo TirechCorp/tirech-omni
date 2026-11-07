@@ -404,7 +404,7 @@ pub(super) fn ligar(fonte: &Fonte, pagina_aberta: impl Fn() -> bool + 'static) -
     // A sessão escolhida fechou: volta para este computador.
     let f = fonte.clone();
     effect(move || {
-        p.pronto.get();
+        ler_contador(p.pronto);
         let lista = f.maquinas();
         let atual = p.maquina.get();
         if !lista.iter().any(|(rotulo, _)| *rotulo == atual) {
@@ -844,7 +844,7 @@ fn barra(
 ) -> impl View + use<> {
     let f = fonte.clone();
     let rotulos = move || {
-        p.pronto.get();
+        ler_contador(p.pronto);
         if !f.com_seletor {
             return Vec::new();
         }
